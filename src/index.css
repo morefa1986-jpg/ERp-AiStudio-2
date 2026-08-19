@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-main: #09090B;
+    --bg-header: #0C0C0E;
+    --bg-card: #121214;
+    --bg-sub: #18181B;
+    --border-main: #1F1F22;
+    --border-accent: #27272A;
+    --gold: #D4AF37;
+    --text-primary: #E4E4E7;
+    --text-secondary: #A1A1AA;
+    --text-muted: #71717A;
+  }
+
+  body {
+    background-color: #09090B;
+    color: #E4E4E7;
+    font-family: 'Vazirmatn', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  .font-serif {
+    font-family: 'Playfair Display', 'Cinzel', serif;
+  }
+}
+
+/* Custom Sophisticated Dark scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #09090B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1F1F22;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #27272A;
+}
+
+/* Subtle glow effects */
+.gold-glow {
+  box-shadow: 0 0 20px -5px rgba(212, 175, 55, 0.15);
+}
+
+.gold-border-glow {
+  border-color: rgba(212, 175, 55, 0.4);
+  box-shadow: 0 0 15px -3px rgba(212, 175, 55, 0.1);
+}
+
+/* Transitions */
+.view-transition {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Fathi Aqua Super ERP - Multi-Platform Sturgeon Aquaculture ERP",
+  "description": "Enterprise cross-platform ERP, CRM, Aquaculture Management and AI Automation system for sturgeon breeding, rearing, caviar processing and farm intelligence in 7 languages (FA, EN, DE, FR, ES, RU, AR).",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
