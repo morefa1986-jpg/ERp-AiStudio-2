@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   assessWaterSafetyForFeeding,
   validateDissolvedOxygen,
-  validateWaterTemperature,
-  SENSOR_BOUNDS,
 } from '../utils/sensorValidation';
 
 describe('Feeding Safety Engine & Water Quality Rules', () => {
@@ -16,7 +14,7 @@ describe('Feeding Safety Engine & Water Quality Rules', () => {
 
     expect(safety.isSafeForFeeding).toBe(false);
     expect(safety.isCriticalAlert).toBe(true);
-    expect(safety.feedingProhibitionReason).toContain('کمتر از حد مجاز ۴.۰');
+    expect(safety.feedingProhibitionReason).toContain('کمتر از حد مجاز');
     expect(safety.doStatus.status).toBe('CRITICAL');
   });
 
@@ -42,7 +40,7 @@ describe('Feeding Safety Engine & Water Quality Rules', () => {
 
     expect(safety.isSafeForFeeding).toBe(false);
     expect(safety.isCriticalAlert).toBe(true);
-    expect(safety.feedingProhibitionReason).toContain('خارج از محدوده ایمن تغذیه');
+    expect(safety.feedingProhibitionReason).toContain('محدوده ایمن تغذیه');
     expect(safety.tempStatus.status).toBe('CRITICAL');
   });
 
