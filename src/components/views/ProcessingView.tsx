@@ -1,401 +1,64 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Plus, Scissors, Snowflake } from 'lucide-react';
 import { useI18n } from '../../i18n';
 import { useFarm } from '../../context/FarmContext';
-import {
-  Scissors,
-  Snowflake,
-  Plus,
-  ShieldCheck,
-  Package,
-  Layers,
-  Thermometer,
-  Calendar,
-  CheckCircle2,
-} from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { runtimeUnitLabel } from '../../i18n/runtimeMessages';
+import { domainLabel } from '../../i18n/runtimeDomainLabels';
+import { ProcessingBatch } from '../../types';
 
 export const ProcessingView: React.FC = () => {
-  const { t, formatNumber, formatDate } = useI18n();
-  const {
-    processingBatches,
-    coldStorage,
-    ponds,
-    createProcessingBatch,
-  } = useFarm();
+  const { t, formatNumber, formatDate, language } = useI18n();
+  const { currentUser } = useAuth();
+  const { processingBatches, coldStorage, ponds, species, createProcessingBatch } = useFarm();
+  const [tab, setTab] = useState<'batches' | 'cold'>('batches');
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState({ pondId: ponds[0]?.id || '', fishCount: 0, liveBiomassKg: 0, caviarYieldKg: 0, filletYieldKg: 0, smokedYieldKg: 0, grade: 'Royal Beluga' as ProcessingBatch['caviarGrade'], cites: '' });
+  const kg = runtimeUnitLabel(language, 'kg');
+  const totalCaviar = useMemo(() => processingBatches.reduce((sum, row) => sum + row.caviarYieldKg, 0), [processingBatches]);
+  const totalMeat = useMemo(() => processingBatches.reduce((sum, row) => sum + row.filletMeatYieldKg + row.smokedMeatYieldKg, 0), [processingBatches]);
+  const sourcePond = ponds.find((pond) => pond.id === form.pondId);
+  const speciesName = sourcePond ? (language === 'fa' ? species.find((item) => item.id === sourcePond.speciesId)?.faName : species.find((item) => item.id === sourcePond.speciesId)?.enName) || sourcePond.speciesId : '';
 
-  const [activeTab, setActiveTab] = useState<'processing' | 'coldStorage'>('processing');
-  const [showNewBatchModal, setShowNewBatchModal] = useState<boolean>(false);
-
-  // Form state
-  const [sourcePondId, setSourcePondId] = useState<string>(ponds[0]?.id || '');
-  const [fishCount, setFishCount] = useState<number>(4);
-  const [liveBiomassKg, setLiveBiomassKg] = useState<number>(240);
-  const [caviarYieldKg, setCaviarYieldKg] = useState<number>(36);
-  const [filletYieldKg, setFilletYieldKg] = useState<number>(110);
-  const [smokedYieldKg, setSmokedYieldKg] = useState<number>(40);
-  const [caviarGrade, setCaviarGrade] = useState<string>('Imperial Beluga (50g/100g)');
-  const [operatorName, setOperatorName] = useState<string>('استاد فلاح (سرممیز فرآوری)');
-  const [citesNumber, setCitesNumber] = useState<string>('CITES/IR/2026/CAV-' + Math.floor(1000 + Math.random() * 9000));
-
-  const totalCaviarStockKg = coldStorage.filter((c) => c.productType.includes('Caviar')).reduce((s, c) => s + c.weightKg, 0);
-  const totalMeatStockKg = coldStorage.filter((c) => c.productType.includes('Fillet')).reduce((s, c) => s + c.weightKg, 0);
-
-  const handleCreateBatch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const sourcePond = ponds.find((p) => p.id === sourcePondId);
-    const waste = Math.max(0, liveBiomassKg - (caviarYieldKg + filletYieldKg + smokedYieldKg));
-
+  const save = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!sourcePond || form.fishCount <= 0 || form.liveBiomassKg <= 0) return;
+    const waste = Math.max(0, form.liveBiomassKg - form.caviarYieldKg - form.filletYieldKg - form.smokedYieldKg);
     createProcessingBatch({
-      batchCode: `CAVIAR-LOT-${new Date().toISOString().slice(0, 7)}-B${processingBatches.length + 1}`,
-      date: new Date().toISOString().split('T')[0],
-      sourcePondId: sourcePond?.id || 'pond_101',
-      sourcePondName: sourcePond?.name || 'استخر ۱۰۱',
-      speciesName: 'فیل‌ماهی (Huso huso)',
-      fishCount: Number(fishCount),
-      liveBiomassKg: Number(liveBiomassKg),
-      caviarYieldKg: Number(caviarYieldKg),
-      caviarGrade,
-      filletMeatYieldKg: Number(filletYieldKg),
-      smokedMeatYieldKg: Number(smokedYieldKg),
-      byProductAndWasteKg: Number(waste.toFixed(1)),
-      operatorName,
-      qualityScore: 98,
-      citesPermitNumber: citesNumber,
-      status: 'Stored In Cold Room',
+      batchCode: `PROC-${Date.now()}`,
+      date: new Date().toISOString().slice(0, 10),
+      sourcePondId: sourcePond.id,
+      sourcePondName: sourcePond.name,
+      speciesName,
+      fishCount: form.fishCount,
+      liveBiomassKg: form.liveBiomassKg,
+      caviarYieldKg: form.caviarYieldKg,
+      caviarGrade: form.grade,
+      filletMeatYieldKg: form.filletYieldKg,
+      smokedMeatYieldKg: form.smokedYieldKg,
+      byProductAndWasteKg: waste,
+      operatorName: currentUser?.fullName || 'Local Operator',
+      qualityScore: 0,
+      citesPermitNumber: form.cites.trim() || undefined,
+      status: 'Completed',
     });
-
-    setShowNewBatchModal(false);
+    setShowModal(false);
+    setForm((previous) => ({ ...previous, fishCount: 0, liveBiomassKg: 0, caviarYieldKg: 0, filletYieldKg: 0, smokedYieldKg: 0, cites: '' }));
   };
 
-  return (
-    <div className="space-y-6 animate-fadeIn pb-12">
-      {/* Header Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-black text-white flex items-center gap-2.5">
-            <Scissors className="w-6 h-6 text-amber-400" />
-            فرآوری خاویار، گوشت و سردخانه زیر صفر
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            استحصال خاویار رویال و امپریال، محاسبه راندمان بازدهی، بسته‌بندی، مجوز سایتس CITES و پالت‌های سردخانه
-          </p>
-        </div>
+  return <div className="space-y-6 animate-fadeIn pb-12">
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h1 className="text-xl font-black text-white flex items-center gap-2.5"><Scissors className="w-6 h-6 text-amber-400" />{t('processing.title')}</h1><p className="text-xs text-slate-400 mt-1">{t('processing.subtitle')}</p></div><button onClick={() => setShowModal(true)} disabled={!ponds.length} className="px-4 py-2 bg-amber-500 text-slate-950 font-bold rounded-xl text-xs flex gap-1 disabled:opacity-40"><Plus className="w-4 h-4" />{t('processing.btnNewBatch')}</button></div>
 
-        {/* Tab switcher */}
-        <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-          <button
-            onClick={() => setActiveTab('processing')}
-            className={`px-4 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-              activeTab === 'processing'
-                ? 'bg-amber-500 text-slate-950 shadow'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            بچ‌های فرآوری و استحصال ({processingBatches.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('coldStorage')}
-            className={`px-4 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-              activeTab === 'coldStorage'
-                ? 'bg-cyan-500 text-slate-950 shadow'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            پالت‌های سردخانه ({coldStorage.length})
-          </button>
-        </div>
-      </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><Metric title={t('processing.cardTotalCaviar')} value={`${formatNumber(totalCaviar)} ${kg}`} /><Metric title={t('processing.cardTotalMeat')} value={`${formatNumber(totalMeat)} ${kg}`} /></div>
+    <div className="flex gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 w-fit text-xs"><button onClick={() => setTab('batches')} className={`px-4 py-2 rounded-lg ${tab === 'batches' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400'}`}>{t('processing.tabBatches')}</button><button onClick={() => setTab('cold')} className={`px-4 py-2 rounded-lg ${tab === 'cold' ? 'bg-blue-500 text-slate-950 font-bold' : 'text-slate-400'}`}>{t('processing.tabColdStorage')}</button></div>
 
-      {/* KPI Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400 block mb-1">موجودی خاویار آماده در سردخانه</span>
-          <span className="text-xl font-black text-amber-400">
-            {formatNumber(totalCaviarStockKg)} <span className="text-xs text-slate-400">kg</span>
-          </span>
-          <span className="text-[11px] text-slate-400 block mt-1">
-            دمای نگهداری استاندارد: -2.8°C
-          </span>
-        </div>
+    {tab === 'batches' ? <Table headers={[t('processing.thBatchCode'), t('processing.thDate'), t('processing.thSourcePond'), t('processing.thSpecies'), t('processing.thFishCount'), t('processing.thLiveBiomass'), t('processing.thCaviarYield'), t('processing.thFilletYield'), t('processing.thOperator'), t('processing.thCites'), t('status')]} rows={processingBatches.map((row) => [row.batchCode, formatDate(row.date), row.sourcePondName, row.speciesName, formatNumber(row.fishCount), `${formatNumber(row.liveBiomassKg)} ${kg}`, `${formatNumber(row.caviarYieldKg)} ${kg}`, `${formatNumber(row.filletMeatYieldKg)} ${kg}`, row.operatorName, row.citesPermitNumber || '—', domainLabel(language, row.status)])} empty={t('noData')} /> : <Table headers={[t('code'), t('processing.thDate'), t('type'), t('quantity'), t('status')]} rows={coldStorage.map((row) => [row.slotCode, formatDate(row.entryDate), row.productType, `${formatNumber(row.weightKg)} ${kg}`, domainLabel(language, row.status)])} empty={t('noData')} />}
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400 block mb-1">موجودی فیله وکیوم گوشت</span>
-          <span className="text-xl font-black text-cyan-400">
-            {formatNumber(totalMeatStockKg)} <span className="text-xs text-slate-400">kg</span>
-          </span>
-          <span className="text-[11px] text-slate-400 block mt-1">
-            فریزر انجماد سریع: -18°C
-          </span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400 block mb-1">میانگین راندمان خاویار</span>
-          <span className="text-xl font-black text-emerald-400">15.8%</span>
-          <span className="text-[11px] text-slate-400 block mt-1">
-            از وزن زنده فیل‌ماهی
-          </span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400 block mb-1">وضعیت گواهینامه‌های CITES</span>
-          <span className="text-xl font-black text-white flex items-center gap-1.5">
-            <ShieldCheck className="w-5 h-5 text-emerald-400" />
-            100% قانونی
-          </span>
-          <span className="text-[11px] text-emerald-400 block mt-1">
-            آماده صادرات به امارات و اروپا
-          </span>
-        </div>
-      </div>
-
-      {/* TAB 1: Processing Batches */}
-      {activeTab === 'processing' && (
-        <div className="space-y-4">
-          <div className="flex justify-end">
-            <button
-              onClick={() => setShowNewBatchModal(true)}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20"
-            >
-              <Plus className="w-4 h-4" />
-              ثبت عملیات جدید استحصال خاویار و کشتار
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            {processingBatches.map((batch) => (
-              <div
-                key={batch.id}
-                className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-3 gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-black text-amber-400 text-sm">
-                        {batch.batchCode}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
-                        امتیاز کیفی: {batch.qualityScore}/100
-                      </span>
-                    </div>
-                    <span className="text-xs text-slate-400">
-                      تاریخ فرآوری: {batch.date} | منبع: {batch.sourcePondName} ({batch.speciesName})
-                    </span>
-                  </div>
-
-                  <span className="text-xs font-mono text-cyan-300 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
-                    مجوز سایتس: {batch.citesPermitNumber}
-                  </span>
-                </div>
-
-                {/* Yield Metrics */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">وزن زنده ماهیان</span>
-                    <span className="text-base font-bold text-white">
-                      {formatNumber(batch.liveBiomassKg)} kg ({batch.fishCount} قطعه)
-                    </span>
-                  </div>
-
-                  <div className="bg-amber-500/10 p-3 rounded-xl border border-amber-500/30">
-                    <span className="text-[11px] text-amber-300 block">خاویار استحصال شده</span>
-                    <span className="text-base font-black text-amber-400">
-                      {batch.caviarYieldKg} kg ({batch.caviarYieldPercent}%)
-                    </span>
-                    <span className="text-[10px] text-amber-200 block truncate">{batch.caviarGrade}</span>
-                  </div>
-
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">فیله گوشت تازه</span>
-                    <span className="text-base font-bold text-cyan-400">
-                      {batch.filletMeatYieldKg} kg ({batch.filletYieldPercent}%)
-                    </span>
-                  </div>
-
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">سرممیز فرآوری</span>
-                    <span className="text-xs font-semibold text-slate-200 block truncate">
-                      {batch.operatorName}
-                    </span>
-                    <span className="text-[10px] text-emerald-400">{batch.status}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 2: Cold Storage Pallets */}
-      {activeTab === 'coldStorage' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {coldStorage.map((pallet) => (
-            <div
-              key={pallet.id}
-              className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3"
-            >
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <span className="font-mono font-bold text-white text-sm">{pallet.slotCode}</span>
-                <span
-                  className={`text-xs font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 ${
-                    pallet.temperatureC > -10
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                      : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                  }`}
-                >
-                  <Thermometer className="w-3.5 h-3.5" />
-                  {pallet.temperatureC}°C
-                </span>
-              </div>
-
-              <div className="space-y-1.5 text-xs text-slate-300">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">نوع محصول:</span>
-                  <strong className="text-white">{pallet.productType}</strong>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">کد بچ مادر:</span>
-                  <span className="font-mono text-amber-400">{pallet.batchCode}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">وزن کل پالت:</span>
-                  <strong className="text-white">{pallet.weightKg} kg</strong>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">تعداد قوطی / بسته:</span>
-                  <strong className="text-white">{pallet.unitsCount} ({pallet.packagingUnit})</strong>
-                </div>
-                {pallet.ownerCustomer && (
-                  <div className="flex justify-between text-amber-300 pt-1 border-t border-slate-800">
-                    <span>مشتری رزرو کننده:</span>
-                    <strong className="truncate max-w-[160px]">{pallet.ownerCustomer}</strong>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Modal: New Processing Batch */}
-      {showNewBatchModal && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-            <h3 className="font-bold text-base text-white flex items-center gap-2">
-              <Scissors className="w-5 h-5 text-amber-400" />
-              ثبت بچ جدید فرآوری و استحصال خاویار
-            </h3>
-
-            <form onSubmit={handleCreateBatch} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">استخر مبدا ماهی:</label>
-                  <select
-                    value={sourcePondId}
-                    onChange={(e) => setSourcePondId(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"
-                  >
-                    {ponds.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.number} — {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">تعداد ماهی کشتار شده:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={fishCount}
-                    onChange={(e) => setFishCount(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">وزن زنده کل (kg):</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={liveBiomassKg}
-                    onChange={(e) => setLiveBiomassKg(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">خاویار خالص (kg):</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={caviarYieldKg}
-                    onChange={(e) => setCaviarYieldKg(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold text-amber-400"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">فیله گوشت (kg):</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={filletYieldKg}
-                    onChange={(e) => setFilletYieldKg(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold text-cyan-400"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">گرید و درجه خاویار:</label>
-                <select
-                  value={caviarGrade}
-                  onChange={(e) => setCaviarGrade(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"
-                >
-                  <option value="Imperial Beluga (50g/100g)">امپریال بلوگا (دانه‌بندی بالای ۳.۴ میلی‌متر)</option>
-                  <option value="Royal Beluga">رویال بلوگا</option>
-                  <option value="Asetra Gold (Persian/Russian)">استرا طلایی (تاس‌ماهی ایرانی)</option>
-                  <option value="Baerii Classic">سیبری کلاسیک</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">شماره مجوز سایتس CITES:</label>
-                <input
-                  type="text"
-                  value={citesNumber}
-                  onChange={(e) => setCitesNumber(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-mono"
-                  required
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowNewBatchModal(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer"
-                >
-                  انصراف
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl cursor-pointer"
-                >
-                  ثبت بچ و انتقال به سردخانه
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    {showModal && <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4"><div className="bg-slate-900 border border-amber-500/40 rounded-2xl max-w-lg w-full p-5 space-y-4"><h3 className="font-bold text-white">{t('processing.modalTitle')}</h3><form onSubmit={save} className="space-y-3 text-xs"><label className="block text-slate-300">{t('processing.fieldPond')}<select value={form.pondId} onChange={(e) => setForm((p) => ({ ...p, pondId: e.target.value }))} className="mt-1 w-full field">{ponds.map((pond) => <option key={pond.id} value={pond.id}>{pond.number} — {pond.name}</option>)}</select></label><div className="grid grid-cols-2 gap-2"><Num label={t('processing.fieldFishCount')} value={form.fishCount} set={(value) => setForm((p) => ({ ...p, fishCount: value }))} /><Num label={t('processing.fieldLiveBiomass')} value={form.liveBiomassKg} set={(value) => setForm((p) => ({ ...p, liveBiomassKg: value }))} /><Num label={t('processing.fieldCaviarYield')} value={form.caviarYieldKg} set={(value) => setForm((p) => ({ ...p, caviarYieldKg: value }))} /><Num label={t('processing.fieldFilletYield')} value={form.filletYieldKg} set={(value) => setForm((p) => ({ ...p, filletYieldKg: value }))} /><Num label={t('processing.fieldSmokedYield')} value={form.smokedYieldKg} set={(value) => setForm((p) => ({ ...p, smokedYieldKg: value }))} /></div><label className="block text-slate-300">{t('processing.fieldCaviarGrade')}<select value={form.grade} onChange={(e) => setForm((p) => ({ ...p, grade: e.target.value as ProcessingBatch['caviarGrade'] }))} className="mt-1 w-full field"><option>Imperial Beluga (50g/100g)</option><option>Royal Beluga</option><option>Classic Baerii</option><option>Asetra Gold</option></select></label><label className="block text-slate-300">{t('processing.fieldCites')}<input value={form.cites} onChange={(e) => setForm((p) => ({ ...p, cites: e.target.value }))} className="mt-1 w-full field" /></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg">{t('cancel')}</button><button type="submit" className="px-4 py-2 bg-amber-500 text-slate-950 font-bold rounded-lg">{t('processing.btnSubmitBatch')}</button></div></form></div></div>}
+    <style>{`.field{background:#1e293b;border:1px solid #334155;border-radius:.7rem;padding:.6rem;color:white}`}</style>
+  </div>;
 };
+
+const Metric: React.FC<{ title: string; value: string }> = ({ title, value }) => <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4"><span className="text-xs text-slate-400 block">{title}</span><strong className="text-xl text-white block mt-1">{value}</strong></div>;
+const Table: React.FC<{ headers: string[]; rows: React.ReactNode[][]; empty: string }> = ({ headers, rows, empty }) => <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto"><table className="w-full text-xs text-start"><thead className="bg-slate-800 text-slate-400"><tr>{headers.map((header, index) => <th key={index} className="p-3">{header}</th>)}</tr></thead><tbody className="divide-y divide-slate-800">{rows.length === 0 ? <tr><td colSpan={headers.length} className="p-8 text-center text-slate-500">{empty}</td></tr> : rows.map((row, rowIndex) => <tr key={rowIndex} className="text-slate-300">{row.map((cell, cellIndex) => <td key={cellIndex} className="p-3">{cell}</td>)}</tr>)}</tbody></table></div>;
+const Num: React.FC<{ label: string; value: number; set: (value: number) => void }> = ({ label, value, set }) => <label className="block text-slate-300">{label}<input type="number" min="0" step="0.01" value={value || ''} onChange={(e) => set(Number(e.target.value))} className="mt-1 w-full field" required /></label>;
