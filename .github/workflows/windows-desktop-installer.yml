@@ -1,0 +1,90 @@
+name: Build Windows Desktop Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - chatgpt/windows-desktop-installer
+    paths:
+      - 'src/**'
+      - 'desktop/**'
+      - 'server.ts'
+      - 'package.json'
+      - 'bun.lock'
+      - 'electron-builder.yml'
+      - '.github/workflows/windows-desktop-installer.yml'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  windows-package:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install locked application dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run lint
+
+      - name: Test
+        run: bun run test
+
+      - name: Build web app and local server
+        run: bun run build
+
+      - name: Install Windows packaging tools without changing package metadata
+        run: npm install --no-save electron electron-builder
+
+      - name: Build Windows NSIS installer
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $source = 'release/windows/win-unpacked'
+          $target = "release/windows/FathiAquaSuperERP-Portable-$version-x64.zip"
+          if (-not (Test-Path $source)) { throw "Portable source folder not found: $source" }
+          Compress-Archive -Path "$source/*" -DestinationPath $target -Force
+
+      - name: Generate SHA-256 checksums
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem 'release/windows' -File | Where-Object { $_.Extension -in '.exe', '.zip' }
+          if ($files.Count -eq 0) { throw 'No Windows release files were generated.' }
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "$hash  $($file.Name)"
+          }
+          $lines | Set-Content 'release/windows/SHA256SUMS.txt' -Encoding ascii
+          Get-Content 'release/windows/SHA256SUMS.txt'
+
+      - name: Upload Windows release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: FathiAquaSuperERP-Windows-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            release/windows/FathiAquaSuperERP-Setup-*.exe
+            release/windows/FathiAquaSuperERP-Portable-*-x64.zip
+            release/windows/SHA256SUMS.txt
