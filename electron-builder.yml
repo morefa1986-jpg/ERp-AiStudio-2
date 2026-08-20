@@ -1,0 +1,37 @@
+appId: com.fathiaqua.supererp
+productName: Fathi Aqua SuperERP
+copyright: Copyright © 2026 Fathi Aqua
+
+asar: false
+npmRebuild: false
+
+directories:
+  output: release/windows
+
+files:
+  - dist/**/*
+  - desktop/**/*
+  - package.json
+  - node_modules/**/*
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  executableName: FathiAquaSuperERP
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Fathi Aqua SuperERP
+  uninstallDisplayName: Fathi Aqua SuperERP
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+
+artifactName: FathiAquaSuperERP-Setup-${version}-${arch}.${ext}
