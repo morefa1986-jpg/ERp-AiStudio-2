@@ -1,107 +1,69 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { FishTransfer, Pond } from '../types';
 import { executeAtomicFishTransfer } from '../utils/transferEngine';
-import { Pond } from '../types';
 
-describe('Transfer Engine - Atomic Conservation & Safety', () => {
-  const initialPonds: Pond[] = [
-    {
-      id: 'pond_src',
-      hallId: 'hall_1',
-      name: 'استخر ۱ مبدا',
-      speciesId: 'sp_beluga',
-      fishCount: 1000,
-      biomassKg: 4000,
-      averageWeightKg: 4.0,
-      waterVolumeM3: 50,
-      dissolvedOxygen: 7.5,
-      waterTemperature: 16.0,
-      ph: 7.4,
-      feedingStatus: 'NORMAL',
-      fcr: 1.1,
-    },
-    {
-      id: 'pond_dst',
-      hallId: 'hall_2',
-      name: 'استخر ۲ مقصد',
-      speciesId: 'sp_beluga',
-      fishCount: 500,
-      biomassKg: 2000,
-      averageWeightKg: 4.0,
-      waterVolumeM3: 50,
-      dissolvedOxygen: 7.8,
-      waterTemperature: 16.0,
-      ph: 7.5,
-      feedingStatus: 'NORMAL',
-      fcr: 1.1,
-    },
-  ];
+const initialPonds: Pond[] = [
+  {
+    id: 'pond_src', number: 'P-001', hallId: 'hall_1', name: 'استخر مبدا', capacityCubicMeters: 50,
+    speciesId: 'sp_beluga', fishCount: 1000, biomassKg: 4000, averageWeightKg: 4,
+    lastFeedingKg: 30, lastFeedingTime: '2026-08-20T07:00:00Z', dissolvedOxygen: 7.5,
+    waterTemperature: 16, ph: 7.4, feedingStatus: 'ACTIVE', fcr: 1.1, dailyMortalityCount: 0,
+    lastBiometryDate: '2026-08-01', criticalAlerts: [],
+  },
+  {
+    id: 'pond_dst', number: 'P-002', hallId: 'hall_2', name: 'استخر مقصد', capacityCubicMeters: 50,
+    speciesId: 'sp_beluga', fishCount: 500, biomassKg: 2000, averageWeightKg: 4,
+    lastFeedingKg: 15, lastFeedingTime: '2026-08-20T07:00:00Z', dissolvedOxygen: 7.8,
+    waterTemperature: 16, ph: 7.5, feedingStatus: 'ACTIVE', fcr: 1.1, dailyMortalityCount: 0,
+    lastBiometryDate: '2026-08-01', criticalAlerts: [],
+  },
+];
 
-  it('strictly preserves total fish count and biomass across ponds during transfer', () => {
-    const initialTotalCount = initialPonds.reduce((s, p) => s + p.fishCount, 0); // 1500
-    const initialTotalBiomass = initialPonds.reduce((s, p) => s + p.biomassKg, 0); // 6000
+function transfer(overrides: Partial<Omit<FishTransfer, 'id' | 'status'>> = {}): Omit<FishTransfer, 'id' | 'status'> {
+  return {
+    sourceType: 'Pond', sourceId: 'pond_src', sourceName: 'استخر مبدا',
+    destinationType: 'Pond', destinationId: 'pond_dst', destinationName: 'استخر مقصد',
+    speciesId: 'sp_beluga', speciesName: 'Huso huso', fishCount: 300, averageWeightKg: 4,
+    totalBiomassKg: 1200, date: '2026-08-20', operator: 'Operator', reason: 'Grading',
+    ...overrides,
+  };
+}
 
-    const transferData = {
-      date: '2026-03-30',
-      sourceId: 'pond_src',
-      sourceName: 'استخر ۱ مبدا',
-      destinationId: 'pond_dst',
-      destinationName: 'استخر ۲ مقصد',
-      fishCount: 300,
-      averageWeightKg: 4.0,
-      operator: 'Reza Mohammadi',
-    };
-
-    const result = executeAtomicFishTransfer(transferData, initialPonds);
+describe('Transfer Engine - conservation and external traceability', () => {
+  it('preserves total count and biomass for pond-to-pond transfers', () => {
+    const result = executeAtomicFishTransfer(transfer(), initialPonds);
     expect(result.success).toBe(true);
-    expect(result.updatedPonds).toBeDefined();
-
-    const finalTotalCount = result.updatedPonds!.reduce((s, p) => s + p.fishCount, 0);
-    const finalTotalBiomass = result.updatedPonds!.reduce((s, p) => s + p.biomassKg, 0);
-
-    expect(finalTotalCount).toBe(initialTotalCount);
-    expect(finalTotalBiomass).toBe(initialTotalBiomass);
-
-    const updatedSource = result.updatedPonds!.find((p) => p.id === 'pond_src')!;
-    const updatedDest = result.updatedPonds!.find((p) => p.id === 'pond_dst')!;
-
-    expect(updatedSource.fishCount).toBe(700);
-    expect(updatedSource.biomassKg).toBe(2800);
-
-    expect(updatedDest.fishCount).toBe(800);
-    expect(updatedDest.biomassKg).toBe(3200);
+    const finalCount = result.updatedPonds!.reduce((sum, pond) => sum + pond.fishCount, 0);
+    const finalBiomass = result.updatedPonds!.reduce((sum, pond) => sum + pond.biomassKg, 0);
+    expect(finalCount).toBe(1500);
+    expect(finalBiomass).toBe(6000);
+    expect(result.updatedPonds!.find((pond) => pond.id === 'pond_src')?.fishCount).toBe(700);
+    expect(result.updatedPonds!.find((pond) => pond.id === 'pond_dst')?.fishCount).toBe(800);
   });
 
-  it('rejects transfer when count exceeds source stock', () => {
-    const invalidTransfer = {
-      date: '2026-03-30',
-      sourceId: 'pond_src',
-      sourceName: 'استخر ۱ مبدا',
-      destinationId: 'pond_dst',
-      destinationName: 'استخر ۲ مقصد',
-      fishCount: 1500, // source only has 1000
-      averageWeightKg: 4.0,
-      operator: 'Reza Mohammadi',
-    };
-
-    const result = executeAtomicFishTransfer(invalidTransfer, initialPonds);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('بیشتر از موجودی');
+  it('rejects excess count, excess biomass, NaN and same-pond transfers', () => {
+    expect(executeAtomicFishTransfer(transfer({ fishCount: 1500, totalBiomassKg: 6000 }), initialPonds).success).toBe(false);
+    expect(executeAtomicFishTransfer(transfer({ fishCount: 900, averageWeightKg: 5, totalBiomassKg: 4500 }), initialPonds).success).toBe(false);
+    expect(executeAtomicFishTransfer(transfer({ averageWeightKg: Number.NaN }), initialPonds).success).toBe(false);
+    expect(executeAtomicFishTransfer(transfer({ destinationId: 'pond_src', destinationName: 'استخر مبدا' }), initialPonds).success).toBe(false);
   });
 
-  it('rejects transfer to the same pond', () => {
-    const invalidTransfer = {
-      date: '2026-03-30',
-      sourceId: 'pond_src',
-      sourceName: 'استخر ۱ مبدا',
-      destinationId: 'pond_src',
-      destinationName: 'استخر ۱ مبدا',
-      fishCount: 100,
-      averageWeightKg: 4.0,
-      operator: 'Reza Mohammadi',
-    };
-
-    const result = executeAtomicFishTransfer(invalidTransfer, initialPonds);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('یکسان');
+  it('allows a traceable transfer from a pond to processing and removes live stock only from source', () => {
+    const result = executeAtomicFishTransfer(transfer({
+      destinationType: 'Processing',
+      destinationId: 'processing_line_1',
+      destinationName: 'Processing Line 1',
+      fishCount: 25,
+      averageWeightKg: 4,
+      totalBiomassKg: 100,
+      reason: 'Harvest',
+    }), initialPonds);
+    expect(result.success).toBe(true);
+    const source = result.updatedPonds!.find((pond) => pond.id === 'pond_src')!;
+    const untouchedDestinationPond = result.updatedPonds!.find((pond) => pond.id === 'pond_dst')!;
+    expect(source.fishCount).toBe(975);
+    expect(source.biomassKg).toBe(3900);
+    expect(untouchedDestinationPond.fishCount).toBe(500);
+    expect(result.newTransfer?.destinationType).toBe('Processing');
   });
 });
