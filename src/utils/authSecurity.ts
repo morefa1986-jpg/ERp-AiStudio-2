@@ -1,47 +1,43 @@
 export const PASSWORD_SALT = 'fathi_aqua_salt_2026';
 
 /**
- * Computes salted SHA-256 hash using Web Crypto API in browser / Node environments.
+ * Computes a deterministic salted SHA-256 hash for compatibility with the
+ * current offline credential store. If a cryptographic implementation is not
+ * available, authentication fails closed instead of falling back to a weak hash.
  */
 export async function hashPasswordWithSalt(plain: string, salt: string = PASSWORD_SALT): Promise<string> {
+  if (typeof plain !== 'string' || typeof salt !== 'string') throw new Error('INVALID_PASSWORD_INPUT');
+
   if (typeof crypto !== 'undefined' && crypto.subtle) {
     const encoder = new TextEncoder();
     const data = encoder.encode(plain + salt);
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    return Array.from(new Uint8Array(hashBuffer)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  // Fallback Node.js crypto if running in test/script environment without global crypto.subtle
   try {
     const nodeCrypto = await import('crypto');
     return nodeCrypto.createHash('sha256').update(plain + salt).digest('hex');
   } catch {
-    let hash = 0;
-    const combined = plain + salt;
-    for (let i = 0; i < combined.length; i++) {
-      hash = (hash << 5) - hash + combined.charCodeAt(i);
-      hash |= 0;
-    }
-    return 'h_' + Math.abs(hash).toString(16);
+    throw new Error('CRYPTO_UNAVAILABLE');
   }
 }
 
 /**
- * Securely verifies password against expected hash without timing leaks.
+ * Constant-work comparison for equal-length hex hashes.
  */
 export async function verifyPasswordSecurely(
   candidatePlain: string,
   salt: string,
   expectedHash: string
 ): Promise<boolean> {
+  if (!/^[a-f0-9]{64}$/i.test(expectedHash)) return false;
   const candidateHash = await hashPasswordWithSalt(candidatePlain, salt);
-  if (candidateHash.length !== expectedHash.length) {
-    return false;
-  }
+  if (candidateHash.length !== expectedHash.length) return false;
+
   let diff = 0;
-  for (let i = 0; i < candidateHash.length; i++) {
-    diff |= candidateHash.charCodeAt(i) ^ expectedHash.charCodeAt(i);
+  for (let index = 0; index < candidateHash.length; index++) {
+    diff |= candidateHash.charCodeAt(index) ^ expectedHash.charCodeAt(index);
   }
   return diff === 0;
 }
