@@ -9,6 +9,16 @@ export interface FeedingRecommendationResult {
   waterSafety?: { isSafe: boolean; doStatus: string; tempStatus: string };
 }
 
+function activeLanguage(): LanguageCode {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const value = localStorage.getItem('fathi_aqua_lang') as LanguageCode | null;
+      if (value && ['fa', 'en', 'de', 'fr', 'es', 'ru', 'ar'].includes(value)) return value;
+    }
+  } catch {}
+  return 'fa';
+}
+
 export function normalizeFeedAmountToKg(amount: number, unit: 'kg' | 'g' | 'gram' | 'cup' | 'cup250g' | 'ton' | 'bag_25kg' | string): number {
   if (!Number.isFinite(amount) || amount <= 0) return 0;
   if (unit === 'g' || unit === 'gram') return Number((amount / 1000).toFixed(4));
@@ -30,7 +40,7 @@ export function calculateFeedingRecommendation(
   pond: Pond | undefined,
   speciesList: SturgeonSpecies[],
   activeTreatment?: TreatmentRecord,
-  language: LanguageCode = 'fa',
+  language: LanguageCode = activeLanguage(),
 ): FeedingRecommendationResult {
   if (!pond) return { recommendedKg: 0, isLocked: true, lockReason: runtimeMessage(language, 'feeding.pondNotFound') };
   if (pond.feedingStatus === 'STOPPED') return { recommendedKg: 0, isLocked: true, lockReason: runtimeMessage(language, 'feeding.stoppedReason', { reason: pond.stopFeedingReason || '-', details: pond.stopFeedingDetails || '-' }) };
@@ -57,7 +67,7 @@ export function validateFeedingSubmission(
   recordData: Omit<FeedingRecord, 'id' | 'timestamp'>,
   pond: Pond | undefined,
   inventory: InventoryItem[],
-  language: LanguageCode = 'fa',
+  language: LanguageCode = activeLanguage(),
 ): { success: boolean; error?: string; normalizedAmountKg: number; feedItem?: InventoryItem } {
   if (!pond) return { success: false, error: runtimeMessage(language, 'feeding.pondNotFound'), normalizedAmountKg: 0 };
   const safety = validatePondSafety(pond, language);
