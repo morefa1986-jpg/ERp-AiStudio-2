@@ -17,7 +17,7 @@ import { WarehouseView } from './components/views/WarehouseView';
 import { BiometricsView } from './components/views/BiometricsView';
 import { WaterQualityView } from './components/views/WaterQualityView';
 import { AiAssistantView } from './components/views/AiAssistantView';
-import { CaviarMarketingView } from './components/views/CaviarMarketingView';
+import { SocialMediaCommandCenterView } from './components/views/SocialMediaCommandCenterView';
 import { CrossPlatformView } from './components/views/CrossPlatformView';
 import { SecurityAuditView } from './components/views/SecurityAuditView';
 import { BackupRestoreView } from './components/views/BackupRestoreView';
@@ -126,7 +126,7 @@ const MainAppContent: React.FC = () => {
       case 'aiAssistant': return <AiAssistantView />;
       case 'mediaStudio':
       case 'media':
-      case 'caviarMarketing': return <CaviarMarketingView />;
+      case 'caviarMarketing': return <SocialMediaCommandCenterView />;
       case 'platformHub':
       case 'crossPlatform': return <CrossPlatformView />;
       case 'securityAudit':
