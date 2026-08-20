@@ -189,15 +189,18 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const formatCurrency = (amount: number, currencyCode?: string): string => {
     const curr = currencyCode || meta.defaultCurrency;
-    if (language === 'fa' && curr === 'IRR') {
-      return `${formatNumber(Math.round(amount))} تومان`;
+    if (curr === 'IRR') {
+      if (language === 'fa') {
+        return `${formatNumber(Math.round(amount / 10))} تومان`;
+      }
+      return `${formatNumber(amount)} IRR`;
     }
     try {
       const locale = language === 'fa' ? 'fa-IR' : language === 'ar' ? 'ar-SA' : language === 'de' ? 'de-DE' : language === 'ru' ? 'ru-RU' : 'en-US';
       return new Intl.NumberFormat(locale, {
         style: 'currency',
-        currency: curr === 'IRR' ? 'USD' : curr,
-        maximumFractionDigits: curr === 'IRR' ? 0 : 2,
+        currency: curr,
+        maximumFractionDigits: 2,
       }).format(amount);
     } catch (e) {
       return `${formatNumber(amount)} ${curr}`;

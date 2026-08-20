@@ -220,13 +220,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Footer info widget */}
         <div className="p-3 border-t border-[#1F1F22] mt-auto">
           <div className="bg-[#18181B] border border-[#27272A] rounded-lg p-3">
-            <div className="text-[10px] text-[#71717A] uppercase tracking-widest mb-1">Active Session</div>
+            <div className="text-[10px] text-[#71717A] uppercase tracking-widest mb-1">{t('auth.sessionActive')}</div>
             <div className="text-xs font-semibold text-white truncate">
               {currentUser?.fullName || 'Dr. Fathi'}
             </div>
             <div className="text-[10px] text-[#52525B] font-mono mt-0.5 flex items-center justify-between">
               <span>Enterprise v6.0</span>
-              <span className="text-emerald-400 font-semibold">● Online</span>
+              <span className="text-emerald-400 font-semibold">● {t('online')}</span>
             </div>
           </div>
         </div>

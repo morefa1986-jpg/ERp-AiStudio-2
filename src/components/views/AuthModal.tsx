@@ -10,7 +10,7 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlocking = false }) => {
-  const { dir } = useI18n();
+  const { t, dir } = useI18n();
   const { currentUser, login, logout } = useAuth();
   const [username, setUsername] = useState<string>('admin');
   const [password, setPassword] = useState<string>('');
@@ -23,7 +23,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password) {
-      setError('نام کاربری و رمز عبور را وارد کنید.');
+      setError(t('authModal.enterUsernamePassword'));
       return;
     }
     setError('');
@@ -34,10 +34,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
         setPassword('');
         onClose();
       } else {
-        setError(res.error || 'کلمه عبور نادرست است.');
+        setError(res.error || t('authModal.invalidPassword'));
       }
     } catch (err) {
-      setError('خطا در برقراری ارتباط با سرور احراز هویت.');
+      setError(t('authModal.networkError'));
     } finally {
       setIsLoading(false);
     }
@@ -62,9 +62,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-semibold text-sm text-white">ورود به سامانه Fathi Aqua ERP</h3>
+              <h3 className="font-semibold text-sm text-white">{t('authModal.title')}</h3>
               <p className="text-[10px] text-[#71717A] uppercase tracking-wider font-mono">
-                Enterprise Authentication & RBAC
+                {t('authModal.subtitle')}
               </p>
             </div>
           </div>
@@ -89,7 +89,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
           <div>
             <label className="block text-[#A1A1AA] font-medium mb-1.5 flex items-center gap-1.5">
               <UserIcon className="w-3.5 h-3.5 text-[#D4AF37]" />
-              <span>نام کاربری (Username):</span>
+              <span>{t('authModal.username')}:</span>
             </label>
             <input
               type="text"
@@ -104,7 +104,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
           <div>
             <label className="block text-[#A1A1AA] font-medium mb-1.5 flex items-center gap-1.5">
               <Key className="w-3.5 h-3.5 text-[#D4AF37]" />
-              <span>کلمه عبور امنیتی (Password):</span>
+              <span>{t('authModal.password')}:</span>
             </label>
             <div className="relative">
               <input
@@ -128,7 +128,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
           {/* Quick Demo Credentials */}
           <div className="bg-[#18181B]/80 border border-[#27272A] rounded-xl p-2.5 space-y-1.5">
             <p className="text-[10px] font-semibold text-[#71717A] uppercase tracking-wider">
-              حساب‌های سازمانی تست:
+              {t('authModal.demoAccounts')}
             </p>
             <div className="grid grid-cols-2 gap-1.5">
               <button
@@ -176,10 +176,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
                 }}
                 className="px-4 py-2 bg-[#18181B] hover:bg-[#1F1F22] text-rose-300 rounded-lg text-xs cursor-pointer border border-[#27272A]"
               >
-                خروج از حساب
+                {t('authModal.logout')}
               </button>
             ) : (
-              <span className="text-[10px] text-[#71717A]">امنیت SHA-256 + Salted Hashing</span>
+              <span className="text-[10px] text-[#71717A]">{t('authModal.securityBadge')}</span>
             )}
 
             <button
@@ -187,7 +187,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
               disabled={isLoading}
               className="px-5 py-2 bg-[#D4AF37] hover:bg-[#c5a030] text-black font-semibold rounded-lg text-xs cursor-pointer shadow-sm disabled:opacity-50"
             >
-              {isLoading ? 'در حال ورود...' : 'ورود به سیستم'}
+              {isLoading ? t('authModal.loggingIn') : t('authModal.login')}
             </button>
           </div>
         </form>

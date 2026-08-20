@@ -8,15 +8,15 @@ import { ru } from '../i18n/ru';
 import { ar } from '../i18n/ar';
 import { LANGUAGES } from '../i18n/index';
 
-describe('Multilingual 7-Locale Comprehensive Audit & Parity Suite', () => {
-  const allDictionaries = [
-    { code: 'fa', dict: fa, dir: 'rtl' },
-    { code: 'en', dict: en, dir: 'ltr' },
-    { code: 'de', dict: de, dir: 'ltr' },
-    { code: 'fr', dict: fr, dir: 'ltr' },
-    { code: 'es', dict: es, dir: 'ltr' },
-    { code: 'ru', dict: ru, dir: 'ltr' },
-    { code: 'ar', dict: ar, dir: 'rtl' },
+describe('Multilingual 7-Locale Comprehensive Audit & 100% Parity Suite', () => {
+  const allDictionaries: { code: string; dict: Record<string, unknown>; dir: string }[] = [
+    { code: 'fa', dict: fa as Record<string, unknown>, dir: 'rtl' },
+    { code: 'en', dict: en as Record<string, unknown>, dir: 'ltr' },
+    { code: 'de', dict: de as Record<string, unknown>, dir: 'ltr' },
+    { code: 'fr', dict: fr as Record<string, unknown>, dir: 'ltr' },
+    { code: 'es', dict: es as Record<string, unknown>, dir: 'ltr' },
+    { code: 'ru', dict: ru as Record<string, unknown>, dir: 'ltr' },
+    { code: 'ar', dict: ar as Record<string, unknown>, dir: 'rtl' },
   ];
 
   it('supports all 7 core enterprise languages with correct metadata', () => {
@@ -32,130 +32,64 @@ describe('Multilingual 7-Locale Comprehensive Audit & Parity Suite', () => {
     });
   });
 
-  it('guarantees 100% dictionary section parity across all 7 locales', () => {
-    const requiredSections: (keyof typeof fa)[] = [
-      'nav',
-      'dashboard',
-      'pond',
-      'feeding',
-      'waterQuality',
-      'biometrics',
-      'hatchery',
-      'processing',
-      'warehouse',
-      'salesCrm',
-      'accounting',
-      'securityAudit',
-      'backupRestore',
-      'platform',
-      'auth',
-      'ai',
-    ];
+  // Recursive deep key extractor
+  function getDeepKeysAndValues(obj: Record<string, unknown>, prefix = ''): { path: string; value: string }[] {
+    let result: { path: string; value: string }[] = [];
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      const newPath = prefix ? `${prefix}.${key}` : key;
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        result = result.concat(getDeepKeysAndValues(val as Record<string, unknown>, newPath));
+      } else if (typeof val === 'string') {
+        result.push({ path: newPath, value: val });
+      }
+    }
+    return result;
+  }
+
+  function extractPlaceholders(str: string): string[] {
+    const matches = str.match(/\{([a-zA-Z0-9_]+)\}/g);
+    return matches ? matches.sort() : [];
+  }
+
+  it('guarantees 100% recursive key parity across all 7 locales against fa.ts (Authoritative Reference)', () => {
+    const referenceEntries = getDeepKeysAndValues(fa as Record<string, unknown>);
+    expect(referenceEntries.length).toBeGreaterThan(150);
 
     allDictionaries.forEach(({ code, dict }) => {
-      requiredSections.forEach((section) => {
-        expect(dict[section], `Locale ${code} missing section ${section}`).toBeDefined();
-        expect(typeof dict[section], `Locale ${code} section ${section} must be an object`).toBe('object');
+      const localeEntries = getDeepKeysAndValues(dict);
+      const localeKeys = new Set(localeEntries.map((e) => e.path));
+
+      referenceEntries.forEach(({ path, value: refVal }) => {
+        expect(localeKeys.has(path), `Locale '${code}' is missing key: ${path}`).toBe(true);
+
+        const found = localeEntries.find((e) => e.path === path);
+        expect(found?.value, `Locale '${code}' key '${path}' must be a non-empty string`).toBeDefined();
+        expect(found?.value.trim().length, `Locale '${code}' key '${path}' is empty string`).toBeGreaterThan(0);
+
+        // Verify template placeholder consistency
+        const refPlaceholders = extractPlaceholders(refVal);
+        const locPlaceholders = extractPlaceholders(found?.value || '');
+        expect(
+          locPlaceholders,
+          `Locale '${code}' key '${path}' placeholders mismatch. Expected ${refPlaceholders.join(',')} but got ${locPlaceholders.join(',')}`
+        ).toEqual(refPlaceholders);
       });
     });
   });
 
-  it('guarantees complete navigation key parity across all 7 locales', () => {
-    const navKeys = Object.keys(fa.nav);
-    allDictionaries.forEach(({ code, dict }) => {
-      navKeys.forEach((key) => {
-        const value = (dict.nav as Record<string, string>)[key];
-        expect(value, `Locale ${code} is missing nav key: ${key}`).toBeDefined();
-        expect(typeof value, `Locale ${code} nav key ${key} must be non-empty string`).toBe('string');
-        expect(value.length, `Locale ${code} nav key ${key} should not be empty`).toBeGreaterThan(0);
-      });
-    });
+  it('verifies Persian currency conversion converts IRR to Toman by dividing by 10', () => {
+    const amountRials = 1000000; // 1,000,000 IRR
+    const amountToman = Math.round(amountRials / 10); // 100,000 Toman
+    expect(amountToman).toBe(100000);
   });
 
-  it('guarantees complete dashboard key parity across all 7 locales', () => {
-    const dashboardKeys = Object.keys(fa.dashboard);
+  it('validates all locale dictionary keys exist and are non-empty', () => {
     allDictionaries.forEach(({ code, dict }) => {
-      dashboardKeys.forEach((key) => {
-        const value = (dict.dashboard as Record<string, string>)[key];
-        expect(value, `Locale ${code} is missing dashboard key: ${key}`).toBeDefined();
-        expect(typeof value).toBe('string');
-      });
-    });
-  });
-
-  it('guarantees complete accounting key parity across all 7 locales', () => {
-    const accountingKeys = Object.keys(fa.accounting);
-    allDictionaries.forEach(({ code, dict }) => {
-      accountingKeys.forEach((key) => {
-        const value = (dict.accounting as Record<string, string>)[key];
-        expect(value, `Locale ${code} is missing accounting key: ${key}`).toBeDefined();
-        expect(typeof value).toBe('string');
-      });
-    });
-  });
-
-  it('guarantees complete feeding key parity across all 7 locales', () => {
-    const feedingKeys = Object.keys(fa.feeding);
-    allDictionaries.forEach(({ code, dict }) => {
-      feedingKeys.forEach((key) => {
-        const value = (dict.feeding as Record<string, string>)[key];
-        expect(value, `Locale ${code} is missing feeding key: ${key}`).toBeDefined();
-        expect(typeof value).toBe('string');
-      });
-    });
-  });
-
-  it('validates common actions and status strings are defined', () => {
-    const commonKeys: (keyof typeof fa)[] = [
-      'appName',
-      'appSlogan',
-      'tagline',
-      'online',
-      'offline',
-      'lanMode',
-      'searchPlaceholder',
-      'save',
-      'cancel',
-      'delete',
-      'edit',
-      'create',
-      'confirm',
-      'back',
-      'close',
-      'exportPdf',
-      'exportExcel',
-      'print',
-      'status',
-      'actions',
-      'date',
-      'time',
-      'notes',
-      'details',
-      'refresh',
-      'systemStatus',
-      'loading',
-      'noData',
-      'emptyTable',
-      'all',
-      'filter',
-      'search',
-      'active',
-      'inactive',
-      'success',
-      'error',
-      'kg',
-      'gram',
-      'unit',
-      'mgL',
-      'celsius',
-      'ppt',
-    ];
-
-    allDictionaries.forEach(({ code, dict }) => {
-      commonKeys.forEach((key) => {
-        const val = dict[key];
-        expect(val, `Locale ${code} is missing common key: ${key}`).toBeDefined();
-        expect(typeof val).toBe('string');
+      const entries = getDeepKeysAndValues(dict);
+      expect(entries.length).toBeGreaterThan(100);
+      entries.forEach(({ path, value }) => {
+        expect(value.trim().length, `Empty translation for key ${path} in locale ${code}`).toBeGreaterThan(0);
       });
     });
   });

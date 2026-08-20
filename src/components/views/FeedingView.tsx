@@ -94,14 +94,14 @@ export const FeedingView: React.FC = () => {
             {t('feeding.title')}
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            محاسبه‌گر هوشمند جیره روزانه مبتنی بر دما، اکسیژن، بیوماس و قفل ایمنی خودکار
+            {t('feeding.subtitle')}
           </p>
         </div>
 
         {/* Safety Badge */}
         <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs">
           <ShieldCheck className="w-4 h-4 text-emerald-400" />
-          <span className="text-slate-300 font-semibold">پروتکل حفاظتی اکسیژن DO ≥ 4.0 mg/L</span>
+          <span className="text-slate-300 font-semibold">{t('feeding.safetyBadge')}</span>
         </div>
       </div>
 
@@ -109,7 +109,7 @@ export const FeedingView: React.FC = () => {
       <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 text-amber-200 text-xs flex items-start gap-3">
         <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
         <div>
-          <h4 className="font-bold text-amber-300 mb-0.5">دستورالعمل حیاتی ایمنی خوراک‌دهی:</h4>
+          <h4 className="font-bold text-amber-300 mb-0.5">{t('feeding.safetyWarningTitle')}</h4>
           <p className="text-[11px] leading-relaxed text-amber-200/90">
             {t('feeding.safetyWarning')}
           </p>
@@ -122,7 +122,7 @@ export const FeedingView: React.FC = () => {
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-5">
           <h2 className="font-bold text-sm text-white flex items-center gap-2 border-b border-slate-800 pb-3">
             <Calculator className="w-4 h-4 text-amber-400" />
-            تخصیص و ثبت وعده غذایی
+            {t('feeding.dispatchTitle')}
           </h2>
 
           <form onSubmit={handleSubmitFeeding} className="space-y-4 text-xs">
@@ -138,7 +138,7 @@ export const FeedingView: React.FC = () => {
               >
                 {ponds.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.number} — {p.name} ({p.feedingStatus === 'STOPPED' ? '🔴 قطع تغذیه' : '🟢 فعال'} | بیوماس: {formatNumber(p.biomassKg)} kg | DO: {p.dissolvedOxygen})
+                    {p.number} — {p.name} ({p.feedingStatus === 'STOPPED' ? `🔴 ${t('pond.stopped')}` : `🟢 ${t('pond.active')}`} | {t('pond.biomass')}: {formatNumber(p.biomassKg)} kg | DO: {p.dissolvedOxygen})
                   </option>
                 ))}
               </select>
@@ -150,10 +150,10 @@ export const FeedingView: React.FC = () => {
                 <Lock className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
                 <div>
                   <strong className="block font-bold text-sm text-rose-200">
-                    ثبت تغذیه در این استخر قفل شده است!
+                    {t('feeding.lockedTitle')}
                   </strong>
                   <p className="text-xs text-rose-300 mt-1 flex items-center gap-1">
-                    <span>علت:</span>
+                    <span>{t('feeding.lockReasonPrefix')}</span>
                     <DynamicTranslatedText
                       text={lockReason || 'محدودیت ایمنی'}
                       recordId={`lock_${selectedPondId}`}
@@ -171,7 +171,7 @@ export const FeedingView: React.FC = () => {
               {/* Unit Toggle */}
               <div>
                 <label className="block text-slate-300 font-bold mb-1.5">
-                  واحد اندازه‌گیری توزیع:
+                  {t('feeding.unitSelection')}
                 </label>
                 <div className="grid grid-cols-3 gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
                   <button
@@ -214,7 +214,7 @@ export const FeedingView: React.FC = () => {
                   {isLocked ? '0.00 kg' : displayRecommended}
                 </span>
                 <span className="text-[10px] text-slate-400">
-                  مبتنی بر دمای {selectedPond?.waterTemperature}°C و ضریب متابولیک
+                  {t('feeding.recommendationSub', { temp: selectedPond?.waterTemperature || 0 })}
                 </span>
               </div>
             </div>
@@ -223,7 +223,7 @@ export const FeedingView: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-slate-300 font-bold mb-1.5">
-                  {t('feeding.actualDose')} (کیلوگرم):
+                  {t('feeding.actualDose')} ({t('kg')}):
                 </label>
                 <input
                   type="number"
@@ -239,7 +239,7 @@ export const FeedingView: React.FC = () => {
 
               <div>
                 <label className="block text-slate-300 font-bold mb-1.5">
-                  نوع خوراک انبار:
+                  {t('feeding.feedTypeSku')}
                 </label>
                 <select
                   value={feedSku}
@@ -261,7 +261,7 @@ export const FeedingView: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-slate-300 font-bold mb-1.5">
-                  {t('feeding.operator')}:
+                  {t('feeding.operator')}
                 </label>
                 <input
                   type="text"
@@ -274,17 +274,17 @@ export const FeedingView: React.FC = () => {
 
               <div>
                 <label className="block text-slate-300 font-bold mb-1.5">
-                  وضعیت رفتار تغذیه‌ای (اشتها):
+                  {t('feeding.appetiteBehavior')}
                 </label>
                 <select
                   value={feedingStatusTag}
                   onChange={(e) => setFeedingStatusTag(e.target.value as any)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white focus:border-amber-500"
                 >
-                  <option value="NORMAL">عادی و اشتهای مطلوب (NORMAL)</option>
-                  <option value="AGGRESSIVE">اشتهای شدید و سریع (AGGRESSIVE)</option>
-                  <option value="LETHARGIC">بی‌حالی و کندی در بلع (LETHARGIC)</option>
-                  <option value="UNTOUCHED">عدم مصرف خوراک (UNTOUCHED)</option>
+                  <option value="NORMAL">{t('feeding.appetiteNormal')}</option>
+                  <option value="AGGRESSIVE">{t('feeding.appetiteAggressive')}</option>
+                  <option value="LETHARGIC">{t('feeding.appetiteLethargic')}</option>
+                  <option value="UNTOUCHED">{t('feeding.appetiteUntouched')}</option>
                 </select>
               </div>
             </div>
@@ -299,7 +299,7 @@ export const FeedingView: React.FC = () => {
                   : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
               }`}
             >
-              {isLocked ? 'تغذیه به دلیل قفل ایمنی غیرفعال است' : t('feeding.submitFeed')}
+              {isLocked ? t('feeding.submitDisabled') : t('feeding.submitFeed')}
             </button>
           </form>
         </div>
@@ -308,43 +308,43 @@ export const FeedingView: React.FC = () => {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
           <h3 className="font-bold text-sm text-white flex items-center gap-2 border-b border-slate-800 pb-3">
             <Droplets className="w-4 h-4 text-cyan-400" />
-            تله‌متری استخر انتخابی
+            {t('feeding.telemetryTitle')}
           </h3>
 
           {selectedPond ? (
             <div className="space-y-3 text-xs">
               <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/50">
-                <span className="text-[11px] text-slate-400 block">نام استخر:</span>
+                <span className="text-[11px] text-slate-400 block">{t('feeding.pondNameLabel')}</span>
                 <span className="font-bold text-white text-sm">{selectedPond.name}</span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">
-                  کد: {selectedPond.number}
+                  {t('feeding.pondCodeLabel')} {selectedPond.number}
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
-                  <span className="text-[11px] text-slate-400 block">اکسیژن (DO)</span>
+                  <span className="text-[11px] text-slate-400 block">{t('feeding.doLabel')}</span>
                   <span className={`text-base font-black ${selectedPond.dissolvedOxygen < 4 ? 'text-rose-400' : 'text-cyan-400'}`}>
                     {selectedPond.dissolvedOxygen} mg/L
                   </span>
                 </div>
 
                 <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
-                  <span className="text-[11px] text-slate-400 block">دمای آب</span>
+                  <span className="text-[11px] text-slate-400 block">{t('feeding.tempLabel')}</span>
                   <span className="text-base font-black text-orange-400">
                     {selectedPond.waterTemperature}°C
                   </span>
                 </div>
 
                 <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
-                  <span className="text-[11px] text-slate-400 block">بیوماس زنده</span>
+                  <span className="text-[11px] text-slate-400 block">{t('feeding.biomassLabel')}</span>
                   <span className="text-base font-black text-white">
                     {formatNumber(selectedPond.biomassKg)} kg
                   </span>
                 </div>
 
                 <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
-                  <span className="text-[11px] text-slate-400 block">FCR فعلی</span>
+                  <span className="text-[11px] text-slate-400 block">{t('feeding.fcrLabel')}</span>
                   <span className="text-base font-black text-emerald-400">
                     {selectedPond.fcr}
                   </span>
@@ -353,17 +353,17 @@ export const FeedingView: React.FC = () => {
 
               <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
                 <div className="flex justify-between">
-                  <span>آخرین وعده ثبت شده:</span>
+                  <span>{t('feeding.lastFeedingLabel')}</span>
                   <strong className="text-slate-200">{selectedPond.lastFeedingKg} kg</strong>
                 </div>
                 <div className="flex justify-between">
-                  <span>زمان آخرین تغذیه:</span>
+                  <span>{t('feeding.lastFeedingTimeLabel')}</span>
                   <strong className="text-slate-300">{formatDate(selectedPond.lastFeedingTime || '')}</strong>
                 </div>
               </div>
             </div>
           ) : (
-            <p className="text-xs text-slate-400">استخری انتخاب نشده است.</p>
+            <p className="text-xs text-slate-400">{t('feeding.noPondSelected')}</p>
           )}
         </div>
       </div>
@@ -373,10 +373,10 @@ export const FeedingView: React.FC = () => {
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-sm text-white flex items-center gap-2">
             <Clock className="w-4 h-4 text-amber-400" />
-            دفتر ثبت و توزیع خوراک (Feeding Ledger)
+            {t('feeding.ledgerTitle')}
           </h3>
           <span className="text-xs text-slate-400">
-            {feedingRecords.length} رکورد ثبت شده
+            {t('feeding.recordsCount', { count: feedingRecords.length })}
           </span>
         </div>
 
@@ -384,20 +384,20 @@ export const FeedingView: React.FC = () => {
           <table className="w-full text-xs text-right text-slate-300">
             <thead className="bg-slate-800/80 text-slate-400 text-[11px] uppercase border-b border-slate-700">
               <tr>
-                <th className="p-3">استخر</th>
-                <th className="p-3">نوع خوراک</th>
-                <th className="p-3">مقدار پیشنهادی</th>
-                <th className="p-3">مقدار مصرفی</th>
-                <th className="p-3">اکسیژن / دما</th>
-                <th className="p-3">تکنسین</th>
-                <th className="p-3">زمان ثبت</th>
+                <th className="p-3">{t('feeding.thPond')}</th>
+                <th className="p-3">{t('feeding.thFeedType')}</th>
+                <th className="p-3">{t('feeding.thRecommended')}</th>
+                <th className="p-3">{t('feeding.thActual')}</th>
+                <th className="p-3">{t('feeding.thDoTemp')}</th>
+                <th className="p-3">{t('feeding.thOperator')}</th>
+                <th className="p-3">{t('feeding.thTime')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {feedingRecords.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-4 text-center text-slate-500">
-                    هنوز رکوردی در این شیفت کاری ثبت نشده است.
+                    {t('feeding.noRecords')}
                   </td>
                 </tr>
               ) : (

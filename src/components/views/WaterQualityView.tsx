@@ -62,10 +62,10 @@ export const WaterQualityView: React.FC = () => {
         <div>
           <h1 className="text-xl font-black text-white flex items-center gap-2.5">
             <Droplets className="w-6 h-6 text-cyan-400" />
-            کیفیت آب، شیمی استخرها و تله‌متری سنسورهای IoT
+            {t('waterQuality.title')}
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            پایش لحظه‌ای اکسیژن محلول، دما، pH، آمونیاک غیر یونیزه، نیتریت و کالیبراسیون پروب‌های نوری
+            {t('waterQuality.subtitle')}
           </p>
         </div>
 
@@ -74,7 +74,7 @@ export const WaterQualityView: React.FC = () => {
           className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-600/20"
         >
           <Plus className="w-4 h-4" />
-          ثبت لاگ آزمایش آب جدید
+          {t('waterQuality.newTest')}
         </button>
       </div>
 
@@ -82,9 +82,9 @@ export const WaterQualityView: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
           <div>
-            <span className="text-xs text-slate-400 block">اکسیژن محلول میانگین مزرعه</span>
+            <span className="text-xs text-slate-400 block">{t('waterQuality.avgDo')}</span>
             <span className="text-2xl font-black text-cyan-400">6.4 mg/L</span>
-            <span className="text-[11px] text-emerald-400 block mt-1">✓ محدوده امن و استاندارد</span>
+            <span className="text-[11px] text-emerald-400 block mt-1">{t('waterQuality.avgDoStatus')}</span>
           </div>
           <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl">
             <Wind className="w-6 h-6" />
@@ -93,9 +93,9 @@ export const WaterQualityView: React.FC = () => {
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
           <div>
-            <span className="text-xs text-slate-400 block">میانگین دمای آب</span>
+            <span className="text-xs text-slate-400 block">{t('waterQuality.avgTemp')}</span>
             <span className="text-2xl font-black text-orange-400">16.3 °C</span>
-            <span className="text-[11px] text-slate-400 block mt-1">ایده‌آل رشد فیل‌ماهی</span>
+            <span className="text-[11px] text-slate-400 block mt-1">{t('waterQuality.avgTempStatus')}</span>
           </div>
           <div className="p-3 bg-orange-500/10 text-orange-400 rounded-xl">
             <Thermometer className="w-6 h-6" />
@@ -104,9 +104,9 @@ export const WaterQualityView: React.FC = () => {
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
           <div>
-            <span className="text-xs text-slate-400 block">اسیدیته میانگین (pH)</span>
+            <span className="text-xs text-slate-400 block">{t('waterQuality.avgPh')}</span>
             <span className="text-2xl font-black text-emerald-400">7.42</span>
-            <span className="text-[11px] text-emerald-400 block mt-1">قلیائیت بافر شده</span>
+            <span className="text-[11px] text-emerald-400 block mt-1">{t('waterQuality.avgPhStatus')}</span>
           </div>
           <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl">
             <Activity className="w-6 h-6" />
@@ -115,9 +115,9 @@ export const WaterQualityView: React.FC = () => {
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
           <div>
-            <span className="text-xs text-slate-400 block">آمونیاک سمی (NH₃)</span>
+            <span className="text-xs text-slate-400 block">{t('waterQuality.toxicAmmonia')}</span>
             <span className="text-2xl font-black text-slate-200">0.01 mg/L</span>
-            <span className="text-[11px] text-emerald-400 block mt-1">زیر آستانه خطر</span>
+            <span className="text-[11px] text-emerald-400 block mt-1">{t('waterQuality.ammoniaStatus')}</span>
           </div>
           <div className="p-3 bg-slate-800 text-slate-400 rounded-xl">
             <Layers className="w-6 h-6" />
@@ -129,22 +129,22 @@ export const WaterQualityView: React.FC = () => {
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
         <h3 className="font-bold text-sm text-white flex items-center gap-2">
           <Activity className="w-4 h-4 text-cyan-400" />
-          تاریخچه آزمایشات و تله‌متری کیفیت آب
+          {t('waterQuality.historyTitle')}
         </h3>
 
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-right text-slate-300">
             <thead className="bg-slate-800/80 text-slate-400 text-[11px] uppercase border-b border-slate-700">
               <tr>
-                <th className="p-3">استخر</th>
-                <th className="p-3">زمان ثبت</th>
-                <th className="p-3">اکسیژن DO (mg/L)</th>
-                <th className="p-3">دما (°C)</th>
-                <th className="p-3">pH</th>
-                <th className="p-3">آمونیاک NH₃</th>
-                <th className="p-3">نیتریت NO₂</th>
-                <th className="p-3">شوری (ppt)</th>
-                <th className="p-3">کارشناس</th>
+                <th className="p-3">{t('waterQuality.thPond')}</th>
+                <th className="p-3">{t('waterQuality.thTime')}</th>
+                <th className="p-3">{t('waterQuality.thDo')}</th>
+                <th className="p-3">{t('waterQuality.thTemp')}</th>
+                <th className="p-3">{t('waterQuality.thPh')}</th>
+                <th className="p-3">{t('waterQuality.thAmmonia')}</th>
+                <th className="p-3">{t('waterQuality.thNitrite')}</th>
+                <th className="p-3">{t('waterQuality.thSalinity')}</th>
+                <th className="p-3">{t('waterQuality.thOperator')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -172,12 +172,12 @@ export const WaterQualityView: React.FC = () => {
           <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
             <h3 className="font-bold text-base text-white flex items-center gap-2">
               <Droplets className="w-5 h-5 text-cyan-400" />
-              ثبت نتایج آنالیز شیمیایی آب
+              {t('waterQuality.modalTitle')}
             </h3>
 
             <form onSubmit={handleRecordTest} className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-300 font-bold mb-1">انتخاب استخر:</label>
+                <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.selectPond')}:</label>
                 <select
                   value={selectedPondId}
                   onChange={(e) => setSelectedPondId(e.target.value)}
@@ -193,7 +193,7 @@ export const WaterQualityView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">اکسیژن محلول (mg/L):</label>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.doField')}:</label>
                   <input
                     type="number"
                     step="0.1"
@@ -205,7 +205,7 @@ export const WaterQualityView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">دمای آب (°C):</label>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.tempField')}:</label>
                   <input
                     type="number"
                     step="0.1"
@@ -219,7 +219,7 @@ export const WaterQualityView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">اسیدیته (pH):</label>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.phField')}:</label>
                   <input
                     type="number"
                     step="0.01"
@@ -231,7 +231,7 @@ export const WaterQualityView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">آمونیاک کل (mg/L):</label>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.ammoniaField')}:</label>
                   <input
                     type="number"
                     step="0.001"
@@ -244,7 +244,7 @@ export const WaterQualityView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-slate-300 font-bold mb-1">کارشناس آزمایشگاه:</label>
+                <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.operatorField')}:</label>
                 <input
                   type="text"
                   value={tester}
@@ -260,13 +260,13 @@ export const WaterQualityView: React.FC = () => {
                   onClick={() => setShowAddModal(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl"
                 >
-                  انصراف
+                  {t('waterQuality.cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl"
                 >
-                  ثبت آزمایش
+                  {t('waterQuality.submit')}
                 </button>
               </div>
             </form>

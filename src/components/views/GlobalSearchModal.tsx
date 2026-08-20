@@ -57,7 +57,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Global Search (ماهی، استخر، فاکتور، میکروچیپ RFID، انبار)..."
+            placeholder={t('globalSearch.placeholder')}
             className="w-full bg-transparent text-white text-xs focus:outline-none placeholder:text-[#71717A]"
           />
           <button
@@ -72,7 +72,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
         <div className="max-h-96 overflow-y-auto p-4 space-y-4 text-xs">
           {query.trim() === '' ? (
             <div className="text-center py-8 text-[#71717A]">
-              <p className="text-xs">برای جستجو در کل ماژول‌های مزرعه خاویاری، عبارتی را تایپ نمایید...</p>
+              <p className="text-xs">{t('searchPlaceholder')}</p>
               <div className="flex justify-center gap-2 mt-3">
                 <span className="px-2 py-0.5 bg-[#18181B] border border-[#27272A] rounded text-[10px] text-[#A1A1AA]">
                   P-101
@@ -87,7 +87,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
             </div>
           ) : !hasResults ? (
             <div className="text-center py-8 text-[#71717A]">
-              موردی مطابق با عبارت «{query}» یافت نشد.
+              {t('globalSearch.noResults', { query })}
             </div>
           ) : (
             <>
@@ -96,7 +96,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                 <div>
                   <h4 className="text-[10px] font-bold text-[#71717A] uppercase tracking-widest mb-2 flex items-center gap-1.5">
                     <Fish className="w-3.5 h-3.5 text-[#D4AF37]" />
-                    استخرهای پرورشی ({matchedPonds.length})
+                    {t('globalSearch.pondsHeading')} ({matchedPonds.length})
                   </h4>
                   <div className="space-y-1">
                     {matchedPonds.map((p) => (
@@ -126,7 +126,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                 <div>
                   <h4 className="text-[10px] font-bold text-[#71717A] uppercase tracking-widest mb-2 flex items-center gap-1.5">
                     <Egg className="w-3.5 h-3.5 text-[#D4AF37]" />
-                    مولدین و چیپست RFID ({matchedBroodstock.length})
+                    {t('globalSearch.broodstockHeading')} ({matchedBroodstock.length})
                   </h4>
                   <div className="space-y-1">
                     {matchedBroodstock.map((b) => (
@@ -141,7 +141,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                         <div>
                           <span className="font-bold text-white font-mono">{b.chipNumber}</span>
                           <span className="text-[10px] text-[#A1A1AA] mr-2">
-                            {b.speciesId} ({b.sex}) — وزن: {b.weightKg} kg
+                            {b.speciesId} ({b.sex}) — {t('amount')}: {b.weightKg} kg
                           </span>
                         </div>
                         <ArrowRight className="w-3.5 h-3.5 text-[#71717A]" />
@@ -156,7 +156,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                 <div>
                   <h4 className="text-[10px] font-bold text-[#71717A] uppercase tracking-widest mb-2 flex items-center gap-1.5">
                     <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                    پیش‌فاکتورها و فروش ({matchedProformas.length})
+                    {t('globalSearch.proformasHeading')} ({matchedProformas.length})
                   </h4>
                   <div className="space-y-1">
                     {matchedProformas.map((pr) => (
@@ -171,7 +171,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                         <div>
                           <span className="font-bold text-white font-mono">{pr.invoiceNumber}</span>
                           <span className="text-[10px] text-[#A1A1AA] mr-2">
-                            مشتری: {pr.customerName} | مبلغ: {pr.grandTotal} {pr.currency}
+                            {pr.customerName} | {t('amount')}: {pr.grandTotal} {pr.currency}
                           </span>
                         </div>
                         <ArrowRight className="w-3.5 h-3.5 text-[#71717A]" />

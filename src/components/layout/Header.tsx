@@ -117,7 +117,7 @@ export const Header: React.FC<HeaderProps> = ({
             className="flex items-center gap-1.5 px-3 py-1.5 bg-[#18181B] text-rose-400 border border-rose-500/40 rounded-lg text-xs font-semibold animate-pulse cursor-pointer"
           >
             <div className="w-2 h-2 rounded-full bg-rose-500" />
-            <span>{stoppedPonds.length} استخر قطع خوراک</span>
+            <span>{t('nav.stoppedBadge', { count: stoppedPonds.length })}</span>
           </button>
         )}
 
@@ -134,12 +134,12 @@ export const Header: React.FC<HeaderProps> = ({
           {isLanOffline ? (
             <>
               <WifiOff className="w-3.5 h-3.5 text-[#D4AF37]" />
-              <span className="hidden xl:inline">{t('offline')} (LAN)</span>
+              <span className="hidden xl:inline">{t('offline')}</span>
             </>
           ) : (
             <>
               <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="hidden xl:inline">{t('online')} (LAN 4ms)</span>
+              <span className="hidden xl:inline">{t('online')} ({t('header.lanLatency')})</span>
             </>
           )}
         </button>
@@ -162,7 +162,7 @@ export const Header: React.FC<HeaderProps> = ({
               } mt-2 w-52 bg-[#121214] border border-[#1F1F22] rounded-xl shadow-2xl py-1.5 z-50`}
             >
               <div className="px-3.5 py-1.5 text-[10px] uppercase tracking-widest font-bold text-[#71717A] border-b border-[#1F1F22]">
-                Select Language (7 Locales)
+                {t('header.selectLanguage')}
               </div>
               {LANGUAGES.map((langItem) => (
                 <button
@@ -199,10 +199,10 @@ export const Header: React.FC<HeaderProps> = ({
                 ? 'bg-cyan-950/40 text-cyan-300 border-cyan-500/40 hover:bg-cyan-900/40 shadow-sm shadow-cyan-950/30'
                 : 'bg-[#18181B] text-[#71717A] border-[#27272A] hover:text-[#A1A1AA]'
             }`}
-            title="وضعیت ترجمه هوشمند محتوای پویا"
+            title={t('header.aiTransTitle')}
           >
             <Sparkles className={`w-3.5 h-3.5 ${dynamicAiEnabled ? 'text-cyan-400 animate-pulse' : 'text-[#71717A]'}`} />
-            <span className="text-[11px]">AI Trans</span>
+            <span className="text-[11px]">{t('header.aiTrans')}</span>
             <span className={`w-1.5 h-1.5 rounded-full ${dynamicAiEnabled ? 'bg-cyan-400' : 'bg-[#52525B]'}`} />
           </button>
 
@@ -215,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center justify-between pb-2 border-b border-[#1F1F22]">
                 <div className="flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-cyan-400" />
-                  <span className="text-xs font-bold text-white">ترجمه رانتایم هوشمند (Gemini)</span>
+                  <span className="text-xs font-bold text-white">{t('header.aiTransTitle')}</span>
                 </div>
                 <button
                   onClick={handleToggleAiTrans}
@@ -225,29 +225,29 @@ export const Header: React.FC<HeaderProps> = ({
                       : 'bg-slate-800 text-slate-400'
                   }`}
                 >
-                  {dynamicAiEnabled ? 'فعال' : 'غیرفعال'}
+                  {dynamicAiEnabled ? t('active') : t('inactive')}
                 </button>
               </div>
 
               <div className="py-2 space-y-1.5 text-[11px] text-[#A1A1AA]">
                 <p className="text-[10px] text-[#71717A] leading-relaxed">
-                  ترجمه در لحظه نمایش یادداشت‌ها، علت‌ها و توضیحات کاربر بدون تغییر پایگاه‌داده اصلی.
+                  {t('header.aiTransDesc')}
                 </p>
                 <div className="bg-[#18181B] p-2 rounded-lg space-y-1 border border-[#27272A] font-mono text-[10px]">
                   <div className="flex justify-between">
-                    <span>درخواست‌های کل:</span>
+                    <span>{t('header.totalRequests')}</span>
                     <span className="text-white font-bold">{metrics.totalRequests}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>حافظه کش (Cache Hit):</span>
+                    <span>{t('header.cacheHits')}</span>
                     <span className="text-emerald-400 font-bold">{metrics.cacheHits}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>فراخوانی سرور (API Calls):</span>
+                    <span>{t('header.apiCalls')}</span>
                     <span className="text-cyan-400 font-bold">{metrics.apiCalls}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>کاراکترهای صرفه‌جویی:</span>
+                    <span>{t('header.savedChars')}</span>
                     <span className="text-[#D4AF37] font-bold">{metrics.savedCharacters}</span>
                   </div>
                 </div>
@@ -262,7 +262,7 @@ export const Header: React.FC<HeaderProps> = ({
                   className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
                 >
                   <RefreshCw className="w-3 h-3" />
-                  پاک‌سازی حافظه موقت (Clear Cache)
+                  {t('header.clearCache')}
                 </button>
               </div>
             </div>
@@ -273,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={() => onSelectNav('securityAudit')}
           className="w-9 h-9 rounded-full bg-[#18181B] border border-[#27272A] hover:border-[#D4AF37]/50 flex items-center justify-center text-[#A1A1AA] hover:text-[#D4AF37] transition-colors cursor-pointer"
-          title="Audit & Alerts"
+          title={t('header.notificationsTitle')}
         >
           <Bell className="w-4 h-4" />
         </button>
@@ -311,7 +311,7 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div className="py-1">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-[#71717A] px-3 py-1">
-                  Active Personnel Accounts:
+                  {t('header.activeAccounts')}
                 </p>
                 {usersList.map((u) => (
                   <div
@@ -336,7 +336,7 @@ export const Header: React.FC<HeaderProps> = ({
                     className="w-full text-center py-1.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#D4AF37]/30 text-[#D4AF37] text-xs rounded-lg transition-colors cursor-pointer font-medium flex items-center justify-center gap-1.5"
                   >
                     <UserIcon className="w-3.5 h-3.5" />
-                    <span>تغییر حساب / ورود با کاربر دیگر</span>
+                    <span>{t('header.switchAccount')}</span>
                   </button>
                 )}
                 <div className="flex justify-between gap-2">
@@ -347,7 +347,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                     className="flex-1 text-center py-1.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#27272A] text-[#E4E4E7] text-xs rounded-lg transition-colors cursor-pointer font-medium"
                   >
-                    مدیریت امنیت
+                    {t('header.manageSecurity')}
                   </button>
                   <button
                     onClick={() => {
@@ -357,7 +357,7 @@ export const Header: React.FC<HeaderProps> = ({
                     className="px-3.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs rounded-lg transition-colors cursor-pointer font-medium flex items-center gap-1"
                   >
                     <LogOut className="w-3 h-3" />
-                    <span>خروج</span>
+                    <span>{t('header.logout')}</span>
                   </button>
                 </div>
               </div>
