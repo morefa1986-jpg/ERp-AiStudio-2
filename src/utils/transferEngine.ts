@@ -1,4 +1,4 @@
-import { Pond, FishTransfer } from '../types';
+import { FishTransfer, Pond } from '../types';
 
 export interface FishTransferInput extends Omit<FishTransfer, 'id' | 'status'> {}
 
@@ -9,108 +9,95 @@ export interface TransferResult {
   newTransfer?: FishTransfer;
 }
 
-/**
- * Validates and executes an atomic fish transfer between ponds.
- * Guaranteed conservation of total fish count and total biomass.
- */
-export function executeAtomicFishTransfer(
-  transferData: FishTransferInput,
-  ponds: Pond[]
-): TransferResult {
-  const sourcePond = ponds.find((p) => p.id === transferData.sourceId);
-  const destPond = ponds.find((p) => p.id === transferData.destinationId);
-
-  if (!sourcePond) return { success: false, error: 'استخر مبدا یافت نشد.' };
-  if (!destPond) return { success: false, error: 'استخر مقصد یافت نشد.' };
-  if (sourcePond.id === destPond.id) {
-    return { success: false, error: 'استخر مبدا و مقصد نمی‌توانند یکسان باشند.' };
+function validateTransferNumbers(transferData: FishTransferInput, sourcePond: Pond): { ok: boolean; error?: string; biomass?: number } {
+  if (!Number.isInteger(transferData.fishCount) || transferData.fishCount <= 0) {
+    return { ok: false, error: 'تعداد ماهیان انتقال باید یک عدد صحیح مثبت باشد.' };
   }
-
-  // Number validation
-  if (!Number.isFinite(transferData.fishCount) || transferData.fishCount <= 0 || !Number.isInteger(transferData.fishCount)) {
-    return { success: false, error: 'تعداد ماهیان انتقال باید یک عدد صحیح مثبت و معتبر باشد.' };
-  }
-
   if (!Number.isFinite(transferData.averageWeightKg) || transferData.averageWeightKg <= 0) {
-    return { success: false, error: 'میانگین وزن ماهیان انتقال باید یک عدد مثبت معتبر باشد.' };
+    return { ok: false, error: 'میانگین وزن انتقال باید عدد مثبت معتبر باشد.' };
+  }
+  if (transferData.fishCount > sourcePond.fishCount) {
+    return { ok: false, error: `تعداد درخواستی (${transferData.fishCount}) بیشتر از موجودی مبدا (${sourcePond.fishCount}) است.` };
   }
 
-  if (sourcePond.fishCount < transferData.fishCount) {
-    return {
-      success: false,
-      error: `تعداد ماهیان درخواستی (${transferData.fishCount}) بیشتر از موجودی استخر مبدا (${sourcePond.fishCount}) است.`,
-    };
+  const biomass = Number((transferData.fishCount * transferData.averageWeightKg).toFixed(2));
+  if (!Number.isFinite(biomass) || biomass <= 0) return { ok: false, error: 'بیومس انتقالی نامعتبر است.' };
+  if (biomass > sourcePond.biomassKg + 0.01) {
+    return { ok: false, error: `بیومس انتقالی (${biomass} kg) بیشتر از بیومس مبدا (${sourcePond.biomassKg} kg) است.` };
+  }
+  if (Number.isFinite(transferData.totalBiomassKg) && transferData.totalBiomassKg > 0 && Math.abs(transferData.totalBiomassKg - biomass) > 0.05) {
+    return { ok: false, error: 'بیومس اعلام‌شده با تعداد و میانگین وزن انتقال سازگار نیست.' };
+  }
+  return { ok: true, biomass };
+}
+
+export function executeAtomicFishTransfer(transferData: FishTransferInput, ponds: Pond[]): TransferResult {
+  if (transferData.sourceType !== 'Pond') {
+    return { success: false, error: 'این موتور در حال حاضر منبع استخر را مدیریت می‌کند؛ انتقال Nursery/Hatchery باید از موجودی همان ماژول ثبت شود.' };
   }
 
-  const transferBiomass = Number((transferData.fishCount * transferData.averageWeightKg).toFixed(2));
-  if (!Number.isFinite(transferBiomass) || transferBiomass <= 0) {
-    return { success: false, error: 'بیومس انتقالی نامعتبر است.' };
-  }
+  const sourcePond = ponds.find((pond) => pond.id === transferData.sourceId);
+  if (!sourcePond) return { success: false, error: 'استخر مبدا یافت نشد.' };
 
-  if (transferBiomass > sourcePond.biomassKg + 0.01) {
-    return {
-      success: false,
-      error: `بیومس درخواستی برای انتقال (${transferBiomass} kg) بیشتر از بیومس کل استخر مبدا (${sourcePond.biomassKg} kg) است.`,
-    };
-  }
+  const validation = validateTransferNumbers(transferData, sourcePond);
+  if (!validation.ok || validation.biomass === undefined) return { success: false, error: validation.error };
+  const transferBiomass = validation.biomass;
 
-  const initialTotalCount = sourcePond.fishCount + destPond.fishCount;
-  const initialTotalBiomass = sourcePond.biomassKg + destPond.biomassKg;
-
-  // Compute updated source pond
   const sourceNewCount = sourcePond.fishCount - transferData.fishCount;
-  const sourceNewBiomass = Math.max(0, Number((sourcePond.biomassKg - transferBiomass).toFixed(2)));
-  const sourceNewAvg = sourceNewCount > 0 ? Number((sourceNewBiomass / sourceNewCount).toFixed(2)) : 0;
-
-  // Compute updated destination pond
-  const destNewCount = destPond.fishCount + transferData.fishCount;
-  const destNewBiomass = Number((destPond.biomassKg + transferBiomass).toFixed(2));
-  const destNewAvg = destNewCount > 0 ? Number((destNewBiomass / destNewCount).toFixed(2)) : transferData.averageWeightKg;
-
-  // Strict Conservation Check
-  const finalTotalCount = sourceNewCount + destNewCount;
-  const finalTotalBiomass = Number((sourceNewBiomass + destNewBiomass).toFixed(2));
-
-  if (finalTotalCount !== initialTotalCount) {
-    return { success: false, error: 'خطای سیستمی: قانون بقای تعداد ماهیان در انتقال نقض شد.' };
-  }
-
-  if (Math.abs(finalTotalBiomass - Number(initialTotalBiomass.toFixed(2))) > 0.05) {
-    return { success: false, error: 'خطای سیستمی: قانون بقای جرم بیومس در انتقال نقض شد.' };
-  }
+  const sourceNewBiomass = Number((sourcePond.biomassKg - transferBiomass).toFixed(2));
+  if (sourceNewCount < 0 || sourceNewBiomass < -0.01) return { success: false, error: 'انتقال باعث موجودی منفی در مبدا می‌شود.' };
+  const safeSourceBiomass = Math.max(0, sourceNewBiomass);
+  const sourceNewAvg = sourceNewCount > 0 ? Number((safeSourceBiomass / sourceNewCount).toFixed(3)) : 0;
 
   const newTransfer: FishTransfer = {
     ...transferData,
-    id: 'trf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+    id: `trf_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     totalBiomassKg: transferBiomass,
     status: 'COMPLETED',
   };
 
-  const updatedPonds = ponds.map((p) => {
-    if (p.id === sourcePond.id) {
-      return {
-        ...p,
-        fishCount: sourceNewCount,
-        biomassKg: sourceNewBiomass,
-        averageWeightKg: sourceNewAvg,
-        lastTransferDate: transferData.date,
-      };
+  // Internal pond-to-pond movement must conserve count and biomass exactly (within rounding tolerance).
+  if (transferData.destinationType === 'Pond') {
+    const destinationPond = ponds.find((pond) => pond.id === transferData.destinationId);
+    if (!destinationPond) return { success: false, error: 'استخر مقصد یافت نشد.' };
+    if (destinationPond.id === sourcePond.id) return { success: false, error: 'استخر مبدا و مقصد نمی‌توانند یکسان باشند.' };
+    if (destinationPond.speciesId !== sourcePond.speciesId && !destinationPond.speciesMix?.some((mix) => mix.speciesId === sourcePond.speciesId)) {
+      return { success: false, error: 'گونه ماهی انتقالی با گونه ثبت‌شده استخر مقصد سازگار نیست.' };
     }
-    if (p.id === destPond.id) {
-      return {
-        ...p,
-        fishCount: destNewCount,
-        biomassKg: destNewBiomass,
-        averageWeightKg: destNewAvg,
-        lastTransferDate: transferData.date,
-      };
+
+    const initialCount = sourcePond.fishCount + destinationPond.fishCount;
+    const initialBiomass = Number((sourcePond.biomassKg + destinationPond.biomassKg).toFixed(2));
+    const destinationNewCount = destinationPond.fishCount + transferData.fishCount;
+    const destinationNewBiomass = Number((destinationPond.biomassKg + transferBiomass).toFixed(2));
+    const destinationNewAvg = destinationNewCount > 0 ? Number((destinationNewBiomass / destinationNewCount).toFixed(3)) : 0;
+
+    const finalCount = sourceNewCount + destinationNewCount;
+    const finalBiomass = Number((safeSourceBiomass + destinationNewBiomass).toFixed(2));
+    if (finalCount !== initialCount || Math.abs(finalBiomass - initialBiomass) > 0.05) {
+      return { success: false, error: 'قانون بقای تعداد یا بیومس در انتقال داخلی نقض شد.' };
     }
-    return p;
-  });
+
+    return {
+      success: true,
+      newTransfer,
+      updatedPonds: ponds.map((pond) => {
+        if (pond.id === sourcePond.id) return { ...pond, fishCount: sourceNewCount, biomassKg: safeSourceBiomass, averageWeightKg: sourceNewAvg, lastTransferDate: transferData.date };
+        if (pond.id === destinationPond.id) return { ...pond, fishCount: destinationNewCount, biomassKg: destinationNewBiomass, averageWeightKg: destinationNewAvg, lastTransferDate: transferData.date };
+        return pond;
+      }),
+    };
+  }
+
+  // Processing, cold storage, sale and other external destinations remove stock from the live pond ledger and retain the transfer record as traceability evidence.
+  const allowedExternal = ['Processing', 'Cold Storage', 'Sale', 'Nursery', 'Other'];
+  if (!allowedExternal.includes(transferData.destinationType)) return { success: false, error: 'نوع مقصد انتقال پشتیبانی نمی‌شود.' };
+  if (!transferData.destinationId?.trim() || !transferData.destinationName?.trim()) return { success: false, error: 'شناسه و نام مقصد الزامی است.' };
 
   return {
     success: true,
-    updatedPonds,
     newTransfer,
+    updatedPonds: ponds.map((pond) => pond.id === sourcePond.id
+      ? { ...pond, fishCount: sourceNewCount, biomassKg: safeSourceBiomass, averageWeightKg: sourceNewAvg, lastTransferDate: transferData.date }
+      : pond),
   };
 }
