@@ -1,427 +1,174 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Activity, AlertTriangle, Building2, Droplets, Fish, Package, Thermometer, Utensils } from 'lucide-react';
 import { useI18n } from '../../i18n';
 import { useFarm } from '../../context/FarmContext';
-import {
-  TrendingUp,
-  Activity,
-  Fish,
-  Utensils,
-  AlertTriangle,
-  ArrowUpRight,
-  ArrowDownRight,
-  DollarSign,
-  ShieldAlert,
-  Clock,
-  Layers,
-  Thermometer,
-  Droplets,
-  Building2,
-  Package,
-  Bot,
-  Sparkles,
-} from 'lucide-react';
 
-interface DashboardViewProps {
-  onSelectNav: (viewId: string) => void;
+interface DashboardViewProps { onSelectNav: (viewId: string) => void; }
+type Period = 'today' | 'week' | 'month' | 'year';
+
+function periodStart(period: Period, now = new Date()): number {
+  const start = new Date(now);
+  if (period === 'today') start.setHours(0, 0, 0, 0);
+  if (period === 'week') start.setTime(now.getTime() - 7 * 86_400_000);
+  if (period === 'month') { start.setDate(1); start.setHours(0, 0, 0, 0); }
+  if (period === 'year') { start.setMonth(0, 1); start.setHours(0, 0, 0, 0); }
+  return start.getTime();
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectNav }) => {
   const { t, formatNumber, formatCurrency, formatDate } = useI18n();
-  const {
-    ponds,
-    halls,
-    feedingRecords,
-    mortalityRecords,
-    processingBatches,
-    coldStorage,
-    proformas,
-    accounts,
-    auditLogs,
-  } = useFarm();
-
-  const [timeFilter, setTimeFilter] = useState<'today' | 'week' | 'month' | 'year'>('week');
-
-  // Filter calculations based on timestamp
+  const { ponds, halls, feedingRecords, mortalityRecords, proformas, treatments, inventory, auditLogs } = useFarm();
+  const [timeFilter, setTimeFilter] = useState<Period>('week');
+  const startTime = periodStart(timeFilter);
   const now = Date.now();
-  const filterDurationMs = {
-    today: 24 * 60 * 60 * 1000,
-    week: 7 * 24 * 60 * 60 * 1000,
-    month: 30 * 24 * 60 * 60 * 1000,
-    year: 365 * 24 * 60 * 60 * 1000,
-  }[timeFilter];
 
-  const startTime = now - filterDurationMs;
+  const filteredFeeding = useMemo(() => feedingRecords.filter((row) => {
+    const time = new Date(row.timestamp).getTime();
+    return Number.isFinite(time) && time >= startTime && time <= now;
+  }), [feedingRecords, startTime, now]);
+  const filteredMortality = useMemo(() => mortalityRecords.filter((row) => {
+    const time = new Date(row.timestamp).getTime();
+    return Number.isFinite(time) && time >= startTime && time <= now;
+  }), [mortalityRecords, startTime, now]);
+  const filteredProformas = useMemo(() => proformas.filter((row) => {
+    const time = new Date(row.date).getTime();
+    return Number.isFinite(time) && time >= startTime && time <= now;
+  }), [proformas, startTime, now]);
 
-  const filteredFeeding = feedingRecords.filter((r) => new Date(r.timestamp).getTime() >= startTime);
-  const filteredMortality = mortalityRecords.filter((m) => new Date(m.timestamp).getTime() >= startTime);
-  const filteredProformas = proformas.filter((p) => new Date(p.date).getTime() >= startTime);
+  const totalBiomassKg = ponds.reduce((sum, pond) => sum + (Number.isFinite(pond.biomassKg) ? pond.biomassKg : 0), 0);
+  const totalFishCount = ponds.reduce((sum, pond) => sum + (Number.isFinite(pond.fishCount) ? pond.fishCount : 0), 0);
+  const periodFeedKg = filteredFeeding.reduce((sum, row) => sum + (Number.isFinite(row.actualAmountKg) ? row.actualAmountKg : 0), 0);
+  const mortalityCount = filteredMortality.reduce((sum, row) => sum + (Number.isFinite(row.count) ? row.count : 0), 0);
+  const mortalityDenominator = totalFishCount + mortalityCount;
+  const mortalityRate = mortalityDenominator > 0 ? (mortalityCount / mortalityDenominator) * 100 : 0;
+  const stoppedPonds = ponds.filter((pond) => pond.feedingStatus === 'STOPPED');
+  const activeTreatments = treatments.filter((row) => row.status === 'ACTIVE').length;
+  const activeHalls = halls.filter((hall) => hall.isActive).length;
+  const avgDO = ponds.length ? ponds.reduce((sum, pond) => sum + pond.dissolvedOxygen, 0) / ponds.length : 0;
+  const avgTemp = ponds.length ? ponds.reduce((sum, pond) => sum + pond.waterTemperature, 0) / ponds.length : 0;
+  const avgFCR = ponds.length ? ponds.reduce((sum, pond) => sum + pond.fcr, 0) / ponds.length : 0;
+  const feedReserveKg = inventory.filter((row) => row.category.includes('Feed') && row.unit === 'kg').reduce((sum, row) => sum + row.quantity, 0);
 
-  // Aggregated KPIs
-  const totalBiomassKg = ponds.reduce((sum, p) => sum + p.biomassKg, 0);
-  const totalFishCount = ponds.reduce((sum, p) => sum + p.fishCount, 0);
-  const stoppedPonds = ponds.filter((p) => p.feedingStatus === 'STOPPED');
-
-  const avgDO = ponds.length > 0 ? (ponds.reduce((sum, p) => sum + p.dissolvedOxygen, 0) / ponds.length).toFixed(2) : '0';
-  const avgTemp = ponds.length > 0 ? (ponds.reduce((sum, p) => sum + p.waterTemperature, 0) / ponds.length).toFixed(1) : '0';
-  const avgFCR = ponds.length > 0 ? (ponds.reduce((sum, p) => sum + p.fcr, 0) / ponds.length).toFixed(2) : '1.12';
-
-  const periodFeedKg = filteredFeeding.length > 0
-    ? filteredFeeding.reduce((sum, r) => sum + (r.actualAmountKg || 0), 0)
-    : ponds.reduce((sum, p) => sum + (p.lastFeedingKg || 0), 0);
-
-  // Financial summary
-  const revenueAccount = accounts.find((a) => a.code === '4010');
-  const totalSalesAmount = filteredProformas.length > 0
-    ? filteredProformas.reduce((sum, p) => sum + p.grandTotal, 0)
-    : (revenueAccount ? revenueAccount.balance : 0);
-
-  // Dynamic Chart Trend Calculation for the Period
-  const chartBuckets = React.useMemo(() => {
-    const numBuckets = 7;
-    const bucketDuration = filterDurationMs / numBuckets;
-    const buckets = [];
-
-    for (let i = 0; i < numBuckets; i++) {
-      const bStart = startTime + i * bucketDuration;
-      const bEnd = bStart + bucketDuration;
-      const bDate = new Date(bStart + bucketDuration / 2);
-
-      const label = timeFilter === 'today'
-        ? bDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : timeFilter === 'year'
-        ? bDate.toLocaleDateString([], { month: 'short' })
-        : bDate.toLocaleDateString([], { weekday: 'short' });
-
-      // Calculate activity in bucket
-      const bucketFeed = filteredFeeding.filter((r) => {
-        const t = new Date(r.timestamp).getTime();
-        return t >= bStart && t < bEnd;
-      });
-
-      const feedSum = bucketFeed.reduce((s, f) => s + f.actualAmountKg, 0);
-      const heightPercent = feedSum > 0 ? Math.min(100, Math.max(20, (feedSum / (periodFeedKg || 1)) * 100 * numBuckets)) : Math.round(50 + (i % 3) * 15);
-
-      buckets.push({
-        label,
-        height: heightPercent,
-        feedKg: feedSum,
-      });
+  const salesByCurrency = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const row of filteredProformas) {
+      if (row.status === 'Cancelled') continue;
+      totals.set(row.currency, (totals.get(row.currency) || 0) + row.grandTotal);
     }
-    return buckets;
-  }, [timeFilter, filterDurationMs, startTime, filteredFeeding, periodFeedKg]);
+    return Array.from(totals.entries());
+  }, [filteredProformas]);
+
+  const chartBuckets = useMemo(() => {
+    const bucketCount = 7;
+    const duration = Math.max(1, now - startTime);
+    const bucketSize = duration / bucketCount;
+    const sums = Array.from({ length: bucketCount }, () => 0);
+    for (const record of filteredFeeding) {
+      const time = new Date(record.timestamp).getTime();
+      const index = Math.min(bucketCount - 1, Math.max(0, Math.floor((time - startTime) / bucketSize)));
+      sums[index] += record.actualAmountKg;
+    }
+    const max = Math.max(...sums, 0);
+    return sums.map((feedKg, index) => {
+      const center = new Date(startTime + bucketSize * (index + 0.5));
+      const label = timeFilter === 'today'
+        ? center.toLocaleTimeString([], { hour: '2-digit' })
+        : timeFilter === 'year'
+          ? center.toLocaleDateString([], { month: 'short' })
+          : center.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      return { label, feedKg, height: max > 0 ? (feedKg / max) * 100 : 0 };
+    });
+  }, [filteredFeeding, startTime, now, timeFilter]);
+
+  const cards = [
+    { label: t('dashboard.totalBiomass'), value: `${formatNumber(totalBiomassKg)} kg`, sub: `${formatNumber(totalFishCount)} ${t('unit')}`, icon: Fish },
+    { label: t('nav.feeding'), value: `${formatNumber(periodFeedKg)} kg`, sub: t(`dashboard.${timeFilter}`), icon: Utensils },
+    { label: t('dashboard.mortalityRate'), value: `${formatNumber(mortalityRate, { maximumFractionDigits: 3 })}%`, sub: `${formatNumber(mortalityCount)} ${t('unit')}`, icon: Activity },
+    { label: t('dashboard.fcrAverage'), value: formatNumber(avgFCR, { maximumFractionDigits: 2 }), sub: `DO ${formatNumber(avgDO, { maximumFractionDigits: 2 })} mg/L`, icon: Droplets },
+    { label: t('dashboard.avgTemp'), value: `${formatNumber(avgTemp, { maximumFractionDigits: 1 })}°C`, sub: `${formatNumber(stoppedPonds.length)} ${t('dashboard.criticalAlerts')}`, icon: Thermometer },
+    { label: t('dashboard.activeHalls'), value: formatNumber(activeHalls), sub: `${formatNumber(ponds.length)} ${t('nav.ponds')}`, icon: Building2 },
+    { label: t('dashboard.activeTreatments'), value: formatNumber(activeTreatments), sub: t('nav.treatments'), icon: AlertTriangle },
+    { label: t('dashboard.feedStockReserve'), value: `${formatNumber(feedReserveKg)} kg`, sub: t('nav.warehouse'), icon: Package },
+  ];
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
-      {/* Top Header Row */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#1F1F22] pb-6">
         <div>
-          <h1 className="text-3xl md:text-4xl font-serif italic text-white tracking-tight">
-            {t('dashboard.title')}
-          </h1>
-          <p className="text-[#71717A] mt-1 text-xs tracking-wide">
-            {t('dashboard.subtitle')}
-          </p>
+          <h1 className="text-2xl md:text-3xl font-serif italic text-white">{t('dashboard.title')}</h1>
+          <p className="text-[#71717A] mt-1 text-xs">{t('dashboard.subtitle')}</p>
         </div>
-
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Time Filter Pills */}
-          <div className="flex items-center bg-[#18181B] border border-[#27272A] p-1 rounded-lg text-xs">
-            {(['today', 'week', 'month', 'year'] as const).map((filterKey) => (
-              <button
-                key={filterKey}
-                onClick={() => setTimeFilter(filterKey)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-                  timeFilter === filterKey
-                    ? 'bg-[#27272A] text-[#D4AF37] font-bold shadow-sm'
-                    : 'text-[#A1A1AA] hover:text-white'
-                }`}
-              >
-                {t(`dashboard.${filterKey}`)}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex bg-[#18181B] border border-[#27272A] p-1 rounded-lg">
+            {(['today', 'week', 'month', 'year'] as Period[]).map((period) => (
+              <button key={period} type="button" onClick={() => setTimeFilter(period)} className={`px-3 py-1 rounded-md text-xs ${timeFilter === period ? 'bg-[#27272A] text-[#D4AF37] font-bold' : 'text-[#A1A1AA]'}`}>
+                {t(`dashboard.${period}`)}
               </button>
             ))}
           </div>
-
-          <button
-            onClick={() => onSelectNav('feeding')}
-            className="bg-[#D4AF37] hover:bg-[#c5a030] text-black px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer"
-          >
-            {t('dashboard.quickActionBtn')}
-          </button>
-          <button
-            onClick={() => onSelectNav('reports')}
-            className="bg-[#18181B] hover:bg-[#1F1F22] text-white px-4 py-2 border border-[#27272A] rounded-lg text-xs font-medium transition-colors cursor-pointer"
-          >
-            {t('dashboard.exportReportBtn')}
-          </button>
+          <button type="button" onClick={() => onSelectNav('feeding')} className="bg-[#D4AF37] text-black px-4 py-2 rounded-lg text-xs font-bold">{t('dashboard.quickActionBtn')}</button>
+          <button type="button" onClick={() => onSelectNav('reports')} className="bg-[#18181B] text-white px-4 py-2 border border-[#27272A] rounded-lg text-xs">{t('dashboard.exportReportBtn')}</button>
         </div>
       </div>
 
-      {/* Critical Alert Banner if feeding stopped */}
       {stoppedPonds.length > 0 && (
-        <div className="bg-[#18181B] border border-rose-500/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-rose-300">
-          <div className="flex items-center gap-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0" />
-            <div>
-              <h4 className="font-bold text-xs text-white">
-                {t('dashboard.criticalPondsAlert', { count: stoppedPonds.length })}
-              </h4>
-              <p className="text-[11px] text-[#A1A1AA] mt-0.5">
-                {stoppedPonds.map((p) => `${p.name} (${p.stopFeedingReason || 'DO < 4.0 mg/L'})`).join(' • ')}
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={() => onSelectNav('ponds')}
-            className="px-3.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
-          >
-            {t('nav.ponds')}
-          </button>
-        </div>
+        <button type="button" onClick={() => onSelectNav('ponds')} className="w-full text-start bg-[#18181B] border border-rose-500/40 rounded-2xl p-4 text-rose-300">
+          <div className="font-bold text-xs text-white">{t('dashboard.criticalPondsAlert', { count: stoppedPonds.length })}</div>
+          <div className="text-[11px] text-[#A1A1AA] mt-1">{stoppedPonds.map((pond) => `${pond.name}: ${pond.stopFeedingReason || 'STOPPED'}`).join(' • ')}</div>
+        </button>
       )}
 
-      {/* 4-Column Metric Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Metric 1: Total Biomass */}
-        <div className="bg-[#121214] border border-[#1F1F22] p-5 rounded-2xl">
-          <div className="text-[10px] text-[#71717A] uppercase tracking-widest mb-1">
-            {t('dashboard.totalBiomass')}
+        {cards.map(({ label, value, sub, icon: Icon }) => (
+          <div key={label} className="bg-[#121214] border border-[#1F1F22] p-5 rounded-2xl">
+            <div className="flex items-center justify-between gap-3"><span className="text-[10px] text-[#71717A] uppercase tracking-widest">{label}</span><Icon className="w-4 h-4 text-[#D4AF37]" /></div>
+            <div className="text-2xl font-light text-white mt-2">{value}</div>
+            <div className="text-[10px] text-[#A1A1AA] mt-2">{sub}</div>
           </div>
-          <div className="text-3xl font-light text-white">
-            {(totalBiomassKg / 1000).toFixed(1)}{' '}
-            <span className="text-sm font-normal text-[#71717A]">Tons ({formatNumber(totalBiomassKg)} kg)</span>
-          </div>
-          <div className="text-[10px] text-emerald-400 mt-2 font-mono flex items-center gap-1">
-            <ArrowUpRight className="w-3.5 h-3.5" />
-            +2.4% • {formatNumber(totalFishCount)} {t('unit')}
-          </div>
-        </div>
-
-        {/* Metric 2: FCR */}
-        <div className="bg-[#121214] border border-[#1F1F22] p-5 rounded-2xl">
-          <div className="text-[10px] text-[#71717A] uppercase tracking-widest mb-1">
-            {t('dashboard.fcrAverage')}
-          </div>
-          <div className="text-3xl font-light text-white">
-            {avgFCR} <span className="text-sm font-normal text-[#71717A]">FCR</span>
-          </div>
-          <div className="text-[10px] text-blue-400 mt-2 font-mono">
-            {t('dashboard.feedToday')}: {formatNumber(todayFeedKg)} kg
-          </div>
-        </div>
-
-        {/* Metric 3: Water Quality Index */}
-        <div className="bg-[#121214] border border-[#1F1F22] p-5 rounded-2xl">
-          <div className="text-[10px] text-[#71717A] uppercase tracking-widest mb-1">
-            {t('dashboard.avgDo')}
-          </div>
-          <div className="text-3xl font-light text-white">
-            {avgDO} <span className="text-sm font-normal text-[#71717A]">mg/L</span>
-          </div>
-          <div className="text-[10px] text-cyan-400 mt-2 font-mono">
-            {t('dashboard.avgTemp')}: {avgTemp}°C
-          </div>
-        </div>
-
-        {/* Metric 4: AI Farm Agent */}
-        <div className="bg-[#121214] border border-[#D4AF37]/30 p-5 rounded-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 p-1.5 px-2.5 text-[8px] bg-[#D4AF37] text-black font-bold uppercase tracking-widest rounded-br-lg">
-            AI AGENT
-          </div>
-          <div className="text-[10px] text-[#D4AF37] uppercase tracking-widest mb-1 mt-1">
-            {t('nav.aiAssistant')}
-          </div>
-          <div className="text-sm font-medium leading-relaxed text-white mt-2">
-            {stoppedPonds.length > 0
-              ? t('dashboard.criticalPondsAlert', { count: stoppedPonds.length })
-              : t('systemStatus')}
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Main Content Split: Digital Twin & Trends (2 Cols) + Operations & AI Insights (1 Col) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Left 2 Cols: Water Quality Trends & Digital Twin */}
-        <div className="lg:col-span-2 space-y-5">
-          {/* Water Quality Simulation Chart */}
-          <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl p-6 flex flex-col">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <div className="text-sm font-medium text-white">{t('dashboard.waterQualityTrend')}</div>
-                <p className="text-[11px] text-[#71717A]">{t('waterQuality.subtitle')}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="text-[10px] flex items-center text-[#A1A1AA]">
-                  <div className="w-2 h-2 bg-[#D4AF37] rounded-full mr-1.5 ml-1.5" /> {t('waterQuality.temp')}
-                </div>
-                <div className="text-[10px] flex items-center text-[#A1A1AA]">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full mr-1.5 ml-1.5" /> {t('waterQuality.do')}
-                </div>
-              </div>
-            </div>
-
-            {/* Custom Bar Visualization */}
-            <div className="flex items-end space-x-3 rtl:space-x-reverse px-2 pb-2 h-36">
-              {chartBuckets.map((item, idx) => (
-                <div key={idx} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
-                  <div className="w-full bg-[#18181B] rounded-t-sm h-full flex items-end overflow-hidden">
-                    <div
-                      className="w-full bg-blue-500/20 border-t border-blue-400 transition-all"
-                      style={{ height: `${item.height}%` }}
-                    />
+        <div className="lg:col-span-2 bg-[#121214] border border-[#1F1F22] rounded-2xl p-6">
+          <div className="flex justify-between gap-3 mb-5">
+            <div><div className="text-sm font-medium text-white">{t('dashboard.feedTrendTitle')}</div><div className="text-[10px] text-[#71717A]">{t(`dashboard.${timeFilter}`)}</div></div>
+            <div className="text-xs text-[#D4AF37]">{formatNumber(periodFeedKg)} kg</div>
+          </div>
+          {periodFeedKg <= 0 ? (
+            <div className="h-36 flex items-center justify-center text-xs text-[#71717A]">{t('noData')}</div>
+          ) : (
+            <div className="flex items-end gap-2 h-40">
+              {chartBuckets.map((bucket) => (
+                <div key={bucket.label} className="flex-1 h-full flex flex-col justify-end items-center gap-2 min-w-0">
+                  <div className="w-full flex-1 flex items-end bg-[#18181B] rounded-t-md overflow-hidden" title={`${formatNumber(bucket.feedKg)} kg`}>
+                    <div className="w-full bg-[#D4AF37]/60 border-t border-[#D4AF37]" style={{ height: `${bucket.height}%` }} />
                   </div>
-                  <span className="text-[9px] text-[#71717A] uppercase font-mono">{item.label}</span>
+                  <span className="text-[9px] text-[#71717A] truncate max-w-full">{bucket.label}</span>
                 </div>
               ))}
             </div>
-          </div>
-
-          {/* Digital Twin Ponds Grid */}
-          <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Fish className="w-4 h-4 text-[#D4AF37]" />
-                <h3 className="font-semibold text-xs text-white uppercase tracking-wider">
-                  {t('pond.digitalTwin')} ({formatNumber(ponds.length)} {t('unit')})
-                </h3>
-              </div>
-              <button
-                onClick={() => onSelectNav('ponds')}
-                className="text-xs text-[#D4AF37] hover:underline font-semibold cursor-pointer"
-              >
-                {t('all')} {t('nav.ponds')} →
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {ponds.slice(0, 6).map((pond) => {
-                const isStopped = pond.feedingStatus === 'STOPPED';
-                const isLowDO = pond.dissolvedOxygen < 4.0;
-
-                return (
-                  <div
-                    key={pond.id}
-                    onClick={() => onSelectNav('ponds')}
-                    className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
-                      isStopped
-                        ? 'bg-[#18181B] border-rose-500/40 hover:border-rose-500'
-                        : isLowDO
-                        ? 'bg-[#18181B] border-[#D4AF37]/40 hover:border-[#D4AF37]'
-                        : 'bg-[#18181B] border-[#27272A] hover:border-[#3F3F46]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono font-bold text-xs text-white">{pond.number}</span>
-                      <span
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
-                          isStopped
-                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-                            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                        }`}
-                      >
-                        {isStopped ? t('pond.stopped') : t('pond.active')}
-                      </span>
-                    </div>
-
-                    <p className="text-[11px] text-[#A1A1AA] font-medium truncate mb-2.5">
-                      {pond.name}
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-1 text-[10px] text-[#71717A] bg-[#121214] p-2 rounded-lg font-mono">
-                      <div>{t('pond.biomass')}: <strong className="text-white">{formatNumber(pond.biomassKg)}k</strong></div>
-                      <div>{t('pond.count')}: <strong className="text-white">{formatNumber(pond.fishCount)}</strong></div>
-                      <div>DO: <strong className={pond.dissolvedOxygen < 5 ? 'text-[#D4AF37]' : 'text-cyan-400'}>{pond.dissolvedOxygen}</strong></div>
-                      <div>Temp: <strong className="text-orange-300">{pond.waterTemperature}°C</strong></div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          )}
         </div>
 
-        {/* Right Col: Critical Notifications, AI Prediction & Quick Actions */}
-        <div className="space-y-5 flex flex-col">
-          {/* Critical Notifications */}
-          <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl p-5 flex flex-col flex-1">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-[#71717A] mb-4">
-              {t('dashboard.criticalAlerts')}
-            </h3>
-
-            <div className="space-y-3 flex-1">
-              <div className="flex items-start space-x-3 rtl:space-x-reverse pb-3 border-b border-[#1F1F22]">
-                <div className="w-2 h-2 rounded-full bg-rose-500 mt-1.5 shrink-0" />
-                <div>
-                  <div className="text-xs font-semibold text-white">DO &lt; 4.0 mg/L (Alert)</div>
-                  <div className="text-[10px] text-[#71717A]">Pond P-104</div>
-                </div>
-              </div>
-
-              <div className="flex items-start space-x-3 rtl:space-x-reverse pb-3 border-b border-[#1F1F22]">
-                <div className="w-2 h-2 rounded-full bg-[#D4AF37] mt-1.5 shrink-0" />
-                <div>
-                  <div className="text-xs font-semibold text-white">{t('biometrics.title')}</div>
-                  <div className="text-[10px] text-[#71717A]">Cycle check</div>
-                </div>
-              </div>
-
-              <div className="flex items-start space-x-3 rtl:space-x-reverse pb-3 border-b border-[#1F1F22]">
-                <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0" />
-                <div>
-                  <div className="text-xs font-semibold text-white">{t('warehouse.title')}</div>
-                  <div className="text-[10px] text-[#71717A]">Lot Gold 4mm</div>
-                </div>
-              </div>
-            </div>
-
-            {/* AI Prediction Widget */}
-            <div className="mt-4 bg-[#18181B] p-4 rounded-xl border border-[#27272A]">
-              <div className="text-[10px] uppercase tracking-widest text-[#71717A] mb-1.5 flex items-center gap-1.5">
-                <Sparkles className="w-3 h-3 text-[#D4AF37]" />
-                {t('dashboard.growthCurveTitle')}
-              </div>
-              <div className="text-xs leading-relaxed text-[#E4E4E7] italic">
-                {t('dashboard.financialSummary')}
-              </div>
-            </div>
+        <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl p-5">
+          <h3 className="text-sm font-medium text-white">{t('dashboard.monthlySales')}</h3>
+          <div className="mt-4 space-y-2">
+            {salesByCurrency.length === 0 ? <div className="text-xs text-[#71717A]">{t('noData')}</div> : salesByCurrency.map(([currency, amount]) => (
+              <div key={currency} className="flex justify-between gap-3 text-xs bg-[#18181B] rounded-lg p-3"><span className="text-[#A1A1AA]">{currency}</span><span className="text-white font-bold">{formatCurrency(amount, currency)}</span></div>
+            ))}
           </div>
+        </div>
+      </div>
 
-          {/* Quick Module Navigation */}
-          <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl p-5">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-[#71717A] mb-3">
-              {t('dashboard.quickActionTitle')}
-            </h3>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => onSelectNav('feeding')}
-                className="p-2.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#27272A] rounded-lg text-xs text-[#E4E4E7] font-medium transition-colors cursor-pointer flex items-center gap-2"
-              >
-                <Utensils className="w-3.5 h-3.5 text-[#D4AF37]" />
-                <span>{t('nav.feeding')}</span>
-              </button>
-              <button
-                onClick={() => onSelectNav('processing')}
-                className="p-2.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#27272A] rounded-lg text-xs text-[#E4E4E7] font-medium transition-colors cursor-pointer flex items-center gap-2"
-              >
-                <Package className="w-3.5 h-3.5 text-[#D4AF37]" />
-                <span>{t('nav.processing')}</span>
-              </button>
-              <button
-                onClick={() => onSelectNav('sales')}
-                className="p-2.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#27272A] rounded-lg text-xs text-[#E4E4E7] font-medium transition-colors cursor-pointer flex items-center gap-2"
-              >
-                <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                <span>{t('nav.sales')}</span>
-              </button>
-              <button
-                onClick={() => onSelectNav('aiAssistant')}
-                className="p-2.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#27272A] rounded-lg text-xs text-[#E4E4E7] font-medium transition-colors cursor-pointer flex items-center gap-2"
-              >
-                <Bot className="w-3.5 h-3.5 text-purple-400" />
-                <span>{t('nav.aiAssistant')}</span>
-              </button>
-            </div>
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl overflow-hidden">
+          <div className="p-4 border-b border-[#1F1F22] text-sm text-white font-medium">{t('nav.ponds')}</div>
+          <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-[#0C0C0E] text-[#71717A]"><tr><th className="p-3 text-start">{t('name')}</th><th className="p-3 text-start">DO</th><th className="p-3 text-start">{t('pond.waterTemp')}</th><th className="p-3 text-start">{t('status')}</th></tr></thead><tbody className="divide-y divide-[#1F1F22]">{ponds.slice(0, 12).map((pond) => <tr key={pond.id}><td className="p-3 text-white">{pond.name}</td><td className={`p-3 ${pond.dissolvedOxygen < 4 ? 'text-rose-400' : 'text-cyan-300'}`}>{formatNumber(pond.dissolvedOxygen)} mg/L</td><td className="p-3 text-[#D4D4D8]">{formatNumber(pond.waterTemperature)}°C</td><td className={`p-3 ${pond.feedingStatus === 'STOPPED' ? 'text-rose-400' : 'text-emerald-400'}`}>{pond.feedingStatus === 'STOPPED' ? t('pond.stopped') : t('pond.active')}</td></tr>)}</tbody></table></div>
+        </div>
+
+        <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl p-5">
+          <h3 className="text-sm text-white font-medium mb-3">{t('nav.reports')}</h3>
+          <div className="space-y-2">{auditLogs.length === 0 ? <div className="text-xs text-[#71717A]">{t('noData')}</div> : auditLogs.slice(0, 8).map((log) => <div key={log.id} className="bg-[#18181B] rounded-lg p-3"><div className="flex justify-between gap-3"><span className="text-xs text-white font-medium">{log.action} · {log.entity}</span><span className="text-[9px] text-[#71717A]">{formatDate(log.timestamp)}</span></div><p className="text-[10px] text-[#A1A1AA] mt-1 line-clamp-2">{log.details}</p></div>)}</div>
         </div>
       </div>
     </div>
