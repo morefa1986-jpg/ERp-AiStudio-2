@@ -9,6 +9,8 @@ export interface LocalMediaAsset {
 
 export interface ImageEditOptions {
   rotationDeg?: 0 | 90 | 180 | 270;
+  /** Backward-compatible alias used by the social media editor UI. */
+  rotation?: 0 | 90 | 180 | 270;
   brightness?: number;
   contrast?: number;
   quality?: number;
@@ -123,7 +125,7 @@ export async function createEditedImageVersion(
 ): Promise<LocalMediaAsset> {
   if (!asset.mimeType.startsWith('image/')) throw new Error('IMAGE_ASSET_REQUIRED');
   const image = await loadImage(asset.blob);
-  const rotation = options.rotationDeg || 0;
+  const rotation = options.rotationDeg ?? options.rotation ?? 0;
   const swapDimensions = rotation === 90 || rotation === 270;
   const canvas = document.createElement('canvas');
   canvas.width = swapDimensions ? image.naturalHeight : image.naturalWidth;
