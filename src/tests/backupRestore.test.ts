@@ -1,27 +1,45 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { BACKUP_SCHEMA_VERSION, checksumBackupData, validateBackupDocument } from '../utils/backupEngine';
 
-describe('Backup Snapshot & Disaster Recovery Verification', () => {
-  const validSnapshotPayload = {
-    version: '6.0.4 Enterprise',
-    exportedAt: new Date().toISOString(),
-    halls: [{ id: 'hall_1', name: 'سالن ۱' }],
-    ponds: [{ id: 'P-101', name: 'استخر ۱۰۱', fishCount: 1200, biomassKg: 7200 }],
-    species: [{ id: 'sp_beluga', nameLatin: 'Huso huso' }],
+function makeData() {
+  return {
+    halls: [{ id: 'hall_1', number: '1', name: 'Hall 1' }],
+    species: [{ id: 'sp_1', scientificName: 'Huso huso' }],
+    ponds: [{ id: 'pond_1', hallId: 'hall_1', speciesId: 'sp_1', fishCount: 100, biomassKg: 400 }],
+    inventory: [{ id: 'inv_1', sku: 'FEED-1', quantity: 100 }],
+    accounts: [{ id: 'acc_1' }],
+    journals: [],
+    feedingRecords: [], biometricSessions: [], waterLogs: [], mortalityRecords: [], treatments: [], transfers: [],
+    broodstock: [], fertilizations: [], incubators: [], larvae: [], nurseryTanks: [], inventoryTxs: [], labSamples: [],
+    processingBatches: [], coldStorage: [], customers: [], proformas: [], employees: [], attendance: [], payrolls: [],
+    equipment: [], socialPosts: [], auditLogs: [],
   };
+}
 
-  it('validates required top-level database collections before applying restore', () => {
-    const jsonStr = JSON.stringify(validSnapshotPayload);
-    const parsed = JSON.parse(jsonStr);
-
-    const isValid = Boolean(parsed.ponds && parsed.halls && parsed.version);
-    expect(isValid).toBe(true);
+describe('Backup integrity engine', () => {
+  it('accepts a versioned snapshot with an intact checksum and linked pond references', () => {
+    const data = makeData();
+    const document = { schemaVersion: BACKUP_SCHEMA_VERSION, checksum: checksumBackupData(data), data };
+    expect(validateBackupDocument(document).ok).toBe(true);
   });
 
-  it('rejects corrupt or incomplete backup files', () => {
-    const invalidJsonStr = JSON.stringify({ randomKey: 123 });
-    const parsed = JSON.parse(invalidJsonStr);
+  it('rejects tampered data after checksum creation', () => {
+    const data = makeData();
+    const document = { schemaVersion: BACKUP_SCHEMA_VERSION, checksum: checksumBackupData(data), data };
+    data.ponds[0].fishCount = 999;
+    expect(validateBackupDocument(document)).toMatchObject({ ok: false, error: 'BACKUP_CHECKSUM_MISMATCH' });
+  });
 
-    const isValid = Boolean(parsed.ponds && parsed.halls);
-    expect(isValid).toBe(false);
+  it('rejects missing core collections, negative stock and broken pond references', () => {
+    const missing = { schemaVersion: BACKUP_SCHEMA_VERSION, checksum: 'x', data: { ponds: [] } };
+    expect(validateBackupDocument(missing).ok).toBe(false);
+
+    const badStock = makeData();
+    badStock.inventory[0].quantity = -1;
+    expect(validateBackupDocument({ schemaVersion: BACKUP_SCHEMA_VERSION, checksum: checksumBackupData(badStock), data: badStock }).ok).toBe(false);
+
+    const brokenRef = makeData();
+    brokenRef.ponds[0].hallId = 'missing_hall';
+    expect(validateBackupDocument({ schemaVersion: BACKUP_SCHEMA_VERSION, checksum: checksumBackupData(brokenRef), data: brokenRef }).ok).toBe(false);
   });
 });
