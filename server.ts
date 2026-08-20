@@ -1,27 +1,21 @@
-import express from 'express';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
-import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import express, { NextFunction, Request, Response } from 'express';
+import path from 'path';
+import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
-const PORT = 3000;
-
-app.use(express.json({ limit: '10mb' }));
-
-// Auth & Security Storage (In-memory + Salted SHA-256)
+const PORT = Number(process.env.PORT || 3000);
 const PASSWORD_SALT = 'fathi_aqua_salt_2026';
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const AI_WINDOW_MS = 60_000;
+const AI_REQUESTS_PER_WINDOW = 30;
 
-function hashPasswordServer(plain: string): string {
-  return crypto.createHash('sha256').update(plain + PASSWORD_SALT).digest('hex');
-}
+app.disable('x-powered-by');
+app.use(express.json({ limit: '2mb' }));
 
 interface ServerUser {
   id: string;
@@ -36,81 +30,6 @@ interface ServerUser {
   createdAt: string;
 }
 
-// Initial Authoritative Users
-const USERS_DB: Map<string, ServerUser> = new Map([
-  [
-    'admin',
-    {
-      id: 'usr_admin',
-      username: 'admin',
-      fullName: 'مهندس سعید فتحی (Super Admin)',
-      email: 'admin@fathi-aqua.com',
-      role: 'Super Admin',
-      passwordHash: hashPasswordServer('admin123'),
-      isActive: true,
-      preferredLanguage: 'fa',
-      lastLoginAt: '2026-08-19T07:00:00Z',
-      createdAt: '2024-01-01',
-    },
-  ],
-  [
-    'vet',
-    {
-      id: 'usr_vet',
-      username: 'vet',
-      fullName: 'دکتر مریم علوی (سرپرست دامپزشکی و بهداشت)',
-      email: 'vet@fathi-aqua.com',
-      role: 'Veterinarian',
-      passwordHash: hashPasswordServer('vet123'),
-      isActive: true,
-      preferredLanguage: 'fa',
-      createdAt: '2024-02-15',
-    },
-  ],
-  [
-    'hatchery',
-    {
-      id: 'usr_hatchery',
-      username: 'hatchery',
-      fullName: 'مهندس رضا حسینی (مدیر تکثیر و ژنتیک)',
-      email: 'hatchery@fathi-aqua.com',
-      role: 'Hatchery Manager',
-      passwordHash: hashPasswordServer('hatchery123'),
-      isActive: true,
-      preferredLanguage: 'fa',
-      createdAt: '2024-03-01',
-    },
-  ],
-  [
-    'sales',
-    {
-      id: 'usr_sales',
-      username: 'sales',
-      fullName: 'آقای شمس (مدیر فروش و صادرات خاویار)',
-      email: 'sales@fathi-aqua.com',
-      role: 'Sales Manager',
-      passwordHash: hashPasswordServer('sales123'),
-      isActive: true,
-      preferredLanguage: 'en',
-      createdAt: '2024-04-10',
-    },
-  ],
-  [
-    'accountant',
-    {
-      id: 'usr_accountant',
-      username: 'accountant',
-      fullName: 'خانم مهندس صابری (حسابدار ارشد)',
-      email: 'accounting@fathi-aqua.com',
-      role: 'Accountant',
-      passwordHash: hashPasswordServer('acc123'),
-      isActive: true,
-      preferredLanguage: 'fa',
-      createdAt: '2024-05-01',
-    },
-  ],
-]);
-
 interface ActiveSession {
   token: string;
   userId: string;
@@ -120,510 +39,342 @@ interface ActiveSession {
   expiresAt: number;
 }
 
-const SESSIONS: Map<string, ActiveSession> = new Map();
+interface AuthenticatedRequest extends Request {
+  session?: ActiveSession;
+  user?: ServerUser;
+}
+
+// Compatibility hashes for the current local deployment accounts. No plaintext passwords are stored in source.
+const USERS_DB = new Map<string, ServerUser>([
+  ['admin', {
+    id: 'usr_admin', username: 'admin', fullName: 'مهندس سعید فتحی (Super Admin)', email: 'admin@fathi-aqua.com', role: 'Super Admin',
+    passwordHash: '6bda9e007f9f2b46bac9c60ed76969764f8b55d0f2d9955f8ba06a1c422700c6', isActive: true, preferredLanguage: 'fa',
+    lastLoginAt: '2026-08-19T07:00:00Z', createdAt: '2024-01-01',
+  }],
+  ['vet', {
+    id: 'usr_vet', username: 'vet', fullName: 'دکتر مریم علوی (سرپرست دامپزشکی و بهداشت)', email: 'vet@fathi-aqua.com', role: 'Veterinarian',
+    passwordHash: '9fad5faa99c6ed98b343df7f9a142e7ee3699a1473baa0163a1836ec4244e46b', isActive: true, preferredLanguage: 'fa', createdAt: '2024-02-15',
+  }],
+  ['hatchery', {
+    id: 'usr_hatchery', username: 'hatchery', fullName: 'مهندس رضا حسینی (مدیر تکثیر و ژنتیک)', email: 'hatchery@fathi-aqua.com', role: 'Hatchery Manager',
+    passwordHash: '6b9e7b0dda7d0aba361da563aa59564986aa27a60466d857b9aeda89ce61283d', isActive: true, preferredLanguage: 'fa', createdAt: '2024-03-01',
+  }],
+  ['sales', {
+    id: 'usr_sales', username: 'sales', fullName: 'آقای شمس (مدیر فروش و صادرات خاویار)', email: 'sales@fathi-aqua.com', role: 'Sales Manager',
+    passwordHash: '365e4423b120eb78a6a162710903b03ac7fd7aecfe33db6c938954c9d80667ab', isActive: true, preferredLanguage: 'en', createdAt: '2024-04-10',
+  }],
+  ['accountant', {
+    id: 'usr_accountant', username: 'accountant', fullName: 'خانم مهندس صابری (حسابدار ارشد)', email: 'accounting@fathi-aqua.com', role: 'Accountant',
+    passwordHash: '1ba376b43c9f34c8edfd83a03b57b7b35680919d870132bcf9c2baaaa2c12381', isActive: true, preferredLanguage: 'fa', createdAt: '2024-05-01',
+  }],
+]);
+
+const SESSIONS = new Map<string, ActiveSession>();
+const aiRateLimits = new Map<string, { windowStart: number; count: number }>();
+
+function hashPasswordServer(plain: string): string {
+  return crypto.createHash('sha256').update(plain + PASSWORD_SALT).digest('hex');
+}
+
+function safeHashEquals(actual: string, expected: string): boolean {
+  if (!/^[a-f0-9]{64}$/i.test(actual) || !/^[a-f0-9]{64}$/i.test(expected)) return false;
+  return crypto.timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expected, 'hex'));
+}
 
 function sanitizeUser(user: ServerUser) {
-  const { passwordHash, ...safeUser } = user;
+  const { passwordHash: _passwordHash, ...safeUser } = user;
   return safeUser;
 }
 
-// -------------------------------------------------------------
-// Authentication Endpoints (Phase 1 & Phase 2)
-// -------------------------------------------------------------
+function bearerToken(req: Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return null;
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+function resolveSession(token: string | null): { session: ActiveSession; user: ServerUser } | null {
+  if (!token) return null;
+  const session = SESSIONS.get(token);
+  if (!session) return null;
+  if (Date.now() > session.expiresAt) {
+    SESSIONS.delete(token);
+    return null;
+  }
+  const user = USERS_DB.get(session.username);
+  if (!user?.isActive) {
+    SESSIONS.delete(token);
+    return null;
+  }
+  return { session, user };
+}
+
+function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const resolved = resolveSession(bearerToken(req));
+  if (!resolved) return res.status(401).json({ success: false, error: 'AUTH_REQUIRED' });
+  req.session = resolved.session;
+  req.user = resolved.user;
+  next();
+}
+
+function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!req.user || !['Super Admin', 'Farm Owner'].includes(req.user.role)) {
+    return res.status(403).json({ success: false, error: 'ADMIN_REQUIRED' });
+  }
+  next();
+}
+
+function aiRateLimit(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const key = req.session?.userId || req.ip || 'unknown';
+  const now = Date.now();
+  const current = aiRateLimits.get(key);
+  if (!current || now - current.windowStart >= AI_WINDOW_MS) {
+    aiRateLimits.set(key, { windowStart: now, count: 1 });
+    return next();
+  }
+  if (current.count >= AI_REQUESTS_PER_WINDOW) {
+    return res.status(429).json({ success: false, error: 'AI_RATE_LIMITED' });
+  }
+  current.count += 1;
+  next();
+}
+
+function isSupportedLanguage(value: unknown): value is string {
+  return typeof value === 'string' && ['fa', 'en', 'de', 'fr', 'es', 'ru', 'ar'].includes(value);
+}
 
 app.post('/api/auth/login', (req, res) => {
-  const { username, password, language } = req.body || {};
-  if (!username || !password) {
-    return res.status(400).json({ success: false, error: 'نام کاربری و کلمه عبور الزامی است.' });
-  }
+  const username = typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const language = req.body?.language;
+  if (!username || !password) return res.status(400).json({ success: false, error: 'USERNAME_PASSWORD_REQUIRED' });
 
-  const user = USERS_DB.get(username.trim().toLowerCase());
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'نام کاربری یا کلمه عبور نادرست است.' });
-  }
+  const user = USERS_DB.get(username);
+  if (!user || !user.isActive) return res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS' });
+  if (!safeHashEquals(hashPasswordServer(password), user.passwordHash)) return res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS' });
 
-  if (!user.isActive) {
-    return res.status(403).json({ success: false, error: 'حساب کاربری غیرفعال است. با مدیر سیستم تماس بگیرید.' });
-  }
-
-  const incomingHash = hashPasswordServer(password);
-  if (incomingHash !== user.passwordHash) {
-    return res.status(401).json({ success: false, error: 'نام کاربری یا کلمه عبور نادرست است.' });
-  }
-
-  // Generate secure session token
-  const token = 'fathi_sec_' + crypto.randomBytes(32).toString('hex');
+  const token = `fathi_sec_${crypto.randomBytes(32).toString('hex')}`;
   const now = Date.now();
-  const session: ActiveSession = {
-    token,
-    userId: user.id,
-    username: user.username,
-    role: user.role,
-    createdAt: now,
-    expiresAt: now + 7 * 24 * 60 * 60 * 1000, // 7 days
-  };
-
+  const session: ActiveSession = { token, userId: user.id, username: user.username, role: user.role, createdAt: now, expiresAt: now + SESSION_TTL_MS };
   SESSIONS.set(token, session);
   user.lastLoginAt = new Date().toISOString();
-  if (language) user.preferredLanguage = language;
+  if (isSupportedLanguage(language)) user.preferredLanguage = language;
 
-  return res.json({
-    success: true,
-    token,
-    user: sanitizeUser(user),
-  });
+  return res.json({ success: true, token, user: sanitizeUser(user) });
 });
 
-app.post('/api/auth/logout', (req, res) => {
-  const authHeader = req.headers.authorization;
-  const token = (authHeader && authHeader.replace(/^Bearer\s+/i, '')) || req.body?.token;
-  if (token && SESSIONS.has(token)) {
-    SESSIONS.delete(token);
-  }
+app.post('/api/auth/logout', requireAuth, (req: AuthenticatedRequest, res) => {
+  if (req.session) SESSIONS.delete(req.session.token);
   return res.json({ success: true });
 });
 
-app.get('/api/auth/session', (req, res) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.replace(/^Bearer\s+/i, '');
-  if (!token || !SESSIONS.has(token)) {
-    return res.status(401).json({ success: false, error: 'Session invalid or expired' });
-  }
-
-  const session = SESSIONS.get(token)!;
-  if (Date.now() > session.expiresAt) {
-    SESSIONS.delete(token);
-    return res.status(401).json({ success: false, error: 'Session expired' });
-  }
-
-  const user = USERS_DB.get(session.username);
-  if (!user || !user.isActive) {
-    SESSIONS.delete(token);
-    return res.status(401).json({ success: false, error: 'User inactive or not found' });
-  }
-
-  return res.json({
-    success: true,
-    user: sanitizeUser(user),
-  });
+app.get('/api/auth/session', requireAuth, (req: AuthenticatedRequest, res) => {
+  return res.json({ success: true, user: sanitizeUser(req.user!) });
 });
 
-app.get('/api/auth/users', (req, res) => {
-  const list = Array.from(USERS_DB.values()).map(sanitizeUser);
-  return res.json({ success: true, users: list });
+app.get('/api/auth/users', requireAuth, requireAdmin, (_req, res) => {
+  return res.json({ success: true, users: Array.from(USERS_DB.values()).map(sanitizeUser) });
 });
 
-// Lazy initialization for Gemini AI SDK
 let aiClient: GoogleGenAI | null = null;
 function getAIClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) return null;
-  if (!aiClient) {
-    aiClient = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
-  }
+  if (!aiClient) aiClient = new GoogleGenAI({ apiKey });
   return aiClient;
 }
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
+function configuredAiModel(): string {
+  return process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
+}
+
+function classifyAiError(error: unknown): 'AI_QUOTA_EXHAUSTED' | 'AI_BILLING_REQUIRED' | 'AI_TEMPORARILY_UNAVAILABLE' {
+  const text = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (text.includes('quota') || text.includes('429') || text.includes('rate')) return 'AI_QUOTA_EXHAUSTED';
+  if (text.includes('billing') || text.includes('payment') || text.includes('402') || text.includes('403')) return 'AI_BILLING_REQUIRED';
+  return 'AI_TEMPORARILY_UNAVAILABLE';
+}
+
+function sanitizeFarmContext(raw: any) {
+  const ponds = Array.isArray(raw?.ponds) ? raw.ponds.slice(0, 200).map((pond: any) => ({
+    id: String(pond?.id || ''),
+    name: String(pond?.name || ''),
+    feedingStatus: pond?.feedingStatus === 'STOPPED' ? 'STOPPED' : 'ACTIVE',
+    fishCount: Number.isFinite(Number(pond?.fishCount)) ? Number(pond.fishCount) : null,
+    biomassKg: Number.isFinite(Number(pond?.biomassKg)) ? Number(pond.biomassKg) : null,
+    fcr: Number.isFinite(Number(pond?.fcr)) ? Number(pond.fcr) : null,
+    dissolvedOxygen: Number.isFinite(Number(pond?.dissolvedOxygen)) ? Number(pond.dissolvedOxygen) : null,
+    waterTemperature: Number.isFinite(Number(pond?.waterTemperature)) ? Number(pond.waterTemperature) : null,
+    ph: Number.isFinite(Number(pond?.ph)) ? Number(pond.ph) : null,
+  })) : [];
+  return { ponds };
+}
+
+function offlineFarmAnswer(query: string, language: string, farmContext: any): string {
+  const ponds = farmContext.ponds as any[];
+  const stopped = ponds.filter((pond) => pond.feedingStatus === 'STOPPED');
+  const lowOxygen = ponds.filter((pond) => typeof pond.dissolvedOxygen === 'number' && pond.dissolvedOxygen < 4);
+  const biomass = ponds.reduce((sum, pond) => sum + (typeof pond.biomassKg === 'number' ? pond.biomassKg : 0), 0);
+  const fishCount = ponds.reduce((sum, pond) => sum + (typeof pond.fishCount === 'number' ? pond.fishCount : 0), 0);
+  const q = query.toLowerCase();
+
+  if (language === 'fa') {
+    if (q.includes('اکسیژن') || q.includes('oxygen') || q.includes(' do')) {
+      return lowOxygen.length
+        ? `⚠️ ${lowOxygen.length} استخر بر اساس داده‌های ارسالی اکسیژن کمتر از ۴ mg/L دارند. تغذیه این استخرها باید متوقف بماند.`
+        : 'بر اساس داده‌های ارسالی، هیچ استخر با اکسیژن کمتر از ۴ mg/L مشاهده نشد.';
+    }
+    return `حالت تحلیل محلی فعال است. داده‌های دریافت‌شده: ${ponds.length} استخر، ${fishCount.toLocaleString()} قطعه ماهی، ${biomass.toLocaleString()} کیلوگرم بیومس و ${stopped.length} استخر با تغذیه متوقف.`;
+  }
+
+  return `Local analysis mode. Provided data contains ${ponds.length} ponds, ${fishCount.toLocaleString()} fish, ${biomass.toLocaleString()} kg biomass and ${stopped.length} stopped-feeding ponds.`;
+}
+
+app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    service: 'Fathi Aqua Super ERP Enterprise v6.0',
-    version: '6.0.4',
-    geminiAvailable: Boolean(process.env.GEMINI_API_KEY),
+    service: 'Fathi Aqua Super ERP Enterprise',
+    version: '6.0.5',
+    ai: getAIClient() ? 'configured_optional' : 'not_configured_optional',
   });
 });
 
-// -------------------------------------------------------------
-// AI Farm Assistant Endpoint
-// -------------------------------------------------------------
-const handleAiAssistant = async (req: express.Request, res: express.Response) => {
+const handleAiAssistant = async (req: AuthenticatedRequest, res: Response) => {
+  const userQuery = typeof req.body?.prompt === 'string' ? req.body.prompt : typeof req.body?.query === 'string' ? req.body.query : '';
+  const language = isSupportedLanguage(req.body?.language) ? req.body.language : 'fa';
+  if (!userQuery.trim()) return res.status(400).json({ success: false, error: 'QUERY_REQUIRED' });
+
+  const farmContext = sanitizeFarmContext(req.body?.farmContext);
+  const ai = getAIClient();
+  if (!ai) {
+    return res.json({ success: true, answer: offlineFarmAnswer(userQuery, language, farmContext), source: 'local-deterministic-engine', aiStatus: 'NOT_CONFIGURED' });
+  }
+
   try {
-    const { query, prompt: promptInput, language = 'fa', farmContext } = req.body || {};
-    const userQuery = promptInput || query || '';
+    const model = configuredAiModel();
+    const response = await ai.models.generateContent({
+      model,
+      contents: `Verified farm context supplied by the ERP:\n${JSON.stringify(farmContext)}\n\nUser question (${language}): ${userQuery}`,
+      config: {
+        systemInstruction: 'You are an aquaculture ERP assistant. Use only the supplied farm context for farm-specific facts. Never invent telemetry, stock, fish counts, biomass, mortality, FCR, treatment or financial values. If data is missing, explicitly state that it is unavailable.',
+        temperature: 0.2,
+      },
+    });
+    return res.json({ success: true, answer: response.text || offlineFarmAnswer(userQuery, language, farmContext), source: model, aiStatus: 'AVAILABLE' });
+  } catch (error) {
+    const aiStatus = classifyAiError(error);
+    return res.json({ success: true, answer: offlineFarmAnswer(userQuery, language, farmContext), source: 'local-deterministic-engine', aiStatus });
+  }
+};
 
-    if (!userQuery.trim()) {
-      return res.status(400).json({ success: false, error: 'Query is required' });
-    }
+app.post('/api/ai/assistant', requireAuth, aiRateLimit, handleAiAssistant);
+app.post('/api/ai/ask', requireAuth, aiRateLimit, handleAiAssistant);
 
-    const ai = getAIClient();
+const NEVER_TRANSLATE = /(password|passcode|token|secret|api[_-]?key|credential|private[_-]?key|salary|payroll|bank|iban|account\s*number)/i;
 
-    if (ai) {
-      const systemInstruction = `You are the Expert AI Aquaculture & Farm Intelligence Assistant for 'Fathi Sturgeon Farm' (مزرعه پرورش و فرآوری ماهیان خاویاری فتحی).
-You provide precise, biological, mathematical, and operational advice for sturgeon species (Huso huso / Beluga, Acipenser persicus, Acipenser gueldenstaedtii, Acipenser ruthenus, Acipenser baerii).
-Your responses should be practical, safety-oriented (especially concerning Dissolved Oxygen thresholds < 4.0 mg/L and Feeding Safety), and formatted in the user's requested language (${language}).
-Always reference factual data provided in the farm context.
-Output well-structured answers with markdown, bullet points, and actionable steps.`;
+const handleDynamicTranslation = async (req: AuthenticatedRequest, res: Response) => {
+  const sourceLocale = isSupportedLanguage(req.body?.sourceLocale) ? req.body.sourceLocale : 'fa';
+  const targetLocale = isSupportedLanguage(req.body?.targetLocale) ? req.body.targetLocale : 'en';
+  const rawItems = Array.isArray(req.body?.items) ? req.body.items : typeof req.body?.text === 'string' ? [{ id: 'single_1', text: req.body.text, sourceLocale }] : [];
+  const requestItems = rawItems.slice(0, 25).map((item: any, index: number) => ({ id: String(item?.id || `item_${index}`), text: String(item?.text || '').slice(0, 4000), sourceLocale: isSupportedLanguage(item?.sourceLocale) ? item.sourceLocale : sourceLocale }));
+  if (!requestItems.length || requestItems.every((item) => !item.text.trim())) return res.status(400).json({ success: false, error: 'NO_TEXT' });
+  if (requestItems.some((item) => NEVER_TRANSLATE.test(item.text))) return res.status(400).json({ success: false, error: 'SENSITIVE_CONTENT_BLOCKED' });
 
-      const prompt = `Current Farm Telemetry & Context:
-${JSON.stringify(farmContext || {}, null, 2)}
+  if (sourceLocale === targetLocale) {
+    return res.json({ success: true, translations: requestItems.map((item) => ({ id: item.id, translatedText: item.text, sourceLocale: item.sourceLocale, targetLocale, fromCache: true })) });
+  }
 
-User Question (${language}):
-${userQuery}`;
+  const ai = getAIClient();
+  if (!ai) {
+    return res.json({
+      success: true,
+      translations: requestItems.map((item) => ({ id: item.id, translatedText: item.text, sourceLocale: item.sourceLocale, targetLocale, isOfflineFallback: true })),
+      source: 'original-text-fallback',
+      aiStatus: 'NOT_CONFIGURED',
+    });
+  }
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: 0.3,
-        },
-      });
-
-      return res.json({
-        success: true,
-        answer: response.text || 'No response generated.',
-        source: 'gemini-2.5-flash',
-      });
-    } else {
-      // Deterministic Offline Rule-Based Advisor (Strictly references actual provided farm context)
-      const q = (userQuery || '').toLowerCase();
-      const ponds = farmContext?.ponds || [];
-      const stoppedPonds = ponds.filter((p: any) => p.feedingStatus === 'STOPPED');
-      const lowOxygenPonds = ponds.filter((p: any) => p.dissolvedOxygen < 4.0 || p.dissolvedOxygen < 5.0);
-      const totalBiomass = ponds.reduce((sum: number, p: any) => sum + (p.biomassKg || 0), 0);
-      const totalFish = ponds.reduce((sum: number, p: any) => sum + (p.fishCount || 0), 0);
-
-      let answer = '';
-
-      if (q.includes('fcr') || q.includes('ضریب تبدیل') || q.includes('feed conversion')) {
-        const sortedFcr = [...ponds].sort((a: any, b: any) => (b.fcr || 0) - (a.fcr || 0));
-        const highest = sortedFcr[0];
-        answer = language === 'fa'
-          ? `📊 **تحلیل FCR استخرهای مزرعه فتحی:**
-${highest ? `- استخر **${highest.name}** با FCR معادل **${highest.fcr}** نیازمند پایش جیره و دمای ورودی است.` : '- داده‌های استخر در دسترس نیست.'}
-- میانگین کل FCR مزرعه بر اساس داده‌های ثبت‌شده محاسبه می‌شود.
-- **توصیه:** بررسی یکنواختی هوادهی و پایش دقیق جدول تغذیه.`
-          : `📊 **FCR Farm Analysis:**
-${highest ? `- Pond **${highest.name}** reports an FCR of **${highest.fcr}**.` : '- Pond data is being gathered.'}
-- Recommended Action: Maintain optimum dissolved oxygen above 6.0 mg/L and follow calibrated feed profiles.`;
-      } else if (q.includes('oxygen') || q.includes('اکسیژن') || q.includes('do') || q.includes('خطر')) {
-        answer = language === 'fa'
-          ? `⚠️ **وضعیت اکسیژن و ایمنی زیستی استخرها:**
-${lowOxygenPonds.length > 0 ? lowOxygenPonds.map((p: any) => `- استخر **${p.name}**: اکسیژن ${p.dissolvedOxygen} mg/L (${p.feedingStatus === 'STOPPED' ? 'تغذیه متوقف' : 'هشدار'})`).join('\n') : '- تمامی استخرها در محدوده اکسیژن مجاز قرار دارند.'}
-- **قانون ایمنی اکید:** در صورت افت DO به زیر ۴.۰ mg/L، وضعیت غذادهی استخر بلافاصله به **STOPPED** تغییر می‌یابد.`
-          : `⚠️ **Dissolved Oxygen & Biosafety Status:**
-${lowOxygenPonds.length > 0 ? lowOxygenPonds.map((p: any) => `- Pond **${p.name}**: DO ${p.dissolvedOxygen} mg/L (${p.feedingStatus})`).join('\n') : '- All ponds maintain safe oxygen levels above threshold.'}
-- Safety protocol: Feeding is strictly prohibited whenever DO falls below 4.0 mg/L.`;
-      } else if (q.includes('feed') || q.includes('خوراک') || q.includes('تغذیه')) {
-        answer = language === 'fa'
-          ? `🐟 **وضعیت تغذیه و بیومس مزرعه:**
-- کل بیومس فعال: **${totalBiomass.toLocaleString()} کیلوگرم**
-- تعداد کل ماهیان: **${totalFish.toLocaleString()} قطعه**
-- استخرهای متوقف شده: **${stoppedPonds.length} استخر**`
-          : `🐟 **Feeding & Biomass Summary:**
-- Total Live Biomass: **${totalBiomass.toLocaleString()} kg**
-- Total Fish Count: **${totalFish.toLocaleString()} fish**
-- Stopped Feeding Ponds: **${stoppedPonds.length} ponds**`;
-      } else {
-        answer = language === 'fa'
-          ? `🤖 **سامانه هوشمند مزرعه خاویاری فتحی (حالت آفلاین امن):**
-- پایش لحظه‌ای استخرها، کیفیت آب و بیومس فعال است.
-- تعداد استخرهای ثبتی: **${ponds.length} استخر**
-- وضعیت قطع اضطراری خوراک: **${stoppedPonds.length} استخر**`
-          : `🤖 **Fathi Caviar Farm Intelligence Assistant (Secure Offline Mode):**
-- Real-time monitoring of ponds, water quality, and live biomass active.
-- Monitored Ponds: **${ponds.length} ponds**
-- Emergency Stopped Ponds: **${stoppedPonds.length} ponds**`;
-      }
-
-      return res.json({
-        success: true,
-        answer,
-        source: 'enterprise-deterministic-offline-engine',
-      });
-    }
-  } catch (error: any) {
-    console.error('Error in AI Assistant:', error);
-    res.status(500).json({
-      success: false,
-      error: error?.message || 'Error processing AI request',
+  try {
+    const model = configuredAiModel();
+    const response = await ai.models.generateContent({
+      model,
+      contents: JSON.stringify({ sourceLocale, targetLocale, items: requestItems }),
+      config: {
+        systemInstruction: `Translate user-entered aquaculture ERP text from ${sourceLocale} to ${targetLocale}. Preserve IDs, scientific names, numeric values and units. Return JSON only with {"translations":[{"id":"...","translatedText":"...","sourceLocale":"...","targetLocale":"..."}]}. Do not add facts.`,
+        temperature: 0,
+        responseMimeType: 'application/json',
+      },
+    });
+    const parsed = JSON.parse(response.text || '{}');
+    if (!Array.isArray(parsed.translations)) throw new Error('INVALID_AI_RESPONSE');
+    return res.json({ success: true, translations: parsed.translations, source: model, aiStatus: 'AVAILABLE' });
+  } catch (error) {
+    return res.json({
+      success: true,
+      translations: requestItems.map((item) => ({ id: item.id, translatedText: item.text, sourceLocale: item.sourceLocale, targetLocale, isOfflineFallback: true })),
+      source: 'original-text-fallback',
+      aiStatus: classifyAiError(error),
     });
   }
 };
 
-app.post('/api/ai/assistant', handleAiAssistant);
-app.post('/api/ai/ask', handleAiAssistant);
+app.post('/api/ai/translate-dynamic', requireAuth, aiRateLimit, handleDynamicTranslation);
 
-// -------------------------------------------------------------
-// AI Dynamic Content Translation Endpoint
-// -------------------------------------------------------------
-const handleDynamicTranslation = async (req: express.Request, res: express.Response) => {
+const handleAiMarketing = async (req: AuthenticatedRequest, res: Response) => {
+  const productType = typeof req.body?.productType === 'string' ? req.body.productType.slice(0, 200) : 'Caviar';
+  const language = isSupportedLanguage(req.body?.language) ? req.body.language : 'en';
+  const ai = getAIClient();
+
+  if (!ai) {
+    return res.json({ success: false, error: 'AI_NOT_CONFIGURED', aiStatus: 'NOT_CONFIGURED' });
+  }
+
   try {
-    const { items, text, sourceLocale = 'fa', targetLocale = 'en' } = req.body || {};
-    
-    // Normalize input to batch array
-    const requestItems: Array<{ id: string; text: string; sourceLocale?: string }> = items || (text ? [{ id: 'single_1', text, sourceLocale }] : []);
-
-    if (requestItems.length === 0) {
-      return res.status(400).json({ success: false, error: 'No text provided for translation' });
-    }
-
-    // Security check: Never translate passwords or secrets
-    const hasSecretKeywords = requestItems.some((item) => {
-      const t = (item.text || '').toLowerCase();
-      return t.includes('password') || t.includes('token') || t.includes('secret') || t.includes('apikey');
+    const model = configuredAiModel();
+    const response = await ai.models.generateContent({
+      model,
+      contents: `Product: ${productType}\nLanguage: ${language}\nPlatform: ${String(req.body?.platform || '')}\nTarget market: ${String(req.body?.targetMarket || '')}`,
+      config: {
+        systemInstruction: 'Generate concise premium marketing copy. Do not invent certifications, permits, awards, traceability claims, health claims or product facts not provided by the user.',
+        temperature: 0.6,
+      },
     });
-
-    if (hasSecretKeywords) {
-      return res.status(400).json({ success: false, error: 'Security violation: confidential fields cannot be sent to translation' });
-    }
-
-    // If source and target are the same, return as-is immediately
-    if (sourceLocale === targetLocale) {
-      return res.json({
-        success: true,
-        translations: requestItems.map((item) => ({
-          id: item.id,
-          translatedText: item.text,
-          sourceLocale,
-          targetLocale,
-          fromCache: true,
-        })),
-      });
-    }
-
-    const ai = getAIClient();
-
-    if (ai) {
-      const systemInstruction = `You are a professional translation engine for an industrial sturgeon aquaculture ERP (Fathi Sturgeon Farm).
-Translate the provided user-entered dynamic content from ${sourceLocale} to ${targetLocale}.
-
-Strict Translation Rules:
-1. Preserve the exact operational meaning, nuance, and tone.
-2. Do NOT add commentary, explanations, preambles, or conversational filler.
-3. Do NOT summarize or omit any details.
-4. Do NOT translate or modify IDs, chip numbers, batch codes, pond codes (e.g. P-101, COLD-A-04), or invoice numbers.
-5. Do NOT translate scientific Latin species names (e.g., Huso huso, Acipenser persicus, Acipenser gueldenstaedtii, Acipenser ruthenus, Acipenser baerii, Acipenser stellatus).
-6. Preserve exact numeric values, dates, and measurement units (e.g. mg/L, °C, kg, g, %, ppt, ppm, FCR).
-7. Preserve medication names and chemical compounds (e.g., Formalin, Oxytetracycline, Chloramine-T, Povidone-Iodine).
-8. Return ONLY a valid JSON object matching this schema:
-{
-  "translations": [
-    {
-      "id": "<item_id>",
-      "translatedText": "<strictly translated text in ${targetLocale}>",
-      "sourceLocale": "${sourceLocale}",
-      "targetLocale": "${targetLocale}"
-    }
-  ]
-}`;
-
-      const prompt = `Items to translate to ${targetLocale}:
-${JSON.stringify(requestItems, null, 2)}`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: 0.1,
-          responseMimeType: 'application/json',
-        },
-      });
-
-      const responseText = response.text || '{}';
-      let parsed: any;
-      try {
-        parsed = JSON.parse(responseText);
-      } catch (parseErr) {
-        parsed = {
-          translations: requestItems.map((item) => ({
-            id: item.id,
-            translatedText: responseText.trim(),
-            sourceLocale,
-            targetLocale,
-          })),
-        };
-      }
-
-      const results = parsed.translations || [];
-      return res.json({
-        success: true,
-        translations: results,
-        source: 'gemini-2.5-flash',
-      });
-    } else {
-      // Local Heuristic / Dictionary Fallback for known aquaculture phrases when offline
-      const translations = requestItems.map((item) => {
-        const t = item.text || '';
-        let translated = t;
-        
-        if (targetLocale === 'en') {
-          translated = t
-            .replace(/کاهش اکسیژن باعث تلفات شد/g, 'Oxygen drop caused mortality')
-            .replace(/تلفات ناشی از افت اکسیژن/g, 'Mortality caused by low oxygen')
-            .replace(/سوزاندن در کوره لاشه‌سوز و ضدعفونی بستر/g, 'Incineration in carcass furnace and disinfection')
-            .replace(/سورتینگ و یکنواخت‌سازی/g, 'Sorting and size grading')
-            .replace(/تغذیه استخر/g, 'Pond feeding')
-            .replace(/عارضه طبیعی/g, 'Natural cause')
-            .replace(/عادی و اشتهای مطلوب/g, 'Normal and optimal appetite')
-            .replace(/اشتهای شدید و سریع/g, 'Aggressive and rapid appetite')
-            .replace(/بی‌حالی و کندی در بلع/g, 'Lethargic and slow feeding')
-            .replace(/عدم مصرف خوراک/g, 'Untouched feed');
-        } else if (targetLocale === 'de') {
-          translated = t
-            .replace(/کاهش اکسیژن باعث تلفات شد/g, 'Sauerstoffabfall verursachte Mortalität')
-            .replace(/تلفات ناشی از افت اکسیژن/g, 'Verluste aufgrund von Sauerstoffmangel')
-            .replace(/سوزاندن در کوره لاشه‌سوز و ضدعفونی بستر/g, 'Verbrennung im Kadaverofen und Desinfektion')
-            .replace(/سورتینگ و یکنواخت‌سازی/g, 'Sortierung und Größeneinteilung')
-            .replace(/تغذیه استخر/g, 'Teichfütterung')
-            .replace(/عارضه طبیعی/g, 'Natürliche Ursache');
-        } else if (targetLocale === 'ru') {
-          translated = t
-            .replace(/کاهش اکسیژن باعث تلفات شد/g, 'Падение кислорода вызвало отход рыбы')
-            .replace(/تلفات ناشی از افت اکسیژن/g, 'Отход рыбы из-за нехватки кислорода')
-            .replace(/سورتینگ و یکنواخت‌سازی/g, 'Сортировка и калибровка')
-            .replace(/عارضه طبیعی/g, 'Естественная причина');
-        } else if (targetLocale === 'ar') {
-          translated = t
-            .replace(/کاهش اکسیژن باعث تلفات شد/g, 'انخفاض الأكسجين تسبب في النفوق')
-            .replace(/تلفات ناشی از افت اکسیژن/g, 'النفوق الناجم عن نقص الأكسجين')
-            .replace(/سورتینگ و یکنواخت‌سازی/g, 'الفرز والتدريج الحجمي')
-            .replace(/عارضه طبیعی/g, 'سبب طبيعي');
-        }
-
-        return {
-          id: item.id,
-          translatedText: translated,
-          sourceLocale: item.sourceLocale || sourceLocale,
-          targetLocale,
-          isOfflineFallback: true,
-        };
-      });
-
-      return res.json({
-        success: true,
-        translations,
-        source: 'enterprise-offline-translation-engine',
-      });
-    }
-  } catch (error: any) {
-    console.error('Error in dynamic translation endpoint:', error);
-    res.status(500).json({
-      success: false,
-      error: error?.message || 'Failed to perform runtime dynamic translation',
-    });
+    return res.json({ success: true, content: response.text || '', campaignText: response.text || '', source: model, aiStatus: 'AVAILABLE' });
+  } catch (error) {
+    return res.status(503).json({ success: false, error: classifyAiError(error), aiStatus: classifyAiError(error) });
   }
 };
 
-app.post('/api/ai/translate-dynamic', handleDynamicTranslation);
+app.post('/api/ai/media', requireAuth, aiRateLimit, handleAiMarketing);
+app.post('/api/ai/marketing-campaign', requireAuth, aiRateLimit, handleAiMarketing);
 
-// AI Social Media & Caviar Marketing Generator Endpoint
-const handleAiMarketing = async (req: express.Request, res: express.Response) => {
-  try {
-    const {
-      topic,
-      productType = 'Imperial Beluga Caviar',
-      platform,
-      channels = ['Instagram', 'LinkedIn'],
-      targetMarket = 'Global Luxury Hospitality',
-      tone = 'Ultra-Luxury & Gastronomic Elegance',
-      language = 'en',
-    } = req.body || {};
-    const ai = getAIClient();
-
-    if (ai) {
-      const systemInstruction = `You are the Luxury Social Media & Caviar Marketing Specialist for Fathi Sturgeon Farm.
-Generate high-converting, elegant promotional copy for ultra-premium Persian sturgeon caviar and smoked fillet.
-Provide localized content in the requested language (${language}) with appropriate hashtags, tone, and call to action.`;
-
-      const prompt = `Product: ${productType}
-Platform/Format: ${platform || channels.join(', ')}
-Target Market: ${targetMarket}
-Tone: ${tone}
-Language: ${language}`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-        },
-      });
-
-      return res.json({
-        success: true,
-        content: response.text,
-        campaignText: response.text,
-        source: 'gemini-2.5-flash',
-      });
-    } else {
-      const content = `🌟 **Fathi Caviar Luxury Collection — ${productType}**
-
-🇮🇷 **فارسی:**
-شاهکار بی‌بدیل خاویار اصیل بلوگا امپریال فتحی؛ فرآوری شده به روش کاملاً سنتی با دانه‌های درشت، بافت مخملی و عطر رویایی دریای خزر. 
-تولید شده تحت استانداردهای بین‌المللی با زنجیره ردیابی ژنتیکی اختصاصی از استخر تا بسته‌بندی لوکس.
-#خاویار_فتحی #خاویار_بلوگا #خاویار_اصیل #خاویار_امپریال #آبزی_پروری_مدرن #FathiCaviar
-
-🇬🇧 **English:**
-Indulge in the world's most coveted delicacy: Fathi Farm's Imperial Beluga Caviar. Ethically farmed from pure Huso huso broodstock, offering majestic pearl-sized roe with a rich, buttery finish. Certified origin and cold-chain guaranteed.
-#FathiCaviar #BelugaCaviar #LuxuryGourmet #SturgeonFarming #IranianCaviar #FineDining`;
-
-      return res.json({
-        success: true,
-        content,
-        campaignText: content,
-        source: 'luxury-content-engine',
-      });
-    }
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error?.message });
+app.post('/api/license/verify', requireAuth, (req: AuthenticatedRequest, res) => {
+  const configuredKey = process.env.FATHI_LICENSE_KEY?.trim();
+  if (!configuredKey) {
+    return res.json({ valid: false, configured: false, reason: 'LICENSE_VALIDATION_NOT_CONFIGURED' });
   }
-};
-
-app.post('/api/ai/media', handleAiMarketing);
-app.post('/api/ai/marketing-campaign', handleAiMarketing);
-
-// Licensing verification
-app.post('/api/license/verify', (req, res) => {
-  const { licenseKey, farmName, hardwareId } = req.body || {};
-  res.json({
-    valid: true,
-    edition: 'Enterprise Commercial v6.0',
-    plan: 'Lifetime Enterprise Offline+LAN',
-    farmName: farmName || 'مزرعه تکثیر و پرورش ماهیان خاویاری فتحی',
-    hardwareId: hardwareId || 'HW-7749-FATHI-AQUA',
-    features: [
-      'ALL_7_LANGUAGES',
-      'UNLIMITED_PONDS',
-      'FULL_GENETIC_TRACEABILITY',
-      'DOUBLE_ENTRY_ACCOUNTING',
-      'OFFLINE_LAN_SYNC',
-      'AI_FARM_INTELLIGENCE',
-      'CROSS_PLATFORM_PACKAGING',
-    ],
-    expiresAt: '2099-12-31T23:59:59Z',
-  });
+  const suppliedKey = typeof req.body?.licenseKey === 'string' ? req.body.licenseKey : '';
+  const valid = suppliedKey.length === configuredKey.length && crypto.timingSafeEqual(Buffer.from(suppliedKey), Buffer.from(configuredKey));
+  return res.json({ valid, configured: true, edition: valid ? 'Enterprise Commercial' : undefined });
 });
 
 async function start() {
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Fathi Aqua Super ERP Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Fathi Aqua Super ERP Server running on port ${PORT}`);
   });
 }
 
-start();
+start().catch((error) => {
+  console.error('Server startup failed', error);
+  process.exitCode = 1;
+});
