@@ -55,6 +55,9 @@ import {
 } from '../data/initialData';
 
 import { assessWaterSafetyForFeeding, validateDissolvedOxygen, validateWaterTemperature } from '../utils/sensorValidation';
+import { calculateFeedingRecommendation, normalizeFeedAmountToKg, validateFeedingSubmission } from '../utils/feedingEngine';
+import { executeAtomicFishTransfer } from '../utils/transferEngine';
+import { validateAndExecuteJournalEntry } from '../utils/accountingEngine';
 
 export interface FeedingRecommendationResult {
   recommendedKg: number;
@@ -256,76 +259,8 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
    */
   const calculateRecommendedFeed = (pondId: string): FeedingRecommendationResult => {
     const pond = ponds.find((p) => p.id === pondId);
-    if (!pond) {
-      return { recommendedKg: 0, isLocked: true, lockReason: 'استخر یافت نشد.' };
-    }
-
-    // 1. Explicit Feeding Status Check
-    if (pond.feedingStatus === 'STOPPED') {
-      return {
-        recommendedKg: 0,
-        isLocked: true,
-        lockReason: `تغذیه این استخر قطع است (${pond.stopFeedingReason || 'توقف دستی'}: ${pond.stopFeedingDetails || ''})`,
-      };
-    }
-
-    // 2. Active Medical Treatment Check
-    if (pond.activeTreatmentId) {
-      const treatment = treatments.find((t) => t.id === pond.activeTreatmentId && t.status === 'Active');
-      if (treatment) {
-        return {
-          recommendedKg: 0,
-          isLocked: true,
-          lockReason: `استخر تحت درمان دارویی فعال (${treatment.medicineName}) قرار دارد و تغذیه طبق پروتکل دامپزشکی ممنوع است.`,
-        };
-      }
-    }
-
-    // 3. Strict Sensor Data Validation Assessment
-    const safetyAssessment = assessWaterSafetyForFeeding({
-      dissolvedOxygen: pond.dissolvedOxygen,
-      waterTemperature: pond.waterTemperature,
-      ph: pond.ph,
-    });
-
-    if (!safetyAssessment.isSafeForFeeding) {
-      return {
-        recommendedKg: 0,
-        isLocked: true,
-        lockReason: safetyAssessment.feedingProhibitionReason || 'شرایط کیفیت آب برای تغذیه ناامن است.',
-        waterSafety: {
-          isSafe: false,
-          doStatus: safetyAssessment.doStatus.status,
-          tempStatus: safetyAssessment.tempStatus.status,
-        },
-      };
-    }
-
-    // 4. Mathematical Ration Computation
-    const sp = species.find((s) => s.id === pond.speciesId);
-    const coeff = sp ? sp.feedingProfileCoeff : 1.0;
-
-    let tempFactor = 1.0;
-    if (pond.waterTemperature >= 14 && pond.waterTemperature <= 18.5) {
-      tempFactor = 1.0;
-    } else if (pond.waterTemperature < 14) {
-      tempFactor = Math.max(0.4, (pond.waterTemperature / 14));
-    } else {
-      tempFactor = Math.max(0.6, 1.0 - ((pond.waterTemperature - 18.5) * 0.08));
-    }
-
-    const baseRate = 0.009 * coeff * tempFactor; // ~0.9% of body weight
-    const recommendedKg = Number((pond.biomassKg * baseRate).toFixed(2));
-
-    return {
-      recommendedKg: Math.max(0, recommendedKg),
-      isLocked: false,
-      waterSafety: {
-        isSafe: true,
-        doStatus: safetyAssessment.doStatus.status,
-        tempStatus: safetyAssessment.tempStatus.status,
-      },
-    };
+    const activeTreatment = pond?.activeTreatmentId ? treatments.find((t) => t.id === pond.activeTreatmentId && t.status === 'Active') : undefined;
+    return calculateFeedingRecommendation(pond, species, activeTreatment);
   };
 
   /**
@@ -336,33 +271,22 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const pond = ponds.find((p) => p.id === recordData.pondId);
     if (!pond) return { success: false, error: 'استخر یافت نشد.' };
 
-    // Strict Domain-Layer Safety Enforcements
-    if (pond.feedingStatus === 'STOPPED') {
+    const validation = validateFeedingSubmission(recordData, pond, inventory);
+    if (!validation.success) {
       createAuditLog(
         'SECURITY_SAFETY_VIOLATION_REJECTED',
         'Feeding',
         pond.id,
-        `تلاش ناموفق برای ثبت خوراک در استخر متوقف‌شده (${pond.name})`
+        `تلاش ناموفق برای ثبت خوراک: ${validation.error}`
       );
-      return { success: false, error: 'ثبت خوراک غیرمجاز است: وضعیت استخر قطع غذا (STOPPED) است.' };
+      return { success: false, error: validation.error };
     }
 
-    if (recordData.dissolvedOxygen < 4.0) {
-      createAuditLog(
-        'SECURITY_SAFETY_VIOLATION_REJECTED',
-        'Feeding',
-        pond.id,
-        `تلاش ناموفق برای ثبت خوراک در شرایط اکسیژن بحرانی (${recordData.dissolvedOxygen} mg/L)`
-      );
-      return { success: false, error: `ثبت خوراک غیرمجاز است: میزان اکسیژن (${recordData.dissolvedOxygen} mg/L) کمتر از ۴.۰ است.` };
-    }
-
-    if (recordData.actualAmountKg <= 0) {
-      return { success: false, error: 'مقدار خوراک مصرفی باید بزرگتر از صفر باشد.' };
-    }
+    const normalizedAmountKg = validation.normalizedAmountKg;
 
     const newRecord: FeedingRecord = {
       ...recordData,
+      actualAmountKg: normalizedAmountKg,
       id: 'fd_' + Date.now(),
       timestamp: new Date().toISOString(),
     };
@@ -375,7 +299,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         p.id === recordData.pondId
           ? {
               ...p,
-              lastFeedingKg: recordData.actualAmountKg,
+              lastFeedingKg: normalizedAmountKg,
               lastFeedingTime: newRecord.timestamp,
             }
           : p
@@ -383,17 +307,17 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
 
     // Ledger deduction from warehouse
-    const feedItem = inventory.find((i) => i.sku === recordData.feedTypeSku || i.category.includes('Feed'));
+    const feedItem = validation.feedItem;
     if (feedItem) {
       addInventoryTransaction({
         itemId: feedItem.id,
         itemName: feedItem.name,
         sku: feedItem.sku,
         type: 'Consumption (مصرف روزانه)',
-        quantityChange: -recordData.actualAmountKg,
+        quantityChange: -normalizedAmountKg,
         unit: 'kg',
         unitPrice: feedItem.purchasePricePerUnit,
-        totalValue: recordData.actualAmountKg * feedItem.purchasePricePerUnit,
+        totalValue: normalizedAmountKg * feedItem.purchasePricePerUnit,
         referenceDoc: newRecord.id,
         pondId: pond.id,
         operator: recordData.operatorName,
@@ -405,9 +329,9 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       'FEEDING_LOGGED',
       'Pond',
       pond.id,
-      `ثبت غذادهی ${recordData.actualAmountKg} kg در ${pond.name}`,
+      `ثبت غذادهی ${normalizedAmountKg} kg در ${pond.name}`,
       `lastFeedingKg: ${pond.lastFeedingKg}`,
-      `lastFeedingKg: ${recordData.actualAmountKg}`
+      `lastFeedingKg: ${normalizedAmountKg}`
     );
 
     return { success: true };
@@ -626,73 +550,20 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * Guaranteed single-transaction mutation: Source fish decrement strictly equals destination increment.
    */
   const executeAtomicTransfer = (transferData: Omit<FishTransfer, 'id' | 'status'>): { success: boolean; error?: string } => {
-    const sourcePond = ponds.find((p) => p.id === transferData.sourceId);
-    const destPond = ponds.find((p) => p.id === transferData.destinationId);
-
-    if (!sourcePond) return { success: false, error: 'استخر مبدا یافت نشد.' };
-    if (!destPond) return { success: false, error: 'استخر مقصد یافت نشد.' };
-    if (sourcePond.id === destPond.id) return { success: false, error: 'استخر مبدا و مقصد نمی‌توانند یکسان باشند.' };
-
-    if (transferData.fishCount <= 0) {
-      return { success: false, error: 'تعداد ماهیان انتقال باید بیشتر از صفر باشد.' };
+    const result = executeAtomicFishTransfer(transferData, ponds);
+    if (!result.success || !result.updatedPonds || !result.newTransfer) {
+      return { success: false, error: result.error || 'خطا در انجام انتقال اتمیک ماهی' };
     }
 
-    if (sourcePond.fishCount < transferData.fishCount) {
-      return {
-        success: false,
-        error: `تعداد ماهیان درخواستی (${transferData.fishCount}) بیشتر از موجودی استخر مبدا (${sourcePond.fishCount}) است.`,
-      };
-    }
-
-    const transferBiomass = Number((transferData.fishCount * transferData.averageWeightKg).toFixed(2));
-
-    const newTransfer: FishTransfer = {
-      ...transferData,
-      id: 'trf_' + Date.now(),
-      totalBiomassKg: transferBiomass,
-      status: 'COMPLETED',
-    };
-
-    // Atomic update of both Source and Destination ponds in single state mutation
-    setPonds((prevPonds) => {
-      return prevPonds.map((p) => {
-        if (p.id === transferData.sourceId) {
-          const newCount = p.fishCount - transferData.fishCount;
-          const newBiomass = Math.max(0, p.biomassKg - transferBiomass);
-          const newAvg = newCount > 0 ? Number((newBiomass / newCount).toFixed(2)) : 0;
-          return {
-            ...p,
-            fishCount: newCount,
-            biomassKg: newBiomass,
-            averageWeightKg: newAvg,
-            lastTransferDate: transferData.date,
-          };
-        }
-        if (p.id === transferData.destinationId) {
-          const newCount = p.fishCount + transferData.fishCount;
-          const newBiomass = p.biomassKg + transferBiomass;
-          const newAvg = newCount > 0 ? Number((newBiomass / newCount).toFixed(2)) : transferData.averageWeightKg;
-          return {
-            ...p,
-            fishCount: newCount,
-            biomassKg: newBiomass,
-            averageWeightKg: newAvg,
-            lastTransferDate: transferData.date,
-          };
-        }
-        return p;
-      });
-    });
-
-    setTransfers((prev) => [newTransfer, ...prev]);
+    setPonds(result.updatedPonds);
+    setTransfers((prev) => [result.newTransfer!, ...prev]);
 
     createAuditLog(
       'FISH_TRANSFER_ATOMIC',
       'Pond',
       transferData.sourceId,
       `انتقال اتمیک ${transferData.fishCount} قطعه ماهی از ${transferData.sourceName} به ${transferData.destinationName}`,
-      `sourceFishCount: ${sourcePond.fishCount}`,
-      `sourceFishCount: ${sourcePond.fishCount - transferData.fishCount}`
+      `transferBiomassKg: ${result.newTransfer.totalBiomassKg}`
     );
 
     return { success: true };
@@ -791,52 +662,19 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const createJournalEntry = (
     entryData: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>
   ): { success: boolean; error?: string } => {
-    if (!entryData.debits || entryData.debits.length === 0 || !entryData.credits || entryData.credits.length === 0) {
-      return { success: false, error: 'سند حسابداری باید حداقل شامل یک ردیف بدهکار و یک ردیف بستانکار باشد.' };
+    const result = validateAndExecuteJournalEntry(entryData, accounts, journals);
+    if (!result.success || !result.newEntry || !result.updatedAccounts) {
+      return { success: false, error: result.error || 'خطا در ثبت سند دوبل حسابداری' };
     }
 
-    const totalDebit = entryData.debits.reduce((sum, d) => sum + d.amount, 0);
-    const totalCredit = entryData.credits.reduce((sum, c) => sum + c.amount, 0);
-
-    if (Math.abs(totalDebit - totalCredit) > 0.01) {
-      return {
-        success: false,
-        error: `عدم توازن سند دوبل: جمع بدهکار (${totalDebit.toLocaleString()}) با جمع بستانکار (${totalCredit.toLocaleString()}) برابر نیست!`,
-      };
-    }
-
-    const newEntry: JournalEntry = {
-      ...entryData,
-      id: 'jnl_' + Date.now(),
-      entryNumber: 'SANAD-' + Date.now().toString().slice(-6),
-      totalDebit,
-      totalCredit,
-      isBalanced: true,
-      createdAt: new Date().toISOString(),
-    };
-
-    setJournals((prev) => [newEntry, ...prev]);
-
-    // Update account balances
-    setAccounts((prevAccounts) =>
-      prevAccounts.map((acc) => {
-        const debitHit = entryData.debits.find((d) => d.accountId === acc.id);
-        const creditHit = entryData.credits.find((c) => c.accountId === acc.id);
-        let diff = 0;
-        if (debitHit) diff += debitHit.amount;
-        if (creditHit) diff -= creditHit.amount;
-        return {
-          ...acc,
-          balance: acc.balance + diff,
-        };
-      })
-    );
+    setJournals((prev) => [result.newEntry!, ...prev]);
+    setAccounts(result.updatedAccounts);
 
     createAuditLog(
       'JOURNAL_POSTED',
       'Accounting',
-      newEntry.entryNumber,
-      `ثبت سند حسابداری دوبل به مبلغ ${totalDebit.toLocaleString()}`
+      result.newEntry.entryNumber,
+      `ثبت سند حسابداری دوبل به مبلغ ${result.newEntry.totalDebit.toLocaleString()}`
     );
 
     return { success: true };

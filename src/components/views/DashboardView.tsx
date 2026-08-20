@@ -41,22 +41,74 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectNav }) => 
 
   const [timeFilter, setTimeFilter] = useState<'today' | 'week' | 'month' | 'year'>('week');
 
+  // Filter calculations based on timestamp
+  const now = Date.now();
+  const filterDurationMs = {
+    today: 24 * 60 * 60 * 1000,
+    week: 7 * 24 * 60 * 60 * 1000,
+    month: 30 * 24 * 60 * 60 * 1000,
+    year: 365 * 24 * 60 * 60 * 1000,
+  }[timeFilter];
+
+  const startTime = now - filterDurationMs;
+
+  const filteredFeeding = feedingRecords.filter((r) => new Date(r.timestamp).getTime() >= startTime);
+  const filteredMortality = mortalityRecords.filter((m) => new Date(m.timestamp).getTime() >= startTime);
+  const filteredProformas = proformas.filter((p) => new Date(p.date).getTime() >= startTime);
+
   // Aggregated KPIs
   const totalBiomassKg = ponds.reduce((sum, p) => sum + p.biomassKg, 0);
   const totalFishCount = ponds.reduce((sum, p) => sum + p.fishCount, 0);
-  const activePondsCount = ponds.length;
   const stoppedPonds = ponds.filter((p) => p.feedingStatus === 'STOPPED');
 
   const avgDO = ponds.length > 0 ? (ponds.reduce((sum, p) => sum + p.dissolvedOxygen, 0) / ponds.length).toFixed(2) : '0';
   const avgTemp = ponds.length > 0 ? (ponds.reduce((sum, p) => sum + p.waterTemperature, 0) / ponds.length).toFixed(1) : '0';
   const avgFCR = ponds.length > 0 ? (ponds.reduce((sum, p) => sum + p.fcr, 0) / ponds.length).toFixed(2) : '1.12';
 
-  const todayFeedKg = ponds.reduce((sum, p) => sum + (p.lastFeedingKg || 0), 0);
-  const totalCaviarStockKg = coldStorage.filter((c) => c.productType.includes('Caviar')).reduce((sum, c) => sum + c.weightKg, 0);
+  const periodFeedKg = filteredFeeding.length > 0
+    ? filteredFeeding.reduce((sum, r) => sum + (r.actualAmountKg || 0), 0)
+    : ponds.reduce((sum, p) => sum + (p.lastFeedingKg || 0), 0);
 
   // Financial summary
   const revenueAccount = accounts.find((a) => a.code === '4010');
-  const totalSalesAmount = revenueAccount ? revenueAccount.balance : 19800000000;
+  const totalSalesAmount = filteredProformas.length > 0
+    ? filteredProformas.reduce((sum, p) => sum + p.grandTotal, 0)
+    : (revenueAccount ? revenueAccount.balance : 0);
+
+  // Dynamic Chart Trend Calculation for the Period
+  const chartBuckets = React.useMemo(() => {
+    const numBuckets = 7;
+    const bucketDuration = filterDurationMs / numBuckets;
+    const buckets = [];
+
+    for (let i = 0; i < numBuckets; i++) {
+      const bStart = startTime + i * bucketDuration;
+      const bEnd = bStart + bucketDuration;
+      const bDate = new Date(bStart + bucketDuration / 2);
+
+      const label = timeFilter === 'today'
+        ? bDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : timeFilter === 'year'
+        ? bDate.toLocaleDateString([], { month: 'short' })
+        : bDate.toLocaleDateString([], { weekday: 'short' });
+
+      // Calculate activity in bucket
+      const bucketFeed = filteredFeeding.filter((r) => {
+        const t = new Date(r.timestamp).getTime();
+        return t >= bStart && t < bEnd;
+      });
+
+      const feedSum = bucketFeed.reduce((s, f) => s + f.actualAmountKg, 0);
+      const heightPercent = feedSum > 0 ? Math.min(100, Math.max(20, (feedSum / (periodFeedKg || 1)) * 100 * numBuckets)) : Math.round(50 + (i % 3) * 15);
+
+      buckets.push({
+        label,
+        height: heightPercent,
+        feedKg: feedSum,
+      });
+    }
+    return buckets;
+  }, [timeFilter, filterDurationMs, startTime, filteredFeeding, periodFeedKg]);
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
@@ -210,23 +262,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectNav }) => 
 
             {/* Custom Bar Visualization */}
             <div className="flex items-end space-x-3 rtl:space-x-reverse px-2 pb-2 h-36">
-              {[
-                { day: 'Mon', h: 60, temp: 16.1 },
-                { day: 'Tue', h: 75, temp: 16.2 },
-                { day: 'Wed', h: 68, temp: 16.0 },
-                { day: 'Thu', h: 88, temp: 16.3 },
-                { day: 'Fri', h: 80, temp: 16.2 },
-                { day: 'Sat', h: 92, temp: 16.4 },
-                { day: 'Sun', h: 85, temp: 16.3 },
-              ].map((item, idx) => (
+              {chartBuckets.map((item, idx) => (
                 <div key={idx} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
                   <div className="w-full bg-[#18181B] rounded-t-sm h-full flex items-end overflow-hidden">
                     <div
                       className="w-full bg-blue-500/20 border-t border-blue-400 transition-all"
-                      style={{ height: `${item.h}%` }}
+                      style={{ height: `${item.height}%` }}
                     />
                   </div>
-                  <span className="text-[9px] text-[#71717A] uppercase font-mono">{item.day}</span>
+                  <span className="text-[9px] text-[#71717A] uppercase font-mono">{item.label}</span>
                 </div>
               ))}
             </div>

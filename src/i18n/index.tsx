@@ -7,6 +7,7 @@ import { es } from './es';
 import { ru } from './ru';
 import { ar } from './ar';
 import { LanguageCode, LanguageMeta, TextDirection } from '../types';
+import { getLocaleTag, formatCurrencyValue } from '../utils/currencyFormatter';
 
 export const LANGUAGES: LanguageMeta[] = [
   {
@@ -180,7 +181,7 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const formatNumber = (num: number, options?: Intl.NumberFormatOptions): string => {
     try {
-      const locale = language === 'fa' ? 'fa-IR' : language === 'ar' ? 'ar-SA' : language === 'de' ? 'de-DE' : language === 'ru' ? 'ru-RU' : 'en-US';
+      const locale = getLocaleTag(language);
       return new Intl.NumberFormat(locale, options).format(num);
     } catch (e) {
       return num.toLocaleString();
@@ -188,23 +189,8 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const formatCurrency = (amount: number, currencyCode?: string): string => {
-    const curr = currencyCode || meta.defaultCurrency;
-    if (curr === 'IRR') {
-      if (language === 'fa') {
-        return `${formatNumber(Math.round(amount / 10))} تومان`;
-      }
-      return `${formatNumber(amount)} IRR`;
-    }
-    try {
-      const locale = language === 'fa' ? 'fa-IR' : language === 'ar' ? 'ar-SA' : language === 'de' ? 'de-DE' : language === 'ru' ? 'ru-RU' : 'en-US';
-      return new Intl.NumberFormat(locale, {
-        style: 'currency',
-        currency: curr,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    } catch (e) {
-      return `${formatNumber(amount)} ${curr}`;
-    }
+    const curr = currencyCode || (language === 'fa' ? 'IRR' : meta.defaultCurrency);
+    return formatCurrencyValue(amount, curr, language, formatNumber);
   };
 
   const formatDate = (dateInput: string | Date | number): string => {
@@ -226,7 +212,7 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
           day: 'numeric',
         }).format(d);
       }
-      const locale = language === 'de' ? 'de-DE' : language === 'fr' ? 'fr-FR' : language === 'es' ? 'es-ES' : language === 'ru' ? 'ru-RU' : 'en-US';
+      const locale = getLocaleTag(language);
       return new Intl.DateTimeFormat(locale, {
         year: 'numeric',
         month: 'short',
@@ -241,7 +227,7 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const d = new Date(dateInput);
     if (isNaN(d.getTime())) return '';
     try {
-      const locale = language === 'fa' ? 'fa-IR' : language === 'ar' ? 'ar-SA' : language === 'de' ? 'de-DE' : language === 'ru' ? 'ru-RU' : 'en-US';
+      const locale = getLocaleTag(language);
       return new Intl.DateTimeFormat(locale, {
         hour: '2-digit',
         minute: '2-digit',

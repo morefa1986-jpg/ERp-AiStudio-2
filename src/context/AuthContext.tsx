@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserRole, GranularPermission, PermissionModule, PermissionAction, LanguageCode } from '../types';
+import { PASSWORD_SALT, hashPasswordWithSalt } from '../utils/authSecurity';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -17,24 +18,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const PASSWORD_SALT = 'fathi_aqua_salt_2026';
-
-// Cryptographic hash simulation using Web Crypto API (SHA-256)
 async function hashPassword(plain: string): Promise<string> {
-  try {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(plain + PASSWORD_SALT);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-  } catch (e) {
-    let hash = 0;
-    for (let i = 0; i < plain.length; i++) {
-      hash = (hash << 5) - hash + plain.charCodeAt(i);
-      hash |= 0;
-    }
-    return 'h_' + Math.abs(hash).toString(16);
-  }
+  return hashPasswordWithSalt(plain, PASSWORD_SALT);
 }
 
 // Authoritative user credentials with salted SHA-256 hashes (never plaintext)
