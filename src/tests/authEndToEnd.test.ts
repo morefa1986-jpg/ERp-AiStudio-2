@@ -1,38 +1,37 @@
-import { describe, it, expect } from 'vitest';
-import { hashPasswordWithSalt, verifyPasswordSecurely } from '../utils/authSecurity';
-import { UserRole } from '../types';
+import { describe, expect, it } from 'vitest';
+import { PASSWORD_SALT, hashPasswordWithSalt, verifyPasswordSecurely } from '../utils/authSecurity';
+import { roleAllows } from '../utils/rbac';
 
-describe('Auth Security End-to-End Hardening', () => {
-  const testSalt = 'fathi_aqua_salt_v6';
-
-  it('generates consistent SHA-256 hashes for salted passwords', async () => {
-    const hash1 = await hashPasswordWithSalt('admin123', testSalt);
-    const hash2 = await hashPasswordWithSalt('admin123', testSalt);
+describe('Auth security and RBAC production policy', () => {
+  it('generates consistent SHA-256 hashes for the configured compatibility salt', async () => {
+    const hash1 = await hashPasswordWithSalt('admin123', PASSWORD_SALT);
+    const hash2 = await hashPasswordWithSalt('admin123', PASSWORD_SALT);
     expect(hash1).toBe(hash2);
-    expect(hash1).toHaveLength(64); // 256 bits in hex
+    expect(hash1).toHaveLength(64);
   });
 
-  it('rejects incorrect passwords during verification', async () => {
-    const expectedHash = await hashPasswordWithSalt('admin123', testSalt);
-    const isCorrect = await verifyPasswordSecurely('wrongpass', testSalt, expectedHash);
-    expect(isCorrect).toBe(false);
+  it('rejects incorrect passwords and accepts the correct password', async () => {
+    const expectedHash = await hashPasswordWithSalt('valid-password', PASSWORD_SALT);
+    await expect(verifyPasswordSecurely('wrong-password', PASSWORD_SALT, expectedHash)).resolves.toBe(false);
+    await expect(verifyPasswordSecurely('valid-password', PASSWORD_SALT, expectedHash)).resolves.toBe(true);
   });
 
-  it('accepts valid credentials during verification', async () => {
-    const expectedHash = await hashPasswordWithSalt('vet123', testSalt);
-    const isCorrect = await verifyPasswordSecurely('vet123', testSalt, expectedHash);
-    expect(isCorrect).toBe(true);
+  it('rejects malformed stored hashes', async () => {
+    await expect(verifyPasswordSecurely('anything', PASSWORD_SALT, 'weak-hash')).resolves.toBe(false);
   });
 
-  it('never matches passwords hashed with different salts', async () => {
-    const hashWithSaltA = await hashPasswordWithSalt('password', 'saltA');
-    const hashWithSaltB = await hashPasswordWithSalt('password', 'saltB');
-    expect(hashWithSaltA).not.toBe(hashWithSaltB);
+  it('is fail-closed for unknown roles', () => {
+    expect(roleAllows('GUEST_UNKNOWN', 'dashboard', 'view')).toBe(false);
+    expect(roleAllows('', 'feeding', 'create')).toBe(false);
   });
 
-  it('verifies that RBAC defaults deny access for undefined/unknown roles', () => {
-    const allowedRoles: UserRole[] = ['SUPER_ADMIN', 'FARM_MANAGER'];
-    const testUnknownRole = 'GUEST_UNKNOWN' as UserRole;
-    expect(allowedRoles.includes(testUnknownRole)).toBe(false);
+  it('grants expected role access without granting destructive access broadly', () => {
+    expect(roleAllows('Super Admin', 'users', 'manage')).toBe(true);
+    expect(roleAllows('Veterinarian', 'treatments', 'create')).toBe(true);
+    expect(roleAllows('Veterinarian', 'accounting', 'view')).toBe(false);
+    expect(roleAllows('Farm Manager', 'ponds', 'edit')).toBe(true);
+    expect(roleAllows('Farm Manager', 'ponds', 'delete')).toBe(false);
+    expect(roleAllows('Viewer/Auditor', 'accounting', 'view')).toBe(true);
+    expect(roleAllows('Viewer/Auditor', 'accounting', 'edit')).toBe(false);
   });
 });
