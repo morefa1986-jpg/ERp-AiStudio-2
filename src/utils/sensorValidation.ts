@@ -52,6 +52,16 @@ export const SENSOR_BOUNDS = {
   MAX_SENSOR_AGE_HOURS: 6,
 };
 
+function activeLanguage(): LanguageCode {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const value = localStorage.getItem('fathi_aqua_lang') as LanguageCode | null;
+      if (value && ['fa', 'en', 'de', 'fr', 'es', 'ru', 'ar'].includes(value)) return value;
+    }
+  } catch {}
+  return 'fa';
+}
+
 function staleResult(value: number, timestamp: string | undefined, code: string, label: string, language: LanguageCode): SensorValidationResult | null {
   if (!timestamp) return null;
   const ts = new Date(timestamp).getTime();
@@ -68,7 +78,7 @@ function numericValue(raw: unknown): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-export function validateDissolvedOxygen(rawDO: number | null | undefined, timestamp?: string, language: LanguageCode = 'fa'): SensorValidationResult {
+export function validateDissolvedOxygen(rawDO: number | null | undefined, timestamp?: string, language: LanguageCode = activeLanguage()): SensorValidationResult {
   const label = runtimeSensorLabel(language, 'oxygen');
   const value = numericValue(rawDO);
   if (value === null) return { isValid: false, status: 'SENSOR_FAULT', sanitizedValue: 0, message: runtimeMessage(language, 'sensor.missing', { label }), errors: ['DO_VALUE_MISSING'] };
@@ -80,7 +90,7 @@ export function validateDissolvedOxygen(rawDO: number | null | undefined, timest
   return { isValid: true, status: 'VALID', sanitizedValue: value, errors: [] };
 }
 
-export function validateWaterTemperature(rawTemp: number | null | undefined, timestamp?: string, language: LanguageCode = 'fa'): SensorValidationResult {
+export function validateWaterTemperature(rawTemp: number | null | undefined, timestamp?: string, language: LanguageCode = activeLanguage()): SensorValidationResult {
   const label = runtimeSensorLabel(language, 'temperature');
   const value = numericValue(rawTemp);
   if (value === null) return { isValid: false, status: 'SENSOR_FAULT', sanitizedValue: 0, message: runtimeMessage(language, 'sensor.missing', { label }), errors: ['TEMP_VALUE_MISSING'] };
@@ -91,7 +101,7 @@ export function validateWaterTemperature(rawTemp: number | null | undefined, tim
   return { isValid: true, status: 'VALID', sanitizedValue: value, errors: [] };
 }
 
-export function validatePh(rawPh: number | null | undefined, timestamp?: string, language: LanguageCode = 'fa'): SensorValidationResult {
+export function validatePh(rawPh: number | null | undefined, timestamp?: string, language: LanguageCode = activeLanguage()): SensorValidationResult {
   const label = runtimeSensorLabel(language, 'ph');
   const value = numericValue(rawPh);
   if (value === null) return { isValid: false, status: 'SENSOR_FAULT', sanitizedValue: 0, message: runtimeMessage(language, 'sensor.missing', { label }), errors: ['PH_VALUE_MISSING'] };
@@ -113,7 +123,7 @@ function validateChemical(raw: number | null | undefined, safeMax: number, criti
 }
 
 export function assessWaterSafetyForFeeding(params: PondWaterParams): WaterSafetyAssessment {
-  const language = params.language || 'fa';
+  const language = params.language || activeLanguage();
   const doStatus = validateDissolvedOxygen(params.dissolvedOxygen, params.timestamp, language);
   const tempStatus = validateWaterTemperature(params.waterTemperature, params.timestamp, language);
   const phStatus = params.ph === undefined ? undefined : validatePh(params.ph, params.timestamp, language);
