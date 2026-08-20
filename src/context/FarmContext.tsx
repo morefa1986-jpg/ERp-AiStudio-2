@@ -1,73 +1,28 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
-  Hall,
-  Pond,
-  SturgeonSpecies,
-  FeedingRecord,
-  BiometricSession,
+  Account, AttendanceRecord, BackupSnapshot, BiometricSession, BroodstockFish, ColdStoragePallet, Customer,
+  Employee, Equipment, FeedingRecord, FertilizationBatch, FishTransfer, FarmAuditLog, Hall, IncubatorUnit,
+  InventoryItem, InventoryTransaction, JournalEntry, LabSample, LarvalBatch, MortalityRecord, NurseryTank,
+  PayrollRecord, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost, SturgeonSpecies, TreatmentRecord,
   WaterQualityLog,
-  MortalityRecord,
-  TreatmentRecord,
-  FishTransfer,
-  BroodstockFish,
-  FertilizationBatch,
-  IncubatorUnit,
-  LarvalBatch,
-  NurseryTank,
-  InventoryItem,
-  InventoryTransaction,
-  LabSample,
-  ProcessingBatch,
-  ColdStoragePallet,
-  Customer,
-  ProformaInvoice,
-  Account,
-  JournalEntry,
-  Employee,
-  AttendanceRecord,
-  PayrollRecord,
-  Equipment,
-  SocialMediaPost,
-  FarmAuditLog,
-  BackupSnapshot,
-  FeedingStatus,
 } from '../types';
-
 import {
-  INITIAL_SPECIES,
-  INITIAL_HALLS,
-  INITIAL_PONDS,
-  INITIAL_BROODSTOCK,
-  INITIAL_FERTILIZATIONS,
-  INITIAL_INCUBATORS,
-  INITIAL_LARVAE,
-  INITIAL_INVENTORY,
-  INITIAL_INVENTORY_TXS,
-  INITIAL_PROCESSING_BATCHES,
-  INITIAL_COLD_STORAGE,
-  INITIAL_CUSTOMERS,
-  INITIAL_PROFORMAS,
-  INITIAL_ACCOUNTS,
-  INITIAL_JOURNALS,
-  INITIAL_EMPLOYEES,
-  INITIAL_EQUIPMENT,
-  INITIAL_AUDIT_LOGS,
+  INITIAL_ACCOUNTS, INITIAL_AUDIT_LOGS, INITIAL_BROODSTOCK, INITIAL_COLD_STORAGE, INITIAL_CUSTOMERS,
+  INITIAL_EQUIPMENT, INITIAL_FERTILIZATIONS, INITIAL_HALLS, INITIAL_INCUBATORS, INITIAL_INVENTORY,
+  INITIAL_INVENTORY_TXS, INITIAL_JOURNALS, INITIAL_LARVAE, INITIAL_PONDS, INITIAL_PROCESSING_BATCHES,
+  INITIAL_PROFORMAS, INITIAL_SPECIES, INITIAL_EMPLOYEES,
 } from '../data/initialData';
-
-import { assessWaterSafetyForFeeding, validateDissolvedOxygen, validateWaterTemperature } from '../utils/sensorValidation';
-import { calculateFeedingRecommendation, normalizeFeedAmountToKg, validateFeedingSubmission } from '../utils/feedingEngine';
-import { executeAtomicFishTransfer } from '../utils/transferEngine';
+import { BACKUP_SCHEMA_VERSION, checksumBackupData, validateBackupDocument } from '../utils/backupEngine';
 import { validateAndExecuteJournalEntry } from '../utils/accountingEngine';
+import { calculateFeedingRecommendation, validateFeedingSubmission } from '../utils/feedingEngine';
+import { assessWaterSafetyForFeeding } from '../utils/sensorValidation';
+import { executeAtomicFishTransfer } from '../utils/transferEngine';
 
 export interface FeedingRecommendationResult {
   recommendedKg: number;
   isLocked: boolean;
   lockReason?: string;
-  waterSafety?: {
-    isSafe: boolean;
-    doStatus: string;
-    tempStatus: string;
-  };
+  waterSafety?: { isSafe: boolean; doStatus: string; tempStatus: string };
 }
 
 export interface OfflineSyncStatus {
@@ -77,40 +32,15 @@ export interface OfflineSyncStatus {
 }
 
 interface FarmContextType {
-  // State
-  halls: Hall[];
-  ponds: Pond[];
-  species: SturgeonSpecies[];
-  feedingRecords: FeedingRecord[];
-  biometricSessions: BiometricSession[];
-  waterLogs: WaterQualityLog[];
-  mortalityRecords: MortalityRecord[];
-  treatments: TreatmentRecord[];
-  transfers: FishTransfer[];
-  broodstock: BroodstockFish[];
-  fertilizations: FertilizationBatch[];
-  incubators: IncubatorUnit[];
-  larvae: LarvalBatch[];
-  nurseryTanks: NurseryTank[];
-  inventory: InventoryItem[];
-  inventoryTxs: InventoryTransaction[];
-  labSamples: LabSample[];
-  processingBatches: ProcessingBatch[];
-  coldStorage: ColdStoragePallet[];
-  customers: Customer[];
-  proformas: ProformaInvoice[];
-  accounts: Account[];
-  journals: JournalEntry[];
-  employees: Employee[];
-  attendance: AttendanceRecord[];
-  payrolls: PayrollRecord[];
-  equipment: Equipment[];
-  socialPosts: SocialMediaPost[];
-  auditLogs: FarmAuditLog[];
-  backups: BackupSnapshot[];
-  syncStatus: OfflineSyncStatus;
-
-  // Operational Actions & Safety Engines
+  halls: Hall[]; ponds: Pond[]; species: SturgeonSpecies[]; feedingRecords: FeedingRecord[];
+  biometricSessions: BiometricSession[]; waterLogs: WaterQualityLog[]; mortalityRecords: MortalityRecord[];
+  treatments: TreatmentRecord[]; transfers: FishTransfer[]; broodstock: BroodstockFish[];
+  fertilizations: FertilizationBatch[]; incubators: IncubatorUnit[]; larvae: LarvalBatch[]; nurseryTanks: NurseryTank[];
+  inventory: InventoryItem[]; inventoryTxs: InventoryTransaction[]; labSamples: LabSample[];
+  processingBatches: ProcessingBatch[]; coldStorage: ColdStoragePallet[]; customers: Customer[];
+  proformas: ProformaInvoice[]; accounts: Account[]; journals: JournalEntry[]; employees: Employee[];
+  attendance: AttendanceRecord[]; payrolls: PayrollRecord[]; equipment: Equipment[]; socialPosts: SocialMediaPost[];
+  auditLogs: FarmAuditLog[]; backups: BackupSnapshot[]; syncStatus: OfflineSyncStatus;
   calculateRecommendedFeed: (pondId: string) => FeedingRecommendationResult;
   recordFeeding: (record: Omit<FeedingRecord, 'id' | 'timestamp'>) => { success: boolean; error?: string };
   stopPondFeeding: (pondId: string, reason: Pond['stopFeedingReason'], details: string, operator: string) => void;
@@ -137,804 +67,218 @@ interface FarmContextType {
 }
 
 const FarmContext = createContext<FarmContextType | null>(null);
+const ROOT_STORAGE_KEY = 'fathi_erp_state_v2';
+
+function loadRoot(): Record<string, any> {
+  try { const raw = localStorage.getItem(ROOT_STORAGE_KEY); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+}
+function loadCollection<T>(name: string, legacyKey: string, fallback: T): T {
+  try {
+    const root = loadRoot();
+    if (root && root[name] !== undefined) return root[name] as T;
+    const legacy = localStorage.getItem(legacyKey);
+    return legacy ? JSON.parse(legacy) as T : fallback;
+  } catch { return fallback; }
+}
+function nextId(prefix: string): string { return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; }
+function inventoryStatus(item: InventoryItem, quantity: number): InventoryItem['status'] {
+  if (item.expiryDate && new Date(item.expiryDate).getTime() < Date.now()) return 'Expired';
+  if (quantity <= item.minimumStockThreshold) return 'Critical Low';
+  if (quantity <= item.reorderLevel) return 'Low Stock';
+  return 'Adequate';
+}
+function stripBackupData(snapshot: BackupSnapshot): BackupSnapshot { const { data: _data, ...metadata } = snapshot; return metadata; }
 
 export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Load initial states from LocalStorage or default datasets
-  const [halls, setHalls] = useState<Hall[]>(() => loadOrInitial('fathi_halls', INITIAL_HALLS));
-  const [ponds, setPonds] = useState<Pond[]>(() => loadOrInitial('fathi_ponds', INITIAL_PONDS));
-  const [species, setSpecies] = useState<SturgeonSpecies[]>(() => loadOrInitial('fathi_species', INITIAL_SPECIES));
-  const [feedingRecords, setFeedingRecords] = useState<FeedingRecord[]>(() => loadOrInitial('fathi_feeding', []));
-  const [biometricSessions, setBiometricSessions] = useState<BiometricSession[]>(() => loadOrInitial('fathi_biometrics', []));
-  const [waterLogs, setWaterLogs] = useState<WaterQualityLog[]>(() => loadOrInitial('fathi_water', []));
-  const [mortalityRecords, setMortalityRecords] = useState<MortalityRecord[]>(() => loadOrInitial('fathi_mortality', []));
-  const [treatments, setTreatments] = useState<TreatmentRecord[]>(() => loadOrInitial('fathi_treatments', []));
-  const [transfers, setTransfers] = useState<FishTransfer[]>(() => loadOrInitial('fathi_transfers', []));
-  const [broodstock, setBroodstock] = useState<BroodstockFish[]>(() => loadOrInitial('fathi_broodstock', INITIAL_BROODSTOCK));
-  const [fertilizations, setFertilizations] = useState<FertilizationBatch[]>(() => loadOrInitial('fathi_fert', INITIAL_FERTILIZATIONS));
-  const [incubators, setIncubators] = useState<IncubatorUnit[]>(() => loadOrInitial('fathi_incubators', INITIAL_INCUBATORS));
-  const [larvae, setLarvae] = useState<LarvalBatch[]>(() => loadOrInitial('fathi_larvae', INITIAL_LARVAE));
-  const [nurseryTanks, setNurseryTanks] = useState<NurseryTank[]>(() => loadOrInitial('fathi_nursery', []));
-  const [inventory, setInventory] = useState<InventoryItem[]>(() => loadOrInitial('fathi_inventory', INITIAL_INVENTORY));
-  const [inventoryTxs, setInventoryTxs] = useState<InventoryTransaction[]>(() => loadOrInitial('fathi_inv_txs', INITIAL_INVENTORY_TXS));
-  const [labSamples, setLabSamples] = useState<LabSample[]>(() => loadOrInitial('fathi_lab', []));
-  const [processingBatches, setProcessingBatches] = useState<ProcessingBatch[]>(() => loadOrInitial('fathi_processing', INITIAL_PROCESSING_BATCHES));
-  const [coldStorage, setColdStorage] = useState<ColdStoragePallet[]>(() => loadOrInitial('fathi_cold_storage', INITIAL_COLD_STORAGE));
-  const [customers, setCustomers] = useState<Customer[]>(() => loadOrInitial('fathi_customers', INITIAL_CUSTOMERS));
-  const [proformas, setProformas] = useState<ProformaInvoice[]>(() => loadOrInitial('fathi_proformas', INITIAL_PROFORMAS));
-  const [accounts, setAccounts] = useState<Account[]>(() => loadOrInitial('fathi_accounts', INITIAL_ACCOUNTS));
-  const [journals, setJournals] = useState<JournalEntry[]>(() => loadOrInitial('fathi_journals', INITIAL_JOURNALS));
-  const [employees, setEmployees] = useState<Employee[]>(() => loadOrInitial('fathi_employees', INITIAL_EMPLOYEES));
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => loadOrInitial('fathi_attendance', []));
-  const [payrolls, setPayrolls] = useState<PayrollRecord[]>(() => loadOrInitial('fathi_payrolls', []));
-  const [equipment, setEquipment] = useState<Equipment[]>(() => loadOrInitial('fathi_equipment', INITIAL_EQUIPMENT));
-  const [socialPosts, setSocialPosts] = useState<SocialMediaPost[]>(() => loadOrInitial('fathi_social', []));
-  const [auditLogs, setAuditLogs] = useState<FarmAuditLog[]>(() => loadOrInitial('fathi_audit', INITIAL_AUDIT_LOGS));
-  const [backups, setBackups] = useState<BackupSnapshot[]>(() => loadOrInitial('fathi_backups', []));
+  const [halls, setHalls] = useState<Hall[]>(() => loadCollection('halls', 'fathi_halls', INITIAL_HALLS));
+  const [ponds, setPonds] = useState<Pond[]>(() => loadCollection('ponds', 'fathi_ponds', INITIAL_PONDS));
+  const [species, setSpecies] = useState<SturgeonSpecies[]>(() => loadCollection('species', 'fathi_species', INITIAL_SPECIES));
+  const [feedingRecords, setFeedingRecords] = useState<FeedingRecord[]>(() => loadCollection('feedingRecords', 'fathi_feeding', []));
+  const [biometricSessions, setBiometricSessions] = useState<BiometricSession[]>(() => loadCollection('biometricSessions', 'fathi_biometrics', []));
+  const [waterLogs, setWaterLogs] = useState<WaterQualityLog[]>(() => loadCollection('waterLogs', 'fathi_water', []));
+  const [mortalityRecords, setMortalityRecords] = useState<MortalityRecord[]>(() => loadCollection('mortalityRecords', 'fathi_mortality', []));
+  const [treatments, setTreatments] = useState<TreatmentRecord[]>(() => loadCollection('treatments', 'fathi_treatments', []));
+  const [transfers, setTransfers] = useState<FishTransfer[]>(() => loadCollection('transfers', 'fathi_transfers', []));
+  const [broodstock, setBroodstock] = useState<BroodstockFish[]>(() => loadCollection('broodstock', 'fathi_broodstock', INITIAL_BROODSTOCK));
+  const [fertilizations, setFertilizations] = useState<FertilizationBatch[]>(() => loadCollection('fertilizations', 'fathi_fert', INITIAL_FERTILIZATIONS));
+  const [incubators, setIncubators] = useState<IncubatorUnit[]>(() => loadCollection('incubators', 'fathi_incubators', INITIAL_INCUBATORS));
+  const [larvae, setLarvae] = useState<LarvalBatch[]>(() => loadCollection('larvae', 'fathi_larvae', INITIAL_LARVAE));
+  const [nurseryTanks, setNurseryTanks] = useState<NurseryTank[]>(() => loadCollection('nurseryTanks', 'fathi_nursery', []));
+  const [inventory, setInventory] = useState<InventoryItem[]>(() => loadCollection('inventory', 'fathi_inventory', INITIAL_INVENTORY));
+  const [inventoryTxs, setInventoryTxs] = useState<InventoryTransaction[]>(() => loadCollection('inventoryTxs', 'fathi_inv_txs', INITIAL_INVENTORY_TXS));
+  const [labSamples, setLabSamples] = useState<LabSample[]>(() => loadCollection('labSamples', 'fathi_lab', []));
+  const [processingBatches, setProcessingBatches] = useState<ProcessingBatch[]>(() => loadCollection('processingBatches', 'fathi_processing', INITIAL_PROCESSING_BATCHES));
+  const [coldStorage, setColdStorage] = useState<ColdStoragePallet[]>(() => loadCollection('coldStorage', 'fathi_cold_storage', INITIAL_COLD_STORAGE));
+  const [customers, setCustomers] = useState<Customer[]>(() => loadCollection('customers', 'fathi_customers', INITIAL_CUSTOMERS));
+  const [proformas, setProformas] = useState<ProformaInvoice[]>(() => loadCollection('proformas', 'fathi_proformas', INITIAL_PROFORMAS));
+  const [accounts, setAccounts] = useState<Account[]>(() => loadCollection('accounts', 'fathi_accounts', INITIAL_ACCOUNTS));
+  const [journals, setJournals] = useState<JournalEntry[]>(() => loadCollection('journals', 'fathi_journals', INITIAL_JOURNALS));
+  const [employees, setEmployees] = useState<Employee[]>(() => loadCollection('employees', 'fathi_employees', INITIAL_EMPLOYEES));
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => loadCollection('attendance', 'fathi_attendance', []));
+  const [payrolls, setPayrolls] = useState<PayrollRecord[]>(() => loadCollection('payrolls', 'fathi_payrolls', []));
+  const [equipment, setEquipment] = useState<Equipment[]>(() => loadCollection('equipment', 'fathi_equipment', INITIAL_EQUIPMENT));
+  const [socialPosts, setSocialPosts] = useState<SocialMediaPost[]>(() => loadCollection('socialPosts', 'fathi_social', []));
+  const [auditLogs, setAuditLogs] = useState<FarmAuditLog[]>(() => loadCollection('auditLogs', 'fathi_audit', INITIAL_AUDIT_LOGS));
+  const [backups, setBackups] = useState<BackupSnapshot[]>(() => loadCollection('backups', 'fathi_backups', []));
+  const [syncStatus, setSyncStatus] = useState<OfflineSyncStatus>({ status: 'OFFLINE', pendingChangesCount: 0, lastSyncTimestamp: '' });
 
-  // Sync state for LAN & Offline-first capabilities
-  const [syncStatus, setSyncStatus] = useState<OfflineSyncStatus>({
-    status: 'ONLINE',
-    pendingChangesCount: 0,
-    lastSyncTimestamp: new Date().toISOString(),
-  });
-
-  function loadOrInitial<T>(key: string, fallback: T): T {
-    try {
-      const item = localStorage.getItem(key);
-      return item ? JSON.parse(item) : fallback;
-    } catch (e) {
-      return fallback;
-    }
-  }
-
-  // Persistence effects
-  useEffect(() => { localStorage.setItem('fathi_ponds', JSON.stringify(ponds)); }, [ponds]);
-  useEffect(() => { localStorage.setItem('fathi_halls', JSON.stringify(halls)); }, [halls]);
-  useEffect(() => { localStorage.setItem('fathi_species', JSON.stringify(species)); }, [species]);
-  useEffect(() => { localStorage.setItem('fathi_feeding', JSON.stringify(feedingRecords)); }, [feedingRecords]);
-  useEffect(() => { localStorage.setItem('fathi_biometrics', JSON.stringify(biometricSessions)); }, [biometricSessions]);
-  useEffect(() => { localStorage.setItem('fathi_water', JSON.stringify(waterLogs)); }, [waterLogs]);
-  useEffect(() => { localStorage.setItem('fathi_mortality', JSON.stringify(mortalityRecords)); }, [mortalityRecords]);
-  useEffect(() => { localStorage.setItem('fathi_treatments', JSON.stringify(treatments)); }, [treatments]);
-  useEffect(() => { localStorage.setItem('fathi_transfers', JSON.stringify(transfers)); }, [transfers]);
-  useEffect(() => { localStorage.setItem('fathi_broodstock', JSON.stringify(broodstock)); }, [broodstock]);
-  useEffect(() => { localStorage.setItem('fathi_inventory', JSON.stringify(inventory)); }, [inventory]);
-  useEffect(() => { localStorage.setItem('fathi_inv_txs', JSON.stringify(inventoryTxs)); }, [inventoryTxs]);
-  useEffect(() => { localStorage.setItem('fathi_processing', JSON.stringify(processingBatches)); }, [processingBatches]);
-  useEffect(() => { localStorage.setItem('fathi_cold_storage', JSON.stringify(coldStorage)); }, [coldStorage]);
-  useEffect(() => { localStorage.setItem('fathi_customers', JSON.stringify(customers)); }, [customers]);
-  useEffect(() => { localStorage.setItem('fathi_proformas', JSON.stringify(proformas)); }, [proformas]);
-  useEffect(() => { localStorage.setItem('fathi_accounts', JSON.stringify(accounts)); }, [accounts]);
-  useEffect(() => { localStorage.setItem('fathi_journals', JSON.stringify(journals)); }, [journals]);
-  useEffect(() => { localStorage.setItem('fathi_audit', JSON.stringify(auditLogs)); }, [auditLogs]);
-  useEffect(() => { localStorage.setItem('fathi_backups', JSON.stringify(backups)); }, [backups]);
-
-  // Recalculate Hall aggregates when ponds change
   useEffect(() => {
-    setHalls((prevHalls) =>
-      prevHalls.map((hall) => {
-        const hallPonds = ponds.filter((p) => p.hallId === hall.id);
-        const totalBiomassKg = hallPonds.reduce((sum, p) => sum + p.biomassKg, 0);
-        const totalFishCount = hallPonds.reduce((sum, p) => sum + p.fishCount, 0);
-        return {
-          ...hall,
-          pondCount: hallPonds.length,
-          totalBiomassKg,
-          totalFishCount,
-        };
-      })
-    );
+    try {
+      localStorage.setItem(ROOT_STORAGE_KEY, JSON.stringify({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups: backups.map(stripBackupData) }));
+    } catch { setSyncStatus((previous) => ({ ...previous, status: 'ERROR' })); }
+  }, [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups]);
+
+  useEffect(() => {
+    setHalls((previous) => previous.map((hall) => {
+      const hallPonds = ponds.filter((pond) => pond.hallId === hall.id);
+      const next = { ...hall, pondCount: hallPonds.length, totalBiomassKg: Number(hallPonds.reduce((sum, pond) => sum + pond.biomassKg, 0).toFixed(2)), totalFishCount: hallPonds.reduce((sum, pond) => sum + pond.fishCount, 0) };
+      return hall.pondCount === next.pondCount && hall.totalBiomassKg === next.totalBiomassKg && hall.totalFishCount === next.totalFishCount ? hall : next;
+    }));
   }, [ponds]);
 
-  // Audit Logger
-  const createAuditLog = (
-    action: string,
-    entity: string,
-    entityId: string,
-    details: string,
-    beforeState?: string,
-    afterState?: string
-  ) => {
-    const newLog: FarmAuditLog = {
-      id: 'audit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-      timestamp: new Date().toISOString(),
-      userId: 'usr_active',
-      userName: 'Current Operator',
-      userRole: 'Enterprise Role',
-      action,
-      entity,
-      entityId,
-      details,
-      beforeState,
-      afterState,
-      ipAddress: '127.0.0.1 (Local LAN)',
-    };
-    setAuditLogs((prev) => [newLog, ...prev.slice(0, 499)]); // Keep last 500
+  const markLocalChange = () => setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: previous.pendingChangesCount + 1 }));
+  const createAuditLog = (action: string, entity: string, entityId: string, details: string, beforeState?: string, afterState?: string) => {
+    const log: FarmAuditLog = { id: nextId('audit'), timestamp: new Date().toISOString(), userId: 'local-session', userName: 'Local Operator', userRole: 'Authenticated Session', action, entity, entityId, details, beforeState, afterState };
+    setAuditLogs((previous) => [log, ...previous].slice(0, 1000));
   };
+  const latestWaterTimestamp = (pondId: string): string | undefined => waterLogs.filter((log) => log.pondId === pondId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0]?.timestamp;
 
-  /**
-   * STRICT FEEDING SAFETY ENGINE (PHASE 3 & PHASE 4)
-   * Evaluates DO, temperature, treatment lockouts, and pond status.
-   * If any safety condition fails, returns recommendedKg = 0 and isLocked = true.
-   */
   const calculateRecommendedFeed = (pondId: string): FeedingRecommendationResult => {
-    const pond = ponds.find((p) => p.id === pondId);
-    const activeTreatment = pond?.activeTreatmentId ? treatments.find((t) => t.id === pond.activeTreatmentId && t.status === 'Active') : undefined;
-    return calculateFeedingRecommendation(pond, species, activeTreatment);
+    const pond = ponds.find((item) => item.id === pondId);
+    const activeTreatment = pond?.activeTreatmentId ? treatments.find((item) => item.id === pond.activeTreatmentId && item.status === 'ACTIVE') : undefined;
+    const base = calculateFeedingRecommendation(pond, species, activeTreatment);
+    if (!pond || base.isLocked) return base;
+    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: pond.dissolvedOxygen, waterTemperature: pond.waterTemperature, ph: pond.ph, timestamp: latestWaterTimestamp(pond.id) });
+    if (!safety.isSafeForFeeding) return { recommendedKg: 0, isLocked: true, lockReason: safety.feedingProhibitionReason, waterSafety: { isSafe: false, doStatus: safety.doStatus.status, tempStatus: safety.tempStatus.status } };
+    return base;
   };
 
-  /**
-   * DOMAIN-LEVEL FEEDING REGISTRATION
-   * Prevents API or UI bypass of feeding safety rules.
-   */
   const recordFeeding = (recordData: Omit<FeedingRecord, 'id' | 'timestamp'>): { success: boolean; error?: string } => {
-    const pond = ponds.find((p) => p.id === recordData.pondId);
+    const pond = ponds.find((item) => item.id === recordData.pondId);
     if (!pond) return { success: false, error: 'استخر یافت نشد.' };
-
+    const recommendation = calculateRecommendedFeed(recordData.pondId);
+    if (recommendation.isLocked) return { success: false, error: recommendation.lockReason || 'تغذیه قفل است.' };
     const validation = validateFeedingSubmission(recordData, pond, inventory);
-    if (!validation.success) {
-      createAuditLog(
-        'SECURITY_SAFETY_VIOLATION_REJECTED',
-        'Feeding',
-        pond.id,
-        `تلاش ناموفق برای ثبت خوراک: ${validation.error}`
-      );
-      return { success: false, error: validation.error };
-    }
-
-    const normalizedAmountKg = validation.normalizedAmountKg;
-
-    const newRecord: FeedingRecord = {
-      ...recordData,
-      actualAmountKg: normalizedAmountKg,
-      id: 'fd_' + Date.now(),
-      timestamp: new Date().toISOString(),
-    };
-
-    setFeedingRecords((prev) => [newRecord, ...prev]);
-
-    // Update pond last feeding info
-    setPonds((prev) =>
-      prev.map((p) =>
-        p.id === recordData.pondId
-          ? {
-              ...p,
-              lastFeedingKg: normalizedAmountKg,
-              lastFeedingTime: newRecord.timestamp,
-            }
-          : p
-      )
-    );
-
-    // Ledger deduction from warehouse
+    if (!validation.success || !validation.feedItem) return { success: false, error: validation.error || 'اعتبارسنجی خوراک ناموفق بود.' };
+    const amountKg = validation.normalizedAmountKg;
     const feedItem = validation.feedItem;
-    if (feedItem) {
-      addInventoryTransaction({
-        itemId: feedItem.id,
-        itemName: feedItem.name,
-        sku: feedItem.sku,
-        type: 'Consumption (مصرف روزانه)',
-        quantityChange: -normalizedAmountKg,
-        unit: 'kg',
-        unitPrice: feedItem.purchasePricePerUnit,
-        totalValue: normalizedAmountKg * feedItem.purchasePricePerUnit,
-        referenceDoc: newRecord.id,
-        pondId: pond.id,
-        operator: recordData.operatorName,
-        notes: `تغذیه استخر ${pond.name}`,
-      });
-    }
-
-    createAuditLog(
-      'FEEDING_LOGGED',
-      'Pond',
-      pond.id,
-      `ثبت غذادهی ${normalizedAmountKg} kg در ${pond.name}`,
-      `lastFeedingKg: ${pond.lastFeedingKg}`,
-      `lastFeedingKg: ${normalizedAmountKg}`
-    );
-
+    const resultingQuantity = Number((feedItem.quantity - amountKg).toFixed(4));
+    if (resultingQuantity < 0) return { success: false, error: 'موجودی خوراک کافی نیست.' };
+    const timestamp = new Date().toISOString();
+    const newRecord: FeedingRecord = { ...recordData, id: nextId('feed'), timestamp, actualAmountKg: amountKg, unit: 'kg', dissolvedOxygen: pond.dissolvedOxygen, waterTemperature: pond.waterTemperature, feedingStatus: 'ACTIVE' };
+    const tx: InventoryTransaction = { id: nextId('invtx'), itemId: feedItem.id, itemName: feedItem.name, sku: feedItem.sku, type: 'Consumption (مصرف روزانه)', quantityChange: -amountKg, resultingQuantity, unit: feedItem.unit, unitPrice: feedItem.purchasePricePerUnit, totalValue: Number((amountKg * feedItem.purchasePricePerUnit).toFixed(2)), referenceDoc: newRecord.id, pondId: pond.id, operator: recordData.operatorName, timestamp, notes: 'Feeding consumption' };
+    setInventory((previous) => previous.map((item) => item.id === feedItem.id ? { ...item, quantity: resultingQuantity, status: inventoryStatus(item, resultingQuantity) } : item));
+    setInventoryTxs((previous) => [tx, ...previous]);
+    setFeedingRecords((previous) => [newRecord, ...previous]);
+    setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, lastFeedingKg: amountKg, lastFeedingTime: timestamp } : item));
+    createAuditLog('CREATE', 'FeedingRecord', newRecord.id, `Feeding ${amountKg} kg registered for ${pond.name}`); markLocalChange();
     return { success: true };
   };
 
   const stopPondFeeding = (pondId: string, reason: Pond['stopFeedingReason'], details: string, operator: string) => {
-    const pond = ponds.find((p) => p.id === pondId);
-    if (!pond) return;
-
-    setPonds((prev) =>
-      prev.map((p) =>
-        p.id === pondId
-          ? {
-              ...p,
-              feedingStatus: 'STOPPED',
-              stopFeedingReason: reason,
-              stopFeedingDetails: details,
-              stopFeedingTimestamp: new Date().toISOString(),
-              stopFeedingUser: operator,
-              criticalAlerts: [`تغذیه قطع شد: ${reason} - ${details}`, ...p.criticalAlerts],
-            }
-          : p
-      )
-    );
-
-    createAuditLog(
-      'FEEDING_STOPPED',
-      'Pond',
-      pondId,
-      `قطع اضطراری تغذیه در استخر ${pond.name} به دلیل ${reason} توسط ${operator}`,
-      'feedingStatus: ACTIVE',
-      'feedingStatus: STOPPED'
-    );
+    const timestamp = new Date().toISOString();
+    setPonds((previous) => previous.map((pond) => pond.id === pondId ? { ...pond, feedingStatus: 'STOPPED', stopFeedingReason: reason || 'Other', stopFeedingDetails: details.trim(), stopFeedingTimestamp: timestamp, stopFeedingUser: operator } : pond));
+    createAuditLog('UPDATE', 'Pond', pondId, `Feeding stopped: ${reason || 'Other'} - ${details}`); markLocalChange();
   };
 
   const resumePondFeeding = (pondId: string, operator: string): { success: boolean; error?: string } => {
-    const pond = ponds.find((p) => p.id === pondId);
+    const pond = ponds.find((item) => item.id === pondId);
     if (!pond) return { success: false, error: 'استخر یافت نشد.' };
-
-    // Safety check: Cannot resume if DO is still < 4.0
-    if (pond.dissolvedOxygen < 4.0) {
-      return {
-        success: false,
-        error: `وصل مجدد تغذیه امکان‌پذیر نیست: اکسیژن استخر هنوز ${pond.dissolvedOxygen} mg/L است و باید بالای ۴.۰ mg/L پایدار شود.`,
-      };
-    }
-
-    setPonds((prev) =>
-      prev.map((p) =>
-        p.id === pondId
-          ? {
-              ...p,
-              feedingStatus: 'ACTIVE',
-              stopFeedingReason: undefined,
-              stopFeedingDetails: undefined,
-              criticalAlerts: p.criticalAlerts.filter((a) => !a.includes('تغذیه قطع شد')),
-            }
-          : p
-      )
-    );
-
-    createAuditLog(
-      'FEEDING_RESUMED',
-      'Pond',
-      pondId,
-      `وصل مجدد تغذیه در استخر ${pond.name} توسط ${operator}`,
-      'feedingStatus: STOPPED',
-      'feedingStatus: ACTIVE'
-    );
-
-    return { success: true };
+    if (pond.activeTreatmentId && treatments.some((treatment) => treatment.id === pond.activeTreatmentId && treatment.status === 'ACTIVE')) return { success: false, error: 'درمان فعال است؛ تغذیه قابل وصل نیست.' };
+    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: pond.dissolvedOxygen, waterTemperature: pond.waterTemperature, ph: pond.ph, timestamp: latestWaterTimestamp(pond.id) });
+    if (!safety.isSafeForFeeding) return { success: false, error: safety.feedingProhibitionReason || 'کیفیت آب ایمن نیست.' };
+    setPonds((previous) => previous.map((item) => item.id === pondId ? { ...item, feedingStatus: 'ACTIVE', stopFeedingReason: undefined, stopFeedingDetails: undefined, stopFeedingTimestamp: undefined, stopFeedingUser: operator } : item));
+    createAuditLog('UPDATE', 'Pond', pondId, 'Feeding resumed after safety validation'); markLocalChange(); return { success: true };
   };
 
-  // Mortality Logging & Live Inventory Reduction
-  const recordMortality = (recordData: Omit<MortalityRecord, 'id' | 'timestamp'>) => {
-    const pond = ponds.find((p) => p.id === recordData.pondId);
-    if (!pond) return;
-
-    const newRecord: MortalityRecord = {
-      ...recordData,
-      id: 'mort_' + Date.now(),
-      timestamp: new Date().toISOString(),
-    };
-
-    setMortalityRecords((prev) => [newRecord, ...prev]);
-
-    // Automatically reduce live fish count and biomass
-    setPonds((prev) =>
-      prev.map((p) => {
-        if (p.id === recordData.pondId) {
-          const newCount = Math.max(0, p.fishCount - recordData.count);
-          const newBiomass = Math.max(0, p.biomassKg - recordData.estimatedWeightKg);
-          const newAvg = newCount > 0 ? Number((newBiomass / newCount).toFixed(2)) : 0;
-          return {
-            ...p,
-            fishCount: newCount,
-            biomassKg: newBiomass,
-            averageWeightKg: newAvg,
-            dailyMortalityCount: p.dailyMortalityCount + recordData.count,
-          };
-        }
-        return p;
-      })
-    );
-
-    createAuditLog(
-      'MORTALITY_LOGGED',
-      'Pond',
-      pond.id,
-      `ثبت تلفات ${recordData.count} قطعه (${recordData.estimatedWeightKg} kg) به علت ${recordData.reason}`,
-      `fishCount: ${pond.fishCount}`,
-      `fishCount: ${pond.fishCount - recordData.count}`
-    );
+  const recordMortality = (record: Omit<MortalityRecord, 'id' | 'timestamp'>) => {
+    const pond = ponds.find((item) => item.id === record.pondId);
+    if (!pond || !Number.isInteger(record.count) || record.count <= 0 || record.count > pond.fishCount || !Number.isFinite(record.estimatedWeightKg) || record.estimatedWeightKg < 0 || record.estimatedWeightKg > pond.biomassKg) { createAuditLog('REJECT', 'MortalityRecord', record.pondId, 'Invalid mortality transaction rejected'); return; }
+    const newRecord: MortalityRecord = { ...record, id: nextId('mort'), timestamp: new Date().toISOString() };
+    const newCount = pond.fishCount - record.count; const newBiomass = Number((pond.biomassKg - record.estimatedWeightKg).toFixed(2));
+    setMortalityRecords((previous) => [newRecord, ...previous]);
+    setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, fishCount: newCount, biomassKg: newBiomass, averageWeightKg: newCount > 0 ? Number((newBiomass / newCount).toFixed(3)) : 0, dailyMortalityCount: item.dailyMortalityCount + record.count } : item));
+    createAuditLog('CREATE', 'MortalityRecord', newRecord.id, `${record.count} mortality recorded in ${pond.name}`); markLocalChange();
   };
 
-  // Biometrics & SGR Engine
-  const recordBiometry = (sessionData: Omit<BiometricSession, 'id' | 'averageWeightKg' | 'minWeightKg' | 'maxWeightKg' | 'estimatedBiomassKg' | 'estimatedCount' | 'growthRateKgPerDay' | 'sgr'>) => {
-    const pond = ponds.find((p) => p.id === sessionData.pondId);
-    if (!pond) return;
-
-    const weights = sessionData.samples.map((s) => s.weightKg);
-    const avgWeight = weights.length > 0 ? weights.reduce((a, b) => a + b, 0) / weights.length : pond.averageWeightKg;
-    const minWeight = weights.length > 0 ? Math.min(...weights) : avgWeight;
-    const maxWeight = weights.length > 0 ? Math.max(...weights) : avgWeight;
-
-    const days = Math.max(1, sessionData.daysSinceLastBiometry || 30);
-    const prevWeight = sessionData.previousAvgWeightKg || pond.averageWeightKg;
-    const growthRate = (avgWeight - prevWeight) / days;
-    const sgr = prevWeight > 0 && avgWeight > 0 ? ((Math.log(avgWeight) - Math.log(prevWeight)) / days) * 100 : 0;
-
-    const estimatedBiomass = Number((pond.fishCount * avgWeight).toFixed(2));
-
-    const newSession: BiometricSession = {
-      ...sessionData,
-      id: 'bio_' + Date.now(),
-      averageWeightKg: Number(avgWeight.toFixed(2)),
-      minWeightKg: Number(minWeight.toFixed(2)),
-      maxWeightKg: Number(maxWeight.toFixed(2)),
-      estimatedBiomassKg: estimatedBiomass,
-      estimatedCount: pond.fishCount,
-      growthRateKgPerDay: Number(growthRate.toFixed(4)),
-      sgr: Number(sgr.toFixed(3)),
-    };
-
-    setBiometricSessions((prev) => [newSession, ...prev]);
-
-    // Update pond biometry state
-    setPonds((prev) =>
-      prev.map((p) =>
-        p.id === sessionData.pondId
-          ? {
-              ...p,
-              averageWeightKg: newSession.averageWeightKg,
-              biomassKg: newSession.estimatedBiomassKg,
-              lastBiometryDate: sessionData.date,
-            }
-          : p
-      )
-    );
-
-    createAuditLog(
-      'BIOMETRY_RECORDED',
-      'Pond',
-      pond.id,
-      `ثبت بیومتری استخر ${pond.name}: میانگین وزن جدید ${newSession.averageWeightKg} kg, SGR: ${newSession.sgr}%/روز`,
-      `avgWeight: ${pond.averageWeightKg}`,
-      `avgWeight: ${newSession.averageWeightKg}`
-    );
+  const recordBiometry = (session: Omit<BiometricSession, 'id' | 'averageWeightKg' | 'minWeightKg' | 'maxWeightKg' | 'estimatedBiomassKg' | 'estimatedCount' | 'growthRateKgPerDay' | 'sgr'>) => {
+    const pond = ponds.find((item) => item.id === session.pondId); const validSamples = session.samples.filter((sample) => Number.isFinite(sample.weightKg) && sample.weightKg > 0); if (!pond || !validSamples.length) return;
+    const weights = validSamples.map((sample) => sample.weightKg); const average = weights.reduce((sum, value) => sum + value, 0) / weights.length;
+    const previousSession = biometricSessions.filter((item) => item.pondId === pond.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+    const previousAverage = previousSession?.averageWeightKg || pond.averageWeightKg || average; const previousDate = previousSession?.date || pond.lastBiometryDate;
+    const days = Math.max(1, Math.round((new Date(session.date).getTime() - new Date(previousDate).getTime()) / 86_400_000)); const growthRate = (average - previousAverage) / days; const sgr = previousAverage > 0 ? (Math.log(average / previousAverage) / days) * 100 : 0; const estimatedBiomass = Number((pond.fishCount * average).toFixed(2));
+    const newSession: BiometricSession = { ...session, id: nextId('bio'), sampleCount: validSamples.length, samples: validSamples, averageWeightKg: Number(average.toFixed(3)), minWeightKg: Math.min(...weights), maxWeightKg: Math.max(...weights), estimatedBiomassKg: estimatedBiomass, estimatedCount: pond.fishCount, previousAvgWeightKg: previousAverage, daysSinceLastBiometry: days, growthRateKgPerDay: Number(growthRate.toFixed(4)), sgr: Number(sgr.toFixed(3)) };
+    setBiometricSessions((previous) => [newSession, ...previous]); setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, averageWeightKg: newSession.averageWeightKg, biomassKg: estimatedBiomass, lastBiometryDate: session.date } : item)); createAuditLog('CREATE', 'BiometricSession', newSession.id, `Biometry recorded for ${pond.name}`); markLocalChange();
   };
 
-  const recordWaterTest = (testData: Omit<WaterQualityLog, 'id' | 'timestamp'>) => {
-    const newLog: WaterQualityLog = {
-      ...testData,
-      id: 'wq_' + Date.now(),
-      timestamp: new Date().toISOString(),
-    };
-    setWaterLogs((prev) => [newLog, ...prev]);
-
-    // Update pond live water parameters
-    setPonds((prev) =>
-      prev.map((p) =>
-        p.id === testData.pondId
-          ? {
-              ...p,
-              waterTemperature: testData.temperature,
-              dissolvedOxygen: testData.dissolvedOxygen,
-              ph: testData.ph,
-            }
-          : p
-      )
-    );
+  const recordWaterTest = (test: Omit<WaterQualityLog, 'id' | 'timestamp'>) => {
+    const pond = ponds.find((item) => item.id === test.pondId); if (!pond) return; const timestamp = new Date().toISOString();
+    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, ammonia: test.ammonia, nitrite: test.nitrite, timestamp });
+    const invalid = !safety.doStatus.isValid || !safety.tempStatus.isValid || safety.phStatus?.isValid === false; const severity: WaterQualityLog['severity'] = safety.isCriticalAlert ? 'CRITICAL' : safety.isSafeForFeeding ? 'INFO' : 'HIGH'; const sensorStatus: WaterQualityLog['sensorStatus'] = invalid ? 'INVALID' : 'VALID';
+    const newLog: WaterQualityLog = { ...test, id: nextId('water'), timestamp, severity, sensorStatus, alertMessage: safety.feedingProhibitionReason }; setWaterLogs((previous) => [newLog, ...previous]);
+    setPonds((previous) => previous.map((item) => {
+      if (item.id !== pond.id) return item;
+      if (invalid) return { ...item, feedingStatus: 'STOPPED', stopFeedingReason: 'Other', stopFeedingDetails: safety.feedingProhibitionReason || 'Invalid sensor data', stopFeedingTimestamp: timestamp };
+      return { ...item, dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, feedingStatus: safety.isSafeForFeeding ? item.feedingStatus : 'STOPPED', stopFeedingReason: safety.isSafeForFeeding ? item.stopFeedingReason : (test.temperature < 4 ? 'Low Temperature' : test.dissolvedOxygen < 4 ? 'Low Oxygen' : 'Other'), stopFeedingDetails: safety.isSafeForFeeding ? item.stopFeedingDetails : safety.feedingProhibitionReason, stopFeedingTimestamp: safety.isSafeForFeeding ? item.stopFeedingTimestamp : timestamp };
+    })); createAuditLog('CREATE', 'WaterQualityLog', newLog.id, safety.isSafeForFeeding ? 'Water quality recorded' : `Water safety alert: ${safety.feedingProhibitionReason}`); markLocalChange();
   };
 
-  const recordTreatment = (treatmentData: Omit<TreatmentRecord, 'id'>) => {
-    const newTreatment: TreatmentRecord = {
-      ...treatmentData,
-      id: 'tr_' + Date.now(),
-    };
-    setTreatments((prev) => [newTreatment, ...prev]);
-
-    // Update pond active treatment
-    setPonds((prev) =>
-      prev.map((p) =>
-        p.id === treatmentData.pondId
-          ? {
-              ...p,
-              activeTreatmentId: newTreatment.id,
-            }
-          : p
-      )
-    );
+  const recordTreatment = (treatment: Omit<TreatmentRecord, 'id'>) => {
+    if (!Number.isFinite(treatment.dose) || treatment.dose <= 0 || Number.isNaN(new Date(treatment.startDate).getTime())) return; const id = nextId('treat'); const newTreatment: TreatmentRecord = { ...treatment, id }; setTreatments((previous) => [newTreatment, ...previous]);
+    if (treatment.status === 'ACTIVE') setPonds((previous) => previous.map((pond) => pond.id === treatment.pondId ? { ...pond, activeTreatmentId: id, feedingStatus: 'STOPPED', stopFeedingReason: 'Treatment', stopFeedingDetails: `${treatment.drugName}: ${treatment.diagnosis}`, stopFeedingTimestamp: new Date().toISOString(), stopFeedingUser: treatment.veterinarian } : pond));
+    createAuditLog('CREATE', 'TreatmentRecord', id, `${treatment.drugName} treatment recorded for ${treatment.pondName}`); markLocalChange();
   };
 
-  /**
-   * ATOMIC FISH TRANSFER ENGINE (PHASE 6)
-   * Guaranteed single-transaction mutation: Source fish decrement strictly equals destination increment.
-   */
   const executeAtomicTransfer = (transferData: Omit<FishTransfer, 'id' | 'status'>): { success: boolean; error?: string } => {
-    const result = executeAtomicFishTransfer(transferData, ponds);
-    if (!result.success || !result.updatedPonds || !result.newTransfer) {
-      return { success: false, error: result.error || 'خطا در انجام انتقال اتمیک ماهی' };
-    }
-
-    setPonds(result.updatedPonds);
-    setTransfers((prev) => [result.newTransfer!, ...prev]);
-
-    createAuditLog(
-      'FISH_TRANSFER_ATOMIC',
-      'Pond',
-      transferData.sourceId,
-      `انتقال اتمیک ${transferData.fishCount} قطعه ماهی از ${transferData.sourceName} به ${transferData.destinationName}`,
-      `transferBiomassKg: ${result.newTransfer.totalBiomassKg}`
-    );
-
-    return { success: true };
+    const result = executeAtomicFishTransfer(transferData, ponds); if (!result.success || !result.updatedPonds || !result.newTransfer) return { success: false, error: result.error }; setPonds(result.updatedPonds); setTransfers((previous) => [result.newTransfer!, ...previous]); createAuditLog('CREATE', 'FishTransfer', result.newTransfer.id, `${transferData.sourceName} → ${transferData.destinationName}: ${transferData.fishCount} fish`); markLocalChange(); return { success: true };
   };
 
-  // Warehouse Ledger
-  const addInventoryTransaction = (txData: Omit<InventoryTransaction, 'id' | 'timestamp' | 'resultingQuantity'>) => {
-    const item = inventory.find((i) => i.id === txData.itemId);
-    if (!item) return;
-
-    const newQty = Math.max(0, item.quantity + txData.quantityChange);
-    const newTx: InventoryTransaction = {
-      ...txData,
-      id: 'tx_' + Date.now(),
-      resultingQuantity: newQty,
-      timestamp: new Date().toISOString(),
-    };
-
-    setInventoryTxs((prev) => [newTx, ...prev]);
-    setInventory((prev) =>
-      prev.map((i) =>
-        i.id === txData.itemId
-          ? {
-              ...i,
-              quantity: newQty,
-              status: newQty <= i.minimumStockThreshold ? 'Low Stock' : 'Adequate',
-            }
-          : i
-      )
-    );
+  const addInventoryTransaction = (tx: Omit<InventoryTransaction, 'id' | 'timestamp' | 'resultingQuantity'>) => {
+    const item = inventory.find((row) => row.id === tx.itemId || row.sku === tx.sku); if (!item || !Number.isFinite(tx.quantityChange) || tx.quantityChange === 0 || (tx.unit && tx.unit !== item.unit)) return; const resultingQuantity = Number((item.quantity + tx.quantityChange).toFixed(4));
+    if (resultingQuantity < 0) { createAuditLog('REJECT', 'InventoryTransaction', item.id, 'Inventory transaction rejected because it would create negative stock'); return; }
+    const newTx: InventoryTransaction = { ...tx, id: nextId('invtx'), timestamp: new Date().toISOString(), resultingQuantity, itemId: item.id, itemName: item.name, sku: item.sku };
+    setInventory((previous) => previous.map((row) => row.id === item.id ? { ...row, quantity: resultingQuantity, status: inventoryStatus(row, resultingQuantity) } : row)); setInventoryTxs((previous) => [newTx, ...previous]); createAuditLog('CREATE', 'InventoryTransaction', newTx.id, `${tx.quantityChange} ${item.unit} ${item.sku}`); markLocalChange();
   };
 
-  // Processing Batch
-  const createProcessingBatch = (batchData: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>) => {
-    const caviarPct = batchData.liveBiomassKg > 0 ? Number(((batchData.caviarYieldKg / batchData.liveBiomassKg) * 100).toFixed(2)) : 0;
-    const filletPct = batchData.liveBiomassKg > 0 ? Number(((batchData.filletMeatYieldKg / batchData.liveBiomassKg) * 100).toFixed(2)) : 0;
-
-    const newBatch: ProcessingBatch = {
-      ...batchData,
-      id: 'proc_' + Date.now(),
-      caviarYieldPercent: caviarPct,
-      filletYieldPercent: filletPct,
-    };
-
-    setProcessingBatches((prev) => [newBatch, ...prev]);
-
-    // Add pallet slot to cold storage
-    const newPallet: ColdStoragePallet = {
-      id: 'plt_' + Date.now(),
-      slotCode: `COLD-A-${newBatch.batchCode.slice(-4)}`,
-      temperatureC: -2.8,
-      productType: 'Caviar (Cans/Jars)',
-      batchCode: newBatch.batchCode,
-      weightKg: newBatch.caviarYieldKg,
-      unitsCount: Math.round(newBatch.caviarYieldKg * 20), // 50g units
-      packagingUnit: 'قوطی ۵۰ گرمی واکیوم',
-      entryDate: newBatch.date,
-      expiryDate: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      status: 'Stored',
-    };
-    setColdStorage((prev) => [newPallet, ...prev]);
-
-    createAuditLog(
-      'PROCESSING_COMMITTED',
-      'ProcessingBatch',
-      newBatch.batchCode,
-      `فرآوری ${newBatch.liveBiomassKg} kg فیل‌ماهی: تولید ${newBatch.caviarYieldKg} kg خاویار (${caviarPct}%) و ${newBatch.filletMeatYieldKg} kg فیله`
-    );
+  const createProcessingBatch = (batch: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>) => {
+    if (!Number.isInteger(batch.fishCount) || batch.fishCount <= 0 || !Number.isFinite(batch.liveBiomassKg) || batch.liveBiomassKg <= 0) return; const outputs = [batch.caviarYieldKg, batch.filletMeatYieldKg, batch.smokedMeatYieldKg, batch.byProductAndWasteKg]; if (outputs.some((value) => !Number.isFinite(value) || value < 0) || outputs.reduce((sum, value) => sum + value, 0) > batch.liveBiomassKg + 0.1) return;
+    const newBatch: ProcessingBatch = { ...batch, id: nextId('proc'), caviarYieldPercent: Number(((batch.caviarYieldKg / batch.liveBiomassKg) * 100).toFixed(2)), filletYieldPercent: Number(((batch.filletMeatYieldKg / batch.liveBiomassKg) * 100).toFixed(2)) }; setProcessingBatches((previous) => [newBatch, ...previous]); createAuditLog('CREATE', 'ProcessingBatch', newBatch.id, `Processing batch ${batch.batchCode} created`); markLocalChange();
   };
 
-  // Sales & Proforma
-  const createProformaInvoice = (proformaData: Omit<ProformaInvoice, 'id' | 'subtotal' | 'grandTotal'>) => {
-    const subtotal = proformaData.items.reduce((s, i) => s + i.total, 0);
-    const grandTotal = subtotal + (proformaData.taxTotal || 0) - (proformaData.discountTotal || 0);
-
-    const newProforma: ProformaInvoice = {
-      ...proformaData,
-      id: 'prof_' + Date.now(),
-      subtotal,
-      grandTotal,
-    };
-
-    setProformas((prev) => [newProforma, ...prev]);
+  const createProformaInvoice = (proforma: Omit<ProformaInvoice, 'id' | 'subtotal' | 'grandTotal'>) => {
+    if (!proforma.items.length || proforma.items.some((item) => !Number.isFinite(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.unitPrice) || item.unitPrice < 0)) return; const subtotal = proforma.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); const taxTotal = proforma.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice * item.taxPercent) / 100, 0); const discountTotal = proforma.items.reduce((sum, item) => sum + Math.max(0, item.discount), 0); const grandTotal = Math.max(0, subtotal + taxTotal - discountTotal);
+    const newProforma: ProformaInvoice = { ...proforma, id: nextId('prof'), subtotal: Number(subtotal.toFixed(2)), taxTotal: Number(taxTotal.toFixed(2)), discountTotal: Number(discountTotal.toFixed(2)), grandTotal: Number(grandTotal.toFixed(2)) }; setProformas((previous) => [newProforma, ...previous]); createAuditLog('CREATE', 'ProformaInvoice', newProforma.id, `Proforma ${newProforma.invoiceNumber} created`); markLocalChange();
   };
+  const updateProformaStage = (id: string, newStage: ProformaInvoice['stage']) => { setProformas((previous) => previous.map((row) => row.id === id ? { ...row, stage: newStage } : row)); createAuditLog('UPDATE', 'ProformaInvoice', id, `Stage changed to ${newStage}`); markLocalChange(); };
+  const createJournalEntry = (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>): { success: boolean; error?: string } => { const result = validateAndExecuteJournalEntry(entry, accounts, journals); if (!result.success || !result.newEntry || !result.updatedAccounts) return { success: false, error: result.error }; setAccounts(result.updatedAccounts); setJournals((previous) => [result.newEntry!, ...previous]); createAuditLog('CREATE', 'JournalEntry', result.newEntry.id, `Balanced journal ${result.newEntry.entryNumber} posted`); markLocalChange(); return { success: true }; };
 
-  const updateProformaStage = (id: string, newStage: ProformaInvoice['stage']) => {
-    setProformas((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, stage: newStage } : p))
-    );
-  };
-
-  /**
-   * DOUBLE-ENTRY ACCOUNTING ENGINE (PHASE 15)
-   * Strictly verifies Debit === Credit before posting to ledger.
-   */
-  const createJournalEntry = (
-    entryData: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>
-  ): { success: boolean; error?: string } => {
-    const result = validateAndExecuteJournalEntry(entryData, accounts, journals);
-    if (!result.success || !result.newEntry || !result.updatedAccounts) {
-      return { success: false, error: result.error || 'خطا در ثبت سند دوبل حسابداری' };
-    }
-
-    setJournals((prev) => [result.newEntry!, ...prev]);
-    setAccounts(result.updatedAccounts);
-
-    createAuditLog(
-      'JOURNAL_POSTED',
-      'Accounting',
-      result.newEntry.entryNumber,
-      `ثبت سند حسابداری دوبل به مبلغ ${result.newEntry.totalDebit.toLocaleString()}`
-    );
-
-    return { success: true };
-  };
-
-  // HR & Attendance
   const clockAttendance = (employeeId: string, type: 'in' | 'out', shift: AttendanceRecord['shift']) => {
-    const emp = employees.find((e) => e.id === employeeId);
-    if (!emp) return;
-
-    const todayStr = new Date().toISOString().split('T')[0];
-    const timeStr = new Date().toLocaleTimeString();
-
-    if (type === 'in') {
-      const newAtt: AttendanceRecord = {
-        id: 'att_' + Date.now(),
-        employeeId,
-        employeeName: emp.fullName,
-        date: todayStr,
-        clockInTime: timeStr,
-        shift,
-        regularHours: 8,
-        overtimeHours: 0,
-        status: 'Present',
-      };
-      setAttendance((prev) => [newAtt, ...prev]);
-    } else {
-      setAttendance((prev) =>
-        prev.map((a) =>
-          a.employeeId === employeeId && a.date === todayStr ? { ...a, clockOutTime: timeStr } : a
-        )
-      );
-    }
+    const employee = employees.find((row) => row.id === employeeId && row.status === 'Active'); if (!employee) return; const now = new Date(); const date = now.toISOString().slice(0, 10);
+    if (type === 'in') { if (attendance.some((row) => row.employeeId === employeeId && row.date === date && !row.clockOutTime)) return; const record: AttendanceRecord = { id: nextId('att'), employeeId, employeeName: employee.fullName, date, clockInTime: now.toISOString(), shift, regularHours: 0, overtimeHours: 0, status: 'Present' }; setAttendance((previous) => [record, ...previous]); }
+    else setAttendance((previous) => { const open = previous.find((row) => row.employeeId === employeeId && row.date === date && !row.clockOutTime); if (!open) return previous; const hours = Math.max(0, (now.getTime() - new Date(open.clockInTime).getTime()) / 3_600_000); return previous.map((row) => row.id === open.id ? { ...row, clockOutTime: now.toISOString(), regularHours: Number(Math.min(8, hours).toFixed(2)), overtimeHours: Number(Math.max(0, hours - 8).toFixed(2)) } : row); });
+    createAuditLog('CREATE', 'Attendance', employeeId, `Clock ${type}`); markLocalChange();
   };
 
   const generateMonthlyPayroll = (monthString: string) => {
-    const newPayrolls: PayrollRecord[] = employees.map((emp) => {
-      const base = emp.baseSalary;
-      const overtime = Math.round(base * 0.15);
-      const bonus = Math.round(base * 0.1);
-      const gross = base + overtime + bonus;
-      const insurance = Math.round(gross * 0.07);
-      const tax = Math.round(gross * 0.1);
-      const net = gross - insurance - tax;
-
-      return {
-        id: 'pay_' + emp.id + '_' + monthString,
-        payrollMonth: monthString,
-        employeeId: emp.id,
-        employeeName: emp.fullName,
-        department: emp.department,
-        baseSalary: base,
-        overtimePay: overtime,
-        shiftBonus: bonus,
-        hardshipAllowance: 0,
-        grossSalary: gross,
-        socialSecurityInsurance: insurance,
-        incomeTax: tax,
-        loanDeduction: 0,
-        netPay: net,
-        currency: emp.currency,
-        paymentStatus: 'Approved',
-        paymentDate: new Date().toISOString().split('T')[0],
-      };
-    });
-
-    setPayrolls(newPayrolls);
+    if (!/^\d{4}-\d{2}$/.test(monthString)) return; const generated: PayrollRecord[] = employees.filter((employee) => employee.status === 'Active').map((employee) => { const employeeAttendance = attendance.filter((row) => row.employeeId === employee.id && row.date.startsWith(monthString)); const overtimeHours = employeeAttendance.reduce((sum, row) => sum + row.overtimeHours, 0); const hourlyRate = employee.baseSalary / 240; const overtimePay = Number((overtimeHours * hourlyRate * 1.4).toFixed(0)); const grossSalary = employee.baseSalary + overtimePay; return { id: nextId('pay'), payrollMonth: monthString, employeeId: employee.id, employeeName: employee.fullName, department: employee.department, baseSalary: employee.baseSalary, overtimePay, shiftBonus: 0, hardshipAllowance: 0, grossSalary, socialSecurityInsurance: 0, incomeTax: 0, loanDeduction: 0, netPay: grossSalary, currency: employee.currency, paymentStatus: 'Calculated' }; }); setPayrolls((previous) => [...generated, ...previous.filter((row) => row.payrollMonth !== monthString)]); createAuditLog('CREATE', 'Payroll', monthString, 'Draft payroll generated from attendance; statutory deductions require configured policy'); markLocalChange();
   };
 
-  // Backup Snapshots & Restore Rollback
-  const createBackupSnapshot = (type: BackupSnapshot['type'] = 'Manual Export'): BackupSnapshot => {
-    const backupData = {
-      halls,
-      ponds,
-      species,
-      feedingRecords,
-      biometricSessions,
-      waterLogs,
-      mortalityRecords,
-      treatments,
-      transfers,
-      broodstock,
-      fertilizations,
-      incubators,
-      larvae,
-      inventory,
-      inventoryTxs,
-      processingBatches,
-      coldStorage,
-      customers,
-      proformas,
-      accounts,
-      journals,
-      employees,
-      auditLogs,
-      exportedAt: new Date().toISOString(),
-      version: '6.0.4 Enterprise',
-    };
-
-    const json = JSON.stringify(backupData);
-    const sizeKb = Number((json.length / 1024).toFixed(1));
-    const checksum = 'SHA256:' + Math.random().toString(36).substr(2, 8).toUpperCase();
-
-    const snapshot: BackupSnapshot = {
-      id: 'bkp_' + Date.now(),
-      filename: `FATHI_AQUA_BACKUP_${new Date().toISOString().slice(0, 10)}.json`,
-      timestamp: new Date().toISOString(),
-      version: '6.0.4 Enterprise',
-      dataSizeKb: sizeKb,
-      tablesCount: 22,
-      checksum,
-      creator: 'Super Admin (Manual Export)',
-      type,
-    };
-
-    setBackups((prev) => [snapshot, ...prev]);
-    return snapshot;
-  };
-
+  const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
+  const createBackupSnapshot = (type: BackupSnapshot['type'] = 'Manual Export'): BackupSnapshot => { const data = buildBackupData(); const serialized = JSON.stringify(data); const timestamp = new Date().toISOString(); const snapshot: BackupSnapshot = { id: nextId('backup'), filename: `fathi-aqua-erp-${timestamp.slice(0, 10)}.json`, timestamp, version: '6.0.5', schemaVersion: BACKUP_SCHEMA_VERSION, dataSizeKb: Number((new Blob([serialized]).size / 1024).toFixed(2)), tablesCount: Object.keys(data).length, checksum: checksumBackupData(data), checksumAlgorithm: 'FNV1A32', creator: 'Authenticated Local Session', type, data }; setBackups((previous) => [stripBackupData(snapshot), ...previous].slice(0, 100)); return snapshot; };
   const restoreFromSnapshotJson = (jsonString: string): { success: boolean; message: string } => {
     try {
-      createBackupSnapshot('Pre-Restore Safety Snapshot');
-
-      const data = JSON.parse(jsonString);
-      if (!data.ponds || !data.halls) {
-        return { success: false, message: 'ساختار فایل پشتیبان نامعتبر است (جداول اصلی یافت نشدند).' };
-      }
-
-      if (data.halls) setHalls(data.halls);
-      if (data.ponds) setPonds(data.ponds);
-      if (data.species) setSpecies(data.species);
-      if (data.feedingRecords) setFeedingRecords(data.feedingRecords);
-      if (data.broodstock) setBroodstock(data.broodstock);
-      if (data.inventory) setInventory(data.inventory);
-      if (data.processingBatches) setProcessingBatches(data.processingBatches);
-      if (data.customers) setCustomers(data.customers);
-      if (data.proformas) setProformas(data.proformas);
-      if (data.accounts) setAccounts(data.accounts);
-      if (data.journals) setJournals(data.journals);
-
-      createAuditLog(
-        'DATABASE_RESTORED',
-        'System',
-        'Database',
-        'بازیابی موفقیت‌آمیز پایگاه داده از فایل پشتیبان به همراه تهیه خودکار Safety Snapshot پیش از اجرا'
-      );
-
-      return { success: true, message: 'بازیابی پایگاه داده با موفقیت انجام شد.' };
-    } catch (e: any) {
-      return { success: false, message: 'خطا در خواندن فایل: ' + (e?.message || 'فرمت JSON نامعتبر است') };
-    }
+      const validation = validateBackupDocument(JSON.parse(jsonString)); if (!validation.ok || !validation.data) return { success: false, message: validation.error || 'فایل پشتیبان معتبر نیست.' }; createBackupSnapshot('Pre-Restore Safety Snapshot'); const data = validation.data; const array = <T,>(key: string): T[] => Array.isArray(data[key]) ? data[key] as T[] : [];
+      setHalls(array<Hall>('halls')); setPonds(array<Pond>('ponds')); setSpecies(array<SturgeonSpecies>('species')); setFeedingRecords(array<FeedingRecord>('feedingRecords')); setBiometricSessions(array<BiometricSession>('biometricSessions')); setWaterLogs(array<WaterQualityLog>('waterLogs')); setMortalityRecords(array<MortalityRecord>('mortalityRecords')); setTreatments(array<TreatmentRecord>('treatments')); setTransfers(array<FishTransfer>('transfers')); setBroodstock(array<BroodstockFish>('broodstock')); setFertilizations(array<FertilizationBatch>('fertilizations')); setIncubators(array<IncubatorUnit>('incubators')); setLarvae(array<LarvalBatch>('larvae')); setNurseryTanks(array<NurseryTank>('nurseryTanks')); setInventory(array<InventoryItem>('inventory')); setInventoryTxs(array<InventoryTransaction>('inventoryTxs')); setLabSamples(array<LabSample>('labSamples')); setProcessingBatches(array<ProcessingBatch>('processingBatches')); setColdStorage(array<ColdStoragePallet>('coldStorage')); setCustomers(array<Customer>('customers')); setProformas(array<ProformaInvoice>('proformas')); setAccounts(array<Account>('accounts')); setJournals(array<JournalEntry>('journals')); setEmployees(array<Employee>('employees')); setAttendance(array<AttendanceRecord>('attendance')); setPayrolls(array<PayrollRecord>('payrolls')); setEquipment(array<Equipment>('equipment')); setSocialPosts(array<SocialMediaPost>('socialPosts')); setAuditLogs(array<FarmAuditLog>('auditLogs')); markLocalChange(); return { success: true, message: 'بازیابی با اعتبارسنجی ساختار و چک‌سام انجام شد.' };
+    } catch { return { success: false, message: 'JSON فایل پشتیبان قابل خواندن نیست.' }; }
   };
 
-  const addBroodstock = (fishData: Omit<BroodstockFish, 'id'>) => {
-    const newFish: BroodstockFish = {
-      ...fishData,
-      id: 'brood_' + Date.now(),
-    };
-    setBroodstock((prev) => [newFish, ...prev]);
-  };
+  const addBroodstock = (fish: Omit<BroodstockFish, 'id'>) => { if (!fish.chipNumber.trim() || broodstock.some((row) => row.chipNumber === fish.chipNumber || row.plateNumber === fish.plateNumber) || !Number.isFinite(fish.weightKg) || fish.weightKg <= 0) return; const newFish: BroodstockFish = { ...fish, id: nextId('brood') }; setBroodstock((previous) => [newFish, ...previous]); createAuditLog('CREATE', 'Broodstock', newFish.id, `Broodstock ${fish.chipNumber} registered`); markLocalChange(); };
+  const recordFertilization = (fert: Omit<FertilizationBatch, 'id' | 'fertilizationTimestamp' | 'status'>) => { const parentsExist = fert.femaleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Female')) && fert.maleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Male')); if (!parentsExist || !Number.isFinite(fert.fertilizationRatePercent) || fert.fertilizationRatePercent < 0 || fert.fertilizationRatePercent > 100) return; const newBatch: FertilizationBatch = { ...fert, id: nextId('fert'), fertilizationTimestamp: new Date().toISOString(), status: 'Incubating' }; setFertilizations((previous) => [newBatch, ...previous]); createAuditLog('CREATE', 'FertilizationBatch', newBatch.id, `Fertilization ${fert.batchCode} registered`); markLocalChange(); };
+  const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!cust.name.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange(); };
+  const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange(); };
 
-  const recordFertilization = (fertData: Omit<FertilizationBatch, 'id' | 'fertilizationTimestamp' | 'status'>) => {
-    const newFert: FertilizationBatch = {
-      ...fertData,
-      id: 'fert_' + Date.now(),
-      fertilizationTimestamp: new Date().toISOString(),
-      status: 'Incubating',
-    };
-    setFertilizations((prev) => [newFert, ...prev]);
-  };
-
-  const addCustomer = (custData: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => {
-    const newCust: Customer = {
-      ...custData,
-      id: 'cust_' + Date.now(),
-      createdAt: new Date().toISOString().split('T')[0],
-      totalOrdersCount: 0,
-      totalSpent: 0,
-      outstandingBalance: 0,
-    };
-    setCustomers((prev) => [newCust, ...prev]);
-  };
-
-  const addSocialPost = (postData: Omit<SocialMediaPost, 'id' | 'status'>) => {
-    const newPost: SocialMediaPost = {
-      ...postData,
-      id: 'post_' + Date.now(),
-      status: 'Draft',
-    };
-    setSocialPosts((prev) => [newPost, ...prev]);
-  };
-
-  return (
-    <FarmContext.Provider
-      value={{
-        halls,
-        ponds,
-        species,
-        feedingRecords,
-        biometricSessions,
-        waterLogs,
-        mortalityRecords,
-        treatments,
-        transfers,
-        broodstock,
-        fertilizations,
-        incubators,
-        larvae,
-        nurseryTanks,
-        inventory,
-        inventoryTxs,
-        labSamples,
-        processingBatches,
-        coldStorage,
-        customers,
-        proformas,
-        accounts,
-        journals,
-        employees,
-        attendance,
-        payrolls,
-        equipment,
-        socialPosts,
-        auditLogs,
-        backups,
-        syncStatus,
-        calculateRecommendedFeed,
-        recordFeeding,
-        stopPondFeeding,
-        resumePondFeeding,
-        recordMortality,
-        recordBiometry,
-        recordWaterTest,
-        recordTreatment,
-        executeAtomicTransfer,
-        addInventoryTransaction,
-        createProcessingBatch,
-        createProformaInvoice,
-        updateProformaStage,
-        createJournalEntry,
-        clockAttendance,
-        generateMonthlyPayroll,
-        createAuditLog,
-        createBackupSnapshot,
-        restoreFromSnapshotJson,
-        addBroodstock,
-        recordFertilization,
-        addCustomer,
-        addSocialPost,
-      }}
-    >
-      {children}
-    </FarmContext.Provider>
-  );
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, recordMortality, recordBiometry, recordWaterTest, recordTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 
-export const useFarm = (): FarmContextType => {
-  const context = useContext(FarmContext);
-  if (!context) {
-    throw new Error('useFarm must be used within a FarmProvider');
-  }
-  return context;
-};
+export const useFarm = (): FarmContextType => { const context = useContext(FarmContext); if (!context) throw new Error('useFarm must be used within a FarmProvider'); return context; };

@@ -9,83 +9,72 @@ export interface AccountingPostingResult {
   updatedAccounts?: Account[];
 }
 
-/**
- * Double-Entry Accounting Core Engine.
- * Validates balance (Sum Debits === Sum Credits), account existence, positive amounts,
- * and properly aggregates multiple debit/credit lines for identical accounts.
- */
+function isDebitNormal(account: Account): boolean {
+  return account.type.startsWith('Asset') || account.type.startsWith('Expense');
+}
+
+function balanceDelta(account: Account, debit: number, credit: number): number {
+  return isDebitNormal(account) ? debit - credit : credit - debit;
+}
+
 export function validateAndExecuteJournalEntry(
   entryData: JournalInput,
   accounts: Account[],
   existingJournals: JournalEntry[] = []
 ): AccountingPostingResult {
-  if (!entryData.debits || entryData.debits.length === 0 || !entryData.credits || entryData.credits.length === 0) {
-    return { success: false, error: 'سند حسابداری باید حداقل شامل یک ردیف بدهکار و یک ردیف بستانکار باشد.' };
+  if (!entryData.debits?.length || !entryData.credits?.length) {
+    return { success: false, error: 'سند باید حداقل یک ردیف بدهکار و یک ردیف بستانکار داشته باشد.' };
+  }
+  if (!entryData.date || Number.isNaN(new Date(entryData.date).getTime())) {
+    return { success: false, error: 'تاریخ سند نامعتبر است.' };
+  }
+  if (!entryData.description?.trim()) {
+    return { success: false, error: 'شرح سند الزامی است.' };
+  }
+  if (entryData.referenceId && existingJournals.some((journal) => journal.referenceType === entryData.referenceType && journal.referenceId === entryData.referenceId)) {
+    return { success: false, error: 'سند با این مرجع قبلاً ثبت شده است.' };
   }
 
-  // Validate all debit lines
-  for (const d of entryData.debits) {
-    if (!Number.isFinite(d.amount) || d.amount <= 0) {
-      return { success: false, error: `مبلغ ردیف بدهکار (${d.accountName || d.accountId}) باید یک عدد مثبت معتبر باشد.` };
+  const allLines = [...entryData.debits, ...entryData.credits];
+  const lineAccounts = new Map<string, Account>();
+  for (const line of allLines) {
+    if (!Number.isFinite(line.amount) || line.amount <= 0) {
+      return { success: false, error: `مبلغ ردیف ${line.accountName || line.accountId} باید عدد مثبت معتبر باشد.` };
     }
-    const acc = accounts.find((a) => a.id === d.accountId);
-    if (!acc) {
-      return { success: false, error: `حساب معین بدهکار با شناسه ${d.accountId} در سرفصل حساب‌ها یافت نشد.` };
-    }
+    const account = accounts.find((item) => item.id === line.accountId);
+    if (!account) return { success: false, error: `حساب ${line.accountId} یافت نشد.` };
+    lineAccounts.set(account.id, account);
   }
 
-  // Validate all credit lines
-  for (const c of entryData.credits) {
-    if (!Number.isFinite(c.amount) || c.amount <= 0) {
-      return { success: false, error: `مبلغ ردیف بستانکار (${c.accountName || c.accountId}) باید یک عدد مثبت معتبر باشد.` };
-    }
-    const acc = accounts.find((a) => a.id === c.accountId);
-    if (!acc) {
-      return { success: false, error: `حساب معین بستانکار با شناسه ${c.accountId} در سرفصل حساب‌ها یافت نشد.` };
-    }
+  const currencies = new Set(Array.from(lineAccounts.values()).map((account) => account.currency));
+  if (currencies.size > 1) {
+    return { success: false, error: 'ثبت یک سند با حساب‌های دارای ارز متفاوت مجاز نیست؛ ابتدا تبدیل ارز ثبت شود.' };
   }
 
-  const totalDebit = Number(entryData.debits.reduce((sum, d) => sum + d.amount, 0).toFixed(2));
-  const totalCredit = Number(entryData.credits.reduce((sum, c) => sum + c.amount, 0).toFixed(2));
-
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
-    return {
-      success: false,
-      error: `عدم توازن سند دوبل: جمع بدهکار (${totalDebit.toLocaleString()}) با جمع بستانکار (${totalCredit.toLocaleString()}) برابر نیست! اختلاف: ${Math.abs(totalDebit - totalCredit).toLocaleString()}`,
-    };
+  const totalDebit = Number(entryData.debits.reduce((sum, line) => sum + line.amount, 0).toFixed(2));
+  const totalCredit = Number(entryData.credits.reduce((sum, line) => sum + line.amount, 0).toFixed(2));
+  if (!Number.isFinite(totalDebit) || !Number.isFinite(totalCredit) || Math.abs(totalDebit - totalCredit) > 0.01) {
+    return { success: false, error: `عدم توازن سند دوبل: بدهکار ${totalDebit.toLocaleString()} و بستانکار ${totalCredit.toLocaleString()} است.` };
   }
 
   const newEntry: JournalEntry = {
     ...entryData,
-    id: 'jnl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-    entryNumber: 'SANAD-' + Date.now().toString().slice(-6),
+    id: `jnl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    entryNumber: `SANAD-${Date.now().toString().slice(-8)}`,
     totalDebit,
     totalCredit,
     isBalanced: true,
     createdAt: new Date().toISOString(),
   };
 
-  // Correct aggregation for all debit and credit lines per account
-  const updatedAccounts = accounts.map((acc) => {
-    const totalDebitForAcc = entryData.debits
-      .filter((d) => d.accountId === acc.id)
-      .reduce((sum, d) => sum + d.amount, 0);
-
-    const totalCreditForAcc = entryData.credits
-      .filter((c) => c.accountId === acc.id)
-      .reduce((sum, c) => sum + c.amount, 0);
-
-    const netChange = totalDebitForAcc - totalCreditForAcc;
-
-    return {
-      ...acc,
-      balance: acc.balance + netChange,
-    };
+  const updatedAccounts = accounts.map((account) => {
+    const debit = entryData.debits.filter((line) => line.accountId === account.id).reduce((sum, line) => sum + line.amount, 0);
+    const credit = entryData.credits.filter((line) => line.accountId === account.id).reduce((sum, line) => sum + line.amount, 0);
+    if (!debit && !credit) return account;
+    const nextBalance = Number((account.balance + balanceDelta(account, debit, credit)).toFixed(2));
+    if (!Number.isFinite(nextBalance)) return account;
+    return { ...account, balance: nextBalance };
   });
 
-  return {
-    success: true,
-    newEntry,
-    updatedAccounts,
-  };
+  return { success: true, newEntry, updatedAccounts };
 }

@@ -1,127 +1,160 @@
 import { describe, it, expect } from 'vitest';
-import { calculateFeedingRecommendation, normalizeFeedAmountToKg, validateFeedingSubmission } from '../utils/feedingEngine';
-import { Pond, SturgeonSpecies, InventoryItem } from '../types';
+import {
+  calculateFeedingRecommendation,
+  normalizeFeedAmountToKg,
+  validateFeedingSubmission,
+} from '../utils/feedingEngine';
+import { FeedingRecord, InventoryItem, Pond, SturgeonSpecies, TreatmentRecord } from '../types';
+
+const mockSpecies: SturgeonSpecies[] = [
+  {
+    id: 'sp_beluga',
+    faName: 'فیل‌ماهی',
+    enName: 'Beluga Sturgeon',
+    scientificName: 'Huso huso',
+    origin: 'Caspian Sea',
+    geneticLine: 'Test Line',
+    description: 'Test species',
+    optimumTempMin: 14,
+    optimumTempMax: 18.5,
+    optimumDOMin: 6,
+    optimumpHMin: 7,
+    optimumpHMax: 8.2,
+    standardFCR: 1.1,
+    feedingProfileCoeff: 1,
+    caviarMaturityYears: 10,
+  },
+];
+
+const mockSafePond: Pond = {
+  id: 'pond_1',
+  number: 'P-001',
+  name: 'استخر ۱',
+  hallId: 'hall_1',
+  capacityCubicMeters: 50,
+  fishCount: 1000,
+  speciesId: 'sp_beluga',
+  biomassKg: 5000,
+  averageWeightKg: 5,
+  lastFeedingKg: 40,
+  lastFeedingTime: new Date().toISOString(),
+  feedingStatus: 'ACTIVE',
+  fcr: 1.1,
+  dailyMortalityCount: 0,
+  waterTemperature: 16.5,
+  dissolvedOxygen: 7.2,
+  ph: 7.5,
+  lastBiometryDate: '2026-08-01',
+  criticalAlerts: [],
+};
+
+const mockInventory: InventoryItem[] = [
+  {
+    id: 'inv_feed_1',
+    sku: 'FEED-GROW-4MM',
+    name: 'پلت رشد خاویاری ۴ میلی‌متر',
+    category: 'Feed (خوراک)',
+    batchNumber: 'TEST-001',
+    quantity: 500,
+    unit: 'kg',
+    purchasePricePerUnit: 120000,
+    currency: 'IRR',
+    supplierName: 'Feed Co',
+    warehouseLocation: 'A-1',
+    minimumStockThreshold: 100,
+    reorderLevel: 200,
+    status: 'Adequate',
+  },
+];
+
+function makeSubmission(overrides: Partial<Omit<FeedingRecord, 'id' | 'timestamp'>> = {}): Omit<FeedingRecord, 'id' | 'timestamp'> {
+  return {
+    pondId: mockSafePond.id,
+    pondName: mockSafePond.name,
+    hallName: 'Hall 1',
+    speciesName: 'Huso huso',
+    biomassKg: mockSafePond.biomassKg,
+    recommendedAmountKg: 45,
+    actualAmountKg: 50,
+    unit: 'kg',
+    feedTypeSku: 'FEED-GROW-4MM',
+    feedTypeName: mockInventory[0].name,
+    waterTemperature: mockSafePond.waterTemperature,
+    dissolvedOxygen: mockSafePond.dissolvedOxygen,
+    feedingStatus: 'ACTIVE',
+    operatorName: 'Ali Rezaei',
+    ...overrides,
+  };
+}
 
 describe('Feeding Engine - Domain Safety & Unit Normalization', () => {
-  const mockSpecies: SturgeonSpecies[] = [
-    {
-      id: 'sp_beluga',
-      nameFa: 'فیل‌ماهی',
-      nameEn: 'Beluga Sturgeon',
-      scientificName: 'Huso huso',
-      feedingProfileCoeff: 1.0,
-      optimalTempMin: 14,
-      optimalTempMax: 20,
-      criticalDoThreshold: 4.0,
-      harvestAgeMonths: 48,
-    },
-  ];
-
-  const mockSafePond: Pond = {
-    id: 'pond_1',
-    hallId: 'hall_1',
-    name: 'استخر ۱',
-    speciesId: 'sp_beluga',
-    fishCount: 1000,
-    biomassKg: 5000,
-    averageWeightKg: 5.0,
-    waterVolumeM3: 50,
-    dissolvedOxygen: 7.2,
-    waterTemperature: 16.5,
-    ph: 7.5,
-    feedingStatus: 'NORMAL',
-    fcr: 1.1,
-  };
-
-  const mockInventory: InventoryItem[] = [
-    {
-      id: 'inv_feed_1',
-      name: 'پلت رشد خاویاری ۴ میلی‌متر',
-      category: 'Feed (خوراک)',
-      sku: 'FEED-GROW-4MM',
-      quantity: 500,
-      unit: 'kg',
-      minimumStockThreshold: 100,
-      purchasePricePerUnit: 1200000,
-      warehouseLocation: 'انبار خوراک A',
-      supplier: 'Feed Co',
-      status: 'Adequate',
-    },
-  ];
-
-  it('calculates optimal recommended ration for safe pond conditions', () => {
+  it('calculates a positive ration for safe pond conditions', () => {
     const result = calculateFeedingRecommendation(mockSafePond, mockSpecies);
     expect(result.isLocked).toBe(false);
-    expect(result.recommendedKg).toBeGreaterThan(0);
-    // Base rate ~0.009 * 5000 = 45 kg
-    expect(result.recommendedKg).toBeCloseTo(45.0, 1);
+    expect(result.recommendedKg).toBeCloseTo(45, 1);
   });
 
-  it('strictly locks and zeroes recommendation if pond feedingStatus is STOPPED', () => {
-    const stoppedPond: Pond = {
-      ...mockSafePond,
-      feedingStatus: 'STOPPED',
-      stopFeedingReason: 'DO < 4.0 mg/L',
-    };
-    const result = calculateFeedingRecommendation(stoppedPond, mockSpecies);
+  it('locks and zeroes the recommendation when feeding is STOPPED', () => {
+    const result = calculateFeedingRecommendation(
+      { ...mockSafePond, feedingStatus: 'STOPPED', stopFeedingReason: 'Low Oxygen' },
+      mockSpecies
+    );
     expect(result.isLocked).toBe(true);
     expect(result.recommendedKg).toBe(0);
   });
 
-  it('strictly locks and zeroes recommendation if active veterinary treatment is present', () => {
-    const treatedPond: Pond = {
-      ...mockSafePond,
-      activeTreatmentId: 'trt_active_1',
-    };
-    const activeTreatment = {
+  it('locks and zeroes the recommendation during an active treatment', () => {
+    const activeTreatment: TreatmentRecord = {
       id: 'trt_active_1',
-      medicineName: 'Formalin 20ppm',
-      status: 'Active' as const,
+      pondId: mockSafePond.id,
+      pondName: mockSafePond.name,
+      speciesName: 'Huso huso',
+      diagnosis: 'Test diagnosis',
+      drugName: 'Formalin 20ppm',
+      dose: 20,
+      doseUnit: 'ppm',
+      administrationMethod: 'Bath (حمام)',
+      startDate: '2026-08-20',
+      endDate: '2026-08-21',
+      veterinarian: 'Vet',
+      withdrawalPeriodDays: 1,
+      withdrawalEndDate: '2026-08-22',
+      status: 'ACTIVE',
+      reminderActive: true,
     };
-    const result = calculateFeedingRecommendation(treatedPond, mockSpecies, activeTreatment);
+    const result = calculateFeedingRecommendation(
+      { ...mockSafePond, activeTreatmentId: activeTreatment.id },
+      mockSpecies,
+      activeTreatment
+    );
     expect(result.isLocked).toBe(true);
     expect(result.recommendedKg).toBe(0);
     expect(result.lockReason).toContain('Formalin 20ppm');
   });
 
-  it('strictly prohibits feeding when dissolved oxygen is below 4.0 mg/L', () => {
-    const hypoxicPond: Pond = {
-      ...mockSafePond,
-      dissolvedOxygen: 3.4,
-    };
-    const result = calculateFeedingRecommendation(hypoxicPond, mockSpecies);
+  it('prohibits feeding when authoritative pond DO is below 4.0 mg/L', () => {
+    const unsafePond = { ...mockSafePond, dissolvedOxygen: 3.4 };
+    const result = calculateFeedingRecommendation(unsafePond, mockSpecies);
     expect(result.isLocked).toBe(true);
     expect(result.recommendedKg).toBe(0);
+
+    const forgedSafeRequest = makeSubmission({ dissolvedOxygen: 9 });
+    const submission = validateFeedingSubmission(forgedSafeRequest, unsafePond, mockInventory);
+    expect(submission.success).toBe(false);
   });
 
-  it('correctly normalizes different measurement units into kilograms', () => {
-    expect(normalizeFeedAmountToKg(500, 'g')).toBe(0.5);
-    expect(normalizeFeedAmountToKg(25, 'kg')).toBe(25);
-    expect(normalizeFeedAmountToKg(2, 'ton')).toBe(2000);
-    expect(normalizeFeedAmountToKg(2, 'bag_25kg')).toBe(50);
+  it('normalizes kg, grams and 250g cups consistently', () => {
+    expect(normalizeFeedAmountToKg(1, 'kg')).toBe(1);
+    expect(normalizeFeedAmountToKg(1000, 'gram')).toBe(1);
+    expect(normalizeFeedAmountToKg(4, 'cup250g')).toBe(1);
   });
 
-  it('validates feeding submission against inventory stock', () => {
-    const validSubmission = {
-      pondId: 'pond_1',
-      feedTypeSku: 'FEED-GROW-4MM',
-      actualAmountKg: 50,
-      unit: 'kg' as const,
-      dissolvedOxygen: 7.0,
-      waterTemperature: 16.0,
-      operatorName: 'Ali Rezaei',
-    };
+  it('rejects unknown feed SKU and insufficient stock', () => {
+    const missing = validateFeedingSubmission(makeSubmission({ feedTypeSku: 'UNKNOWN' }), mockSafePond, mockInventory);
+    expect(missing.success).toBe(false);
 
-    const validResult = validateFeedingSubmission(validSubmission, mockSafePond, mockInventory);
-    expect(validResult.success).toBe(true);
-    expect(validResult.normalizedAmountKg).toBe(50);
-
-    const excessiveSubmission = {
-      ...validSubmission,
-      actualAmountKg: 600, // inventory is only 500
-    };
-    const excessiveResult = validateFeedingSubmission(excessiveSubmission, mockSafePond, mockInventory);
-    expect(excessiveResult.success).toBe(false);
-    expect(excessiveResult.error).toContain('موجودی ناکافی');
+    const excessive = validateFeedingSubmission(makeSubmission({ actualAmountKg: 600 }), mockSafePond, mockInventory);
+    expect(excessive.success).toBe(false);
+    expect(excessive.error).toContain('موجودی ناکافی');
   });
 });

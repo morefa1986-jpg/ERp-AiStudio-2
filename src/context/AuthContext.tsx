@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, UserRole, GranularPermission, PermissionModule, PermissionAction, LanguageCode } from '../types';
-import { PASSWORD_SALT, hashPasswordWithSalt } from '../utils/authSecurity';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { GranularPermission, LanguageCode, PermissionAction, PermissionModule, User } from '../types';
+import { PASSWORD_SALT, hashPasswordWithSalt, verifyPasswordSecurely } from '../utils/authSecurity';
+import { roleAllows } from '../utils/rbac';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -18,217 +19,157 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-async function hashPassword(plain: string): Promise<string> {
-  return hashPasswordWithSalt(plain, PASSWORD_SALT);
-}
+type LocalUser = User & { passwordHash: string };
 
-// Authoritative user credentials with salted SHA-256 hashes (never plaintext)
-const DEFAULT_USERS: (User & { passwordHash: string })[] = [
+// Offline-only credential cache. Hashes match PASSWORD_SALT and contain no plaintext password.
+const DEFAULT_USERS: LocalUser[] = [
   {
-    id: 'usr_admin',
-    username: 'admin',
-    fullName: 'مهندس سعید فتحی (Super Admin)',
-    email: 'admin@fathi-aqua.com',
-    role: 'Super Admin',
-    passwordHash: '8e81119bbf0280eb4c2f6d0fca7a77e8dbbe8ae04e578dc924976722d4c06282', // admin123 + salt
-    isActive: true,
-    preferredLanguage: 'fa',
-    lastLoginAt: '2026-08-19T07:00:00Z',
-    createdAt: '2024-01-01',
+    id: 'usr_admin', username: 'admin', fullName: 'مهندس سعید فتحی (Super Admin)', email: 'admin@fathi-aqua.com',
+    role: 'Super Admin', passwordHash: '6bda9e007f9f2b46bac9c60ed76969764f8b55d0f2d9955f8ba06a1c422700c6',
+    isActive: true, preferredLanguage: 'fa', lastLoginAt: '2026-08-19T07:00:00Z', createdAt: '2024-01-01',
   },
   {
-    id: 'usr_vet',
-    username: 'vet',
-    fullName: 'دکتر مریم علوی (سرپرست دامپزشکی و بهداشت)',
-    email: 'vet@fathi-aqua.com',
-    role: 'Veterinarian',
-    passwordHash: '438d0d481da4f3ca4e8faeef4b684cb32f913d80098f98d75225c567a505b267', // vet123 + salt
-    isActive: true,
-    preferredLanguage: 'fa',
-    createdAt: '2024-02-15',
+    id: 'usr_vet', username: 'vet', fullName: 'دکتر مریم علوی (سرپرست دامپزشکی و بهداشت)', email: 'vet@fathi-aqua.com',
+    role: 'Veterinarian', passwordHash: '9fad5faa99c6ed98b343df7f9a142e7ee3699a1473baa0163a1836ec4244e46b',
+    isActive: true, preferredLanguage: 'fa', createdAt: '2024-02-15',
   },
   {
-    id: 'usr_hatchery',
-    username: 'hatchery',
-    fullName: 'مهندس رضا حسینی (مدیر تکثیر و ژنتیک)',
-    email: 'hatchery@fathi-aqua.com',
-    role: 'Hatchery Manager',
-    passwordHash: '0c3fc99c086be7781b29a888c3a9f074d280d463bda697d022b7c4dca19ad7df', // hatchery123 + salt
-    isActive: true,
-    preferredLanguage: 'fa',
-    createdAt: '2024-03-01',
+    id: 'usr_hatchery', username: 'hatchery', fullName: 'مهندس رضا حسینی (مدیر تکثیر و ژنتیک)', email: 'hatchery@fathi-aqua.com',
+    role: 'Hatchery Manager', passwordHash: '6b9e7b0dda7d0aba361da563aa59564986aa27a60466d857b9aeda89ce61283d',
+    isActive: true, preferredLanguage: 'fa', createdAt: '2024-03-01',
   },
   {
-    id: 'usr_sales',
-    username: 'sales',
-    fullName: 'آقای شمس (مدیر فروش و صادرات خاویار)',
-    email: 'sales@fathi-aqua.com',
-    role: 'Sales Manager',
-    passwordHash: '6d0fffae0258d4a9cfd0a4e76d910dcfa12d216f497424fb99aa123b379ea666', // sales123 + salt
-    isActive: true,
-    preferredLanguage: 'en',
-    createdAt: '2024-04-10',
+    id: 'usr_sales', username: 'sales', fullName: 'آقای شمس (مدیر فروش و صادرات خاویار)', email: 'sales@fathi-aqua.com',
+    role: 'Sales Manager', passwordHash: '365e4423b120eb78a6a162710903b03ac7fd7aecfe33db6c938954c9d80667ab',
+    isActive: true, preferredLanguage: 'en', createdAt: '2024-04-10',
   },
   {
-    id: 'usr_accountant',
-    username: 'accountant',
-    fullName: 'خانم مهندس صابری (حسابدار ارشد)',
-    email: 'accounting@fathi-aqua.com',
-    role: 'Accountant',
-    passwordHash: '52824df413f1754020a442750e318ea1914ee9c5bda2b512c1da0e25cbf5d01e', // acc123 + salt
-    isActive: true,
-    preferredLanguage: 'fa',
-    createdAt: '2024-05-01',
+    id: 'usr_accountant', username: 'accountant', fullName: 'خانم مهندس صابری (حسابدار ارشد)', email: 'accounting@fathi-aqua.com',
+    role: 'Accountant', passwordHash: '1ba376b43c9f34c8edfd83a03b57b7b35680919d870132bcf9c2baaaa2c12381',
+    isActive: true, preferredLanguage: 'fa', createdAt: '2024-05-01',
   },
 ];
 
-function sanitizeUser(u: User & { passwordHash?: string }): User {
-  const { passwordHash, ...safe } = u;
+function sanitizeUser(user: LocalUser | (User & { passwordHash?: string })): User {
+  const { passwordHash: _passwordHash, ...safe } = user;
   return safe as User;
+}
+
+function readLocalUsers(): LocalUser[] {
+  try {
+    const saved = localStorage.getItem('fathi_aqua_users_db');
+    if (!saved) return DEFAULT_USERS;
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return DEFAULT_USERS;
+    const valid = parsed.filter((user) => user && typeof user.username === 'string' && typeof user.passwordHash === 'string');
+    return valid.length ? valid : DEFAULT_USERS;
+  } catch {
+    return DEFAULT_USERS;
+  }
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
-  const [isInitializing, setIsInitializing] = useState<boolean>(true);
-
-  const [usersDb, setUsersDb] = useState<(User & { passwordHash: string })[]>(() => {
-    try {
-      const saved = localStorage.getItem('fathi_aqua_users_db');
-      return saved ? JSON.parse(saved) : DEFAULT_USERS;
-    } catch (e) {
-      return DEFAULT_USERS;
-    }
-  });
-
+  const [usersDb, setUsersDb] = useState<LocalUser[]>(readLocalUsers);
   const [customRoles, setCustomRoles] = useState<{ id: string; name: string; permissions: GranularPermission[] }[]>(() => {
     try {
       const saved = localStorage.getItem('fathi_aqua_roles');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
       return [];
     }
   });
 
-  // Verify stored session on startup
   useEffect(() => {
     const initSession = async () => {
       const token = localStorage.getItem('fathi_aqua_session_token');
-      if (token) {
-        try {
-          const res = await fetch('/api/auth/session', {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success && data.user) {
-              setCurrentUser(data.user);
-              setSessionToken(token);
-              setIsInitializing(false);
-              return;
-            }
-          }
-        } catch (e) {
-          // Backend might be offline in local LAN; check local session cache
-          const cachedUser = localStorage.getItem('fathi_aqua_session_user');
-          if (cachedUser) {
-            try {
-              const parsed = JSON.parse(cachedUser);
-              if (parsed && parsed.id) {
-                setCurrentUser(parsed);
-                setSessionToken(token);
-              }
-            } catch (err) {}
-          }
-        }
+      if (!token || token.startsWith('lan_session_')) {
+        localStorage.removeItem('fathi_aqua_session_token');
+        localStorage.removeItem('fathi_aqua_session_user');
+        return;
       }
-      setIsInitializing(false);
+
+      try {
+        const response = await fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}` } });
+        if (!response.ok) throw new Error('INVALID_SESSION');
+        const data = await response.json();
+        if (data.success && data.user?.id && data.user?.isActive) {
+          setCurrentUser(data.user);
+          setSessionToken(token);
+          return;
+        }
+      } catch {
+        // Fail closed. A cached user object is never accepted as an authenticated session.
+      }
+
+      localStorage.removeItem('fathi_aqua_session_token');
+      localStorage.removeItem('fathi_aqua_session_user');
     };
-    initSession();
+    void initSession();
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('fathi_aqua_users_db', JSON.stringify(usersDb));
-    } catch (e) {}
+    try { localStorage.setItem('fathi_aqua_users_db', JSON.stringify(usersDb)); } catch {}
   }, [usersDb]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('fathi_aqua_roles', JSON.stringify(customRoles));
-    } catch (e) {}
+    try { localStorage.setItem('fathi_aqua_roles', JSON.stringify(customRoles)); } catch {}
   }, [customRoles]);
 
   const login = async (username: string, passwordPlain: string, language?: LanguageCode): Promise<{ success: boolean; error?: string }> => {
-    const trimmedUser = username.trim().toLowerCase();
-    if (!trimmedUser || !passwordPlain) {
-      return { success: false, error: 'نام کاربری و رمز عبور الزامی است.' };
-    }
+    const normalizedUsername = username.trim().toLowerCase();
+    if (!normalizedUsername || !passwordPlain) return { success: false, error: 'نام کاربری و رمز عبور الزامی است.' };
 
-    // Try server authentication first
     try {
-      const res = await fetch('/api/auth/login', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: trimmedUser, password: passwordPlain, language }),
+        body: JSON.stringify({ username: normalizedUsername, password: passwordPlain, language }),
       });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.user) {
-          setCurrentUser(data.user);
-          setSessionToken(data.token);
-          localStorage.setItem('fathi_aqua_session_token', data.token);
-          localStorage.setItem('fathi_aqua_session_user', JSON.stringify(data.user));
-          return { success: true };
-        } else {
-          return { success: false, error: data.error || 'نام کاربری یا رمز عبور اشتباه است.' };
-        }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success || !data.user?.id || !data.token) {
+        return { success: false, error: data.error || 'نام کاربری یا رمز عبور اشتباه است.' };
       }
-    } catch (err) {
-      // Fallback to client-side salted SHA-256 verification (for offline LAN operation)
+      setCurrentUser(data.user);
+      setSessionToken(data.token);
+      localStorage.setItem('fathi_aqua_session_token', data.token);
+      localStorage.setItem('fathi_aqua_session_user', JSON.stringify(data.user));
+      return { success: true };
+    } catch {
+      // Offline mode validates the salted local hash. There are no plaintext/demo bypasses.
+      const user = usersDb.find((item) => item.username.toLowerCase() === normalizedUsername);
+      if (!user || !user.isActive) return { success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' };
+
+      let valid = false;
+      try {
+        valid = await verifyPasswordSecurely(passwordPlain, PASSWORD_SALT, user.passwordHash);
+      } catch {
+        return { success: false, error: 'سرویس رمزنگاری محلی در دسترس نیست.' };
+      }
+      if (!valid) return { success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' };
+
+      const updatedUser: User = {
+        ...sanitizeUser(user),
+        lastLoginAt: new Date().toISOString(),
+        preferredLanguage: language || user.preferredLanguage || 'fa',
+      };
+      const localToken = `lan_session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      setCurrentUser(updatedUser);
+      setSessionToken(localToken);
+      // Offline sessions intentionally expire on application restart.
+      return { success: true };
     }
-
-    // Offline LAN fallback verification
-    const user = usersDb.find((u) => u.username.toLowerCase() === trimmedUser);
-    if (!user) {
-      return { success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' };
-    }
-    if (!user.isActive) {
-      return { success: false, error: 'این حساب کاربری غیرفعال شده است. لطفاً با مدیر سیستم تماس بگیرید.' };
-    }
-
-    const hash = await hashPassword(passwordPlain);
-    // Support known demo hashes and matching hashes
-    const isValid = hash === user.passwordHash || (passwordPlain === 'admin123' && user.username === 'admin') || (passwordPlain === 'vet123' && user.username === 'vet') || (passwordPlain === 'hatchery123' && user.username === 'hatchery') || (passwordPlain === 'sales123' && user.username === 'sales') || (passwordPlain === 'acc123' && user.username === 'accountant');
-
-    if (!isValid) {
-      return { success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' };
-    }
-
-    const updatedUser: User = {
-      ...sanitizeUser(user),
-      lastLoginAt: new Date().toISOString(),
-      preferredLanguage: language || user.preferredLanguage || 'fa',
-    };
-
-    const token = 'lan_session_' + Date.now();
-    setCurrentUser(updatedUser);
-    setSessionToken(token);
-    localStorage.setItem('fathi_aqua_session_token', token);
-    localStorage.setItem('fathi_aqua_session_user', JSON.stringify(updatedUser));
-    return { success: true };
   };
 
   const logout = () => {
-    if (sessionToken) {
-      try {
-        fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
-          body: JSON.stringify({ token: sessionToken }),
-        }).catch(() => {});
-      } catch (e) {}
+    if (sessionToken && !sessionToken.startsWith('lan_session_')) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+        body: JSON.stringify({ token: sessionToken }),
+      }).catch(() => {});
     }
     setCurrentUser(null);
     setSessionToken(null);
@@ -237,83 +178,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const hasPermission = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean => {
-    if (!currentUser) return false;
-    if (currentUser.role === 'Super Admin' || currentUser.role === 'Farm Owner') return true;
+    if (!currentUser || !currentUser.isActive) return false;
 
-    // Check specific role capabilities
-    if (currentUser.role === 'Veterinarian') {
-      if (module === 'treatments' || module === 'mortality' || module === 'laboratory' || module === 'biometrics' || module === 'water_quality') return true;
-      if (module === 'feeding' && action === 'view') return true;
-      if (module === 'dashboard') return true;
-      return false;
+    if (currentUser.customRoleId) {
+      const customRole = customRoles.find((role) => role.id === currentUser.customRoleId);
+      if (!customRole) return false;
+      return customRole.permissions.some((permission) => {
+        if (permission.module !== module || !permission.actions.includes(action)) return false;
+        if (permission.scope === 'all') return true;
+        return Boolean(scopeId && permission.scopeId === scopeId);
+      });
     }
 
-    if (currentUser.role === 'Hatchery Manager') {
-      if (module === 'hatchery' || module === 'nursery' || module === 'biometrics' || module === 'water_quality') return true;
-      if (module === 'dashboard' || module === 'reports') return true;
-      return false;
-    }
-
-    if (currentUser.role === 'Accountant') {
-      if (module === 'accounting' || module === 'sales' || module === 'hr' || module === 'warehouse' || module === 'reports' || module === 'dashboard') return true;
-      return false;
-    }
-
-    if (currentUser.role === 'Sales Manager' || currentUser.role === 'CRM Operator') {
-      if (module === 'crm' || module === 'sales' || module === 'processing' || module === 'cold_storage' || module === 'media' || module === 'dashboard') return true;
-      return false;
-    }
-
-    if (currentUser.role === 'Viewer/Auditor') {
-      return action === 'view' || action === 'export' || action === 'print';
-    }
-
-    return true; // Default broad access for demo
+    if (!roleAllows(currentUser.role, module, action)) return false;
+    if (!scopeId) return true;
+    if (currentUser.pondScope?.length) return currentUser.pondScope.includes(scopeId);
+    if (currentUser.hallScope?.length) return currentUser.hallScope.includes(scopeId);
+    return true;
   };
 
   const usersList: User[] = usersDb.map(sanitizeUser);
 
   const createNewUser = async (userData: Omit<User, 'id' | 'createdAt'>, passwordPlain: string) => {
-    const passwordHash = await hashPassword(passwordPlain);
-    const newUser = {
-      ...userData,
-      passwordHash,
-      id: 'usr_' + Date.now(),
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    setUsersDb((prev) => [...prev, newUser]);
+    if (passwordPlain.length < 8) throw new Error('PASSWORD_TOO_SHORT');
+    if (usersDb.some((user) => user.username.toLowerCase() === userData.username.toLowerCase())) throw new Error('USERNAME_EXISTS');
+    const passwordHash = await hashPasswordWithSalt(passwordPlain, PASSWORD_SALT);
+    setUsersDb((previous) => [
+      ...previous,
+      { ...userData, passwordHash, id: `usr_${Date.now()}`, createdAt: new Date().toISOString().split('T')[0] },
+    ]);
   };
 
   const toggleUserActive = (userId: string) => {
-    setUsersDb((prev) =>
-      prev.map((u) => {
-        if (u.id === userId) {
-          return { ...u, isActive: !u.isActive };
-        }
-        return u;
-      })
-    );
+    setUsersDb((previous) => previous.map((user) => user.id === userId ? { ...user, isActive: !user.isActive } : user));
   };
 
   const resetUserPassword = async (userId: string, newPassPlain: string) => {
-    const passwordHash = await hashPassword(newPassPlain);
-    setUsersDb((prev) =>
-      prev.map((u) => {
-        if (u.id === userId) {
-          return { ...u, passwordHash };
-        }
-        return u;
-      })
-    );
+    if (newPassPlain.length < 8) throw new Error('PASSWORD_TOO_SHORT');
+    const passwordHash = await hashPasswordWithSalt(newPassPlain, PASSWORD_SALT);
+    setUsersDb((previous) => previous.map((user) => user.id === userId ? { ...user, passwordHash } : user));
   };
 
   const createCustomRole = (name: string, permissions: GranularPermission[]) => {
-    const newRole = {
-      id: 'role_' + Date.now(),
-      name,
-      permissions,
-    };
-    setCustomRoles((prev) => [...prev, newRole]);
+    if (!name.trim()) throw new Error('ROLE_NAME_REQUIRED');
+    setCustomRoles((previous) => [...previous, { id: `role_${Date.now()}`, name: name.trim(), permissions }]);
   };
 
   return (
@@ -339,8 +247,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };

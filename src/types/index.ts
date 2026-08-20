@@ -121,8 +121,8 @@ export interface SturgeonSpecies {
   optimumpHMin: number;
   optimumpHMax: number;
   standardFCR: number;
-  feedingProfileCoeff: number; // e.g. 1.0 = standard 1% body weight
-  caviarMaturityYears: number; // e.g. 8-12 years for Beluga
+  feedingProfileCoeff: number;
+  caviarMaturityYears: number;
 }
 
 export type FeedingStatus = 'ACTIVE' | 'STOPPED';
@@ -160,7 +160,7 @@ export interface Pond {
   fcr: number;
   dailyMortalityCount: number;
   waterTemperature: number;
-  dissolvedOxygen: number; // DO in mg/L
+  dissolvedOxygen: number;
   ph: number;
   activeTreatmentId?: string;
   lastBiometryDate: string;
@@ -223,7 +223,7 @@ export interface BiometricSession {
   previousAvgWeightKg: number;
   daysSinceLastBiometry: number;
   growthRateKgPerDay: number;
-  sgr: number; // Specific Growth Rate %/day
+  sgr: number;
   operatorName: string;
   notes?: string;
 }
@@ -280,7 +280,7 @@ export interface TreatmentRecord {
   endDate: string;
   nextDoseDate?: string;
   veterinarian: string;
-  withdrawalPeriodDays: number; // دوره پرهیز از مصرف
+  withdrawalPeriodDays: number;
   withdrawalEndDate: string;
   status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
   notes?: string;
@@ -308,7 +308,7 @@ export interface FishTransfer {
 
 export interface BroodstockFish {
   id: string;
-  chipNumber: string; // Microchip RFID
+  chipNumber: string;
   plateNumber: string;
   sex: 'Female' | 'Male' | 'Unknown';
   speciesId: string;
@@ -431,7 +431,7 @@ export interface InventoryTransaction {
   itemName: string;
   sku: string;
   type: InventoryTxType;
-  quantityChange: number; // positive or negative
+  quantityChange: number;
   resultingQuantity: number;
   unit: string;
   unitPrice: number;
@@ -475,7 +475,7 @@ export interface ProcessingBatch {
   smokedMeatYieldKg: number;
   byProductAndWasteKg: number;
   operatorName: string;
-  qualityScore: number; // out of 100
+  qualityScore: number;
   citesPermitNumber?: string;
   status: 'Completed' | 'Packaging' | 'Stored In Cold Room';
 }
@@ -621,7 +621,7 @@ export interface AttendanceRecord {
 
 export interface PayrollRecord {
   id: string;
-  payrollMonth: string; // e.g. "1405-02" or "2026-05"
+  payrollMonth: string;
   employeeId: string;
   employeeName: string;
   department: string;
@@ -693,8 +693,11 @@ export interface BackupSnapshot {
   dataSizeKb: number;
   tablesCount: number;
   checksum: string;
+  checksumAlgorithm?: 'FNV1A32';
+  schemaVersion?: number;
   creator: string;
   type: 'Automatic Daily' | 'Pre-Restore Safety Snapshot' | 'Manual Export';
+  data?: Record<string, unknown>;
 }
 
 export interface ExcelImportPreviewRow {
