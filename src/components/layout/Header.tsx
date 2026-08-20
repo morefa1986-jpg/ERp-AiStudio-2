@@ -27,12 +27,14 @@ interface HeaderProps {
   onSelectNav: (viewId: string) => void;
   onOpenSearch: () => void;
   onToggleMobileMenu?: () => void;
+  onOpenAuth?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onSelectNav,
   onOpenSearch,
   onToggleMobileMenu,
+  onOpenAuth,
 }) => {
   const { t, language, setLanguage, meta, dir } = useI18n();
   const { currentUser, logout, usersList, login } = useAuth();
@@ -309,44 +311,55 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div className="py-1">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-[#71717A] px-3 py-1">
-                  Switch Active Role (RBAC):
+                  Active Personnel Accounts:
                 </p>
                 {usersList.map((u) => (
-                  <button
+                  <div
                     key={u.id}
-                    onClick={() => {
-                      login(u.username, '123456');
-                      setShowUserDropdown(false);
-                    }}
-                    className={`w-full text-right px-3 py-1.5 text-xs rounded-lg flex items-center justify-between hover:bg-[#18181B] transition-colors cursor-pointer ${
+                    className={`w-full text-right px-3 py-1.5 text-xs rounded-lg flex items-center justify-between transition-colors ${
                       currentUser?.id === u.id ? 'bg-[#18181B] font-bold text-[#D4AF37]' : 'text-[#A1A1AA]'
                     }`}
                   >
                     <span className="truncate">{u.fullName}</span>
-                    <span className="text-[9px] text-[#71717A] mr-2">{u.role.split(' ')[0]}</span>
-                  </button>
+                    <span className="text-[9px] text-[#71717A] mr-2 font-mono">@{u.username}</span>
+                  </div>
                 ))}
               </div>
 
-              <div className="pt-2 border-t border-[#1F1F22] mt-1.5 flex justify-between gap-2">
-                <button
-                  onClick={() => {
-                    onSelectNav('securityAudit');
-                    setShowUserDropdown(false);
-                  }}
-                  className="flex-1 text-center py-1.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#27272A] text-[#E4E4E7] text-xs rounded-lg transition-colors cursor-pointer font-medium"
-                >
-                  مدیریت امنیت
-                </button>
-                <button
-                  onClick={() => {
-                    logout();
-                    setShowUserDropdown(false);
-                  }}
-                  className="px-3.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs rounded-lg transition-colors cursor-pointer font-medium"
-                >
-                  خروج
-                </button>
+              <div className="pt-2 border-t border-[#1F1F22] mt-1.5 space-y-1.5">
+                {onOpenAuth && (
+                  <button
+                    onClick={() => {
+                      onOpenAuth();
+                      setShowUserDropdown(false);
+                    }}
+                    className="w-full text-center py-1.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#D4AF37]/30 text-[#D4AF37] text-xs rounded-lg transition-colors cursor-pointer font-medium flex items-center justify-center gap-1.5"
+                  >
+                    <UserIcon className="w-3.5 h-3.5" />
+                    <span>تغییر حساب / ورود با کاربر دیگر</span>
+                  </button>
+                )}
+                <div className="flex justify-between gap-2">
+                  <button
+                    onClick={() => {
+                      onSelectNav('securityAudit');
+                      setShowUserDropdown(false);
+                    }}
+                    className="flex-1 text-center py-1.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#27272A] text-[#E4E4E7] text-xs rounded-lg transition-colors cursor-pointer font-medium"
+                  >
+                    مدیریت امنیت
+                  </button>
+                  <button
+                    onClick={() => {
+                      logout();
+                      setShowUserDropdown(false);
+                    }}
+                    className="px-3.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs rounded-lg transition-colors cursor-pointer font-medium flex items-center gap-1"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    <span>خروج</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { I18nProvider, useI18n } from './i18n';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { FarmProvider } from './context/FarmContext';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
@@ -27,6 +27,7 @@ import { AuthModal } from './components/views/AuthModal';
 
 const MainAppContent: React.FC = () => {
   const { dir } = useI18n();
+  const { isAuthenticated, currentUser } = useAuth();
   const [activeView, setActiveView] = useState<string>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
@@ -89,6 +90,15 @@ const MainAppContent: React.FC = () => {
     }
   };
 
+  // If user is not authenticated, display blocking login gate
+  if (!isAuthenticated || !currentUser) {
+    return (
+      <div dir={dir} className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans flex items-center justify-center p-4">
+        <AuthModal isOpen={true} isBlocking={true} onClose={() => {}} />
+      </div>
+    );
+  }
+
   return (
     <div
       dir={dir}
@@ -99,6 +109,7 @@ const MainAppContent: React.FC = () => {
         onSelectNav={setActiveView}
         onOpenSearch={() => setIsSearchOpen(true)}
         onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
+        onOpenAuth={() => setIsAuthOpen(true)}
       />
 
       {/* Body Layout Area */}

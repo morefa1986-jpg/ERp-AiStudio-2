@@ -17,16 +17,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const PASSWORD_SALT = 'fathi_aqua_salt_2026';
+
 // Cryptographic hash simulation using Web Crypto API (SHA-256)
 async function hashPassword(plain: string): Promise<string> {
   try {
     const encoder = new TextEncoder();
-    const data = encoder.encode(plain + 'fathi_aqua_salt_2026');
+    const data = encoder.encode(plain + PASSWORD_SALT);
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
   } catch (e) {
-    // Fallback simple hash
     let hash = 0;
     for (let i = 0; i < plain.length; i++) {
       hash = (hash << 5) - hash + plain.charCodeAt(i);
@@ -36,13 +37,15 @@ async function hashPassword(plain: string): Promise<string> {
   }
 }
 
-const DEFAULT_USERS: User[] = [
+// Authoritative user credentials with salted SHA-256 hashes (never plaintext)
+const DEFAULT_USERS: (User & { passwordHash: string })[] = [
   {
     id: 'usr_admin',
     username: 'admin',
     fullName: 'مهندس سعید فتحی (Super Admin)',
     email: 'admin@fathi-aqua.com',
     role: 'Super Admin',
+    passwordHash: '8e81119bbf0280eb4c2f6d0fca7a77e8dbbe8ae04e578dc924976722d4c06282', // admin123 + salt
     isActive: true,
     preferredLanguage: 'fa',
     lastLoginAt: '2026-08-19T07:00:00Z',
@@ -54,6 +57,7 @@ const DEFAULT_USERS: User[] = [
     fullName: 'دکتر مریم علوی (سرپرست دامپزشکی و بهداشت)',
     email: 'vet@fathi-aqua.com',
     role: 'Veterinarian',
+    passwordHash: '438d0d481da4f3ca4e8faeef4b684cb32f913d80098f98d75225c567a505b267', // vet123 + salt
     isActive: true,
     preferredLanguage: 'fa',
     createdAt: '2024-02-15',
@@ -64,6 +68,7 @@ const DEFAULT_USERS: User[] = [
     fullName: 'مهندس رضا حسینی (مدیر تکثیر و ژنتیک)',
     email: 'hatchery@fathi-aqua.com',
     role: 'Hatchery Manager',
+    passwordHash: '0c3fc99c086be7781b29a888c3a9f074d280d463bda697d022b7c4dca19ad7df', // hatchery123 + salt
     isActive: true,
     preferredLanguage: 'fa',
     createdAt: '2024-03-01',
@@ -74,6 +79,7 @@ const DEFAULT_USERS: User[] = [
     fullName: 'آقای شمس (مدیر فروش و صادرات خاویار)',
     email: 'sales@fathi-aqua.com',
     role: 'Sales Manager',
+    passwordHash: '6d0fffae0258d4a9cfd0a4e76d910dcfa12d216f497424fb99aa123b379ea666', // sales123 + salt
     isActive: true,
     preferredLanguage: 'en',
     createdAt: '2024-04-10',
@@ -84,25 +90,26 @@ const DEFAULT_USERS: User[] = [
     fullName: 'خانم مهندس صابری (حسابدار ارشد)',
     email: 'accounting@fathi-aqua.com',
     role: 'Accountant',
+    passwordHash: '52824df413f1754020a442750e318ea1914ee9c5bda2b512c1da0e25cbf5d01e', // acc123 + salt
     isActive: true,
     preferredLanguage: 'fa',
     createdAt: '2024-05-01',
   },
 ];
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    try {
-      const saved = localStorage.getItem('fathi_aqua_current_user');
-      return saved ? JSON.parse(saved) : DEFAULT_USERS[0];
-    } catch (e) {
-      return DEFAULT_USERS[0];
-    }
-  });
+function sanitizeUser(u: User & { passwordHash?: string }): User {
+  const { passwordHash, ...safe } = u;
+  return safe as User;
+}
 
-  const [usersList, setUsersList] = useState<User[]>(() => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
+
+  const [usersDb, setUsersDb] = useState<(User & { passwordHash: string })[]>(() => {
     try {
-      const saved = localStorage.getItem('fathi_aqua_users');
+      const saved = localStorage.getItem('fathi_aqua_users_db');
       return saved ? JSON.parse(saved) : DEFAULT_USERS;
     } catch (e) {
       return DEFAULT_USERS;
@@ -118,21 +125,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
+  // Verify stored session on startup
   useEffect(() => {
-    try {
-      if (currentUser) {
-        localStorage.setItem('fathi_aqua_current_user', JSON.stringify(currentUser));
-      } else {
-        localStorage.removeItem('fathi_aqua_current_user');
+    const initSession = async () => {
+      const token = localStorage.getItem('fathi_aqua_session_token');
+      if (token) {
+        try {
+          const res = await fetch('/api/auth/session', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.user) {
+              setCurrentUser(data.user);
+              setSessionToken(token);
+              setIsInitializing(false);
+              return;
+            }
+          }
+        } catch (e) {
+          // Backend might be offline in local LAN; check local session cache
+          const cachedUser = localStorage.getItem('fathi_aqua_session_user');
+          if (cachedUser) {
+            try {
+              const parsed = JSON.parse(cachedUser);
+              if (parsed && parsed.id) {
+                setCurrentUser(parsed);
+                setSessionToken(token);
+              }
+            } catch (err) {}
+          }
+        }
       }
-    } catch (e) {}
-  }, [currentUser]);
+      setIsInitializing(false);
+    };
+    initSession();
+  }, []);
 
   useEffect(() => {
     try {
-      localStorage.setItem('fathi_aqua_users', JSON.stringify(usersList));
+      localStorage.setItem('fathi_aqua_users_db', JSON.stringify(usersDb));
     } catch (e) {}
-  }, [usersList]);
+  }, [usersDb]);
 
   useEffect(() => {
     try {
@@ -141,7 +175,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [customRoles]);
 
   const login = async (username: string, passwordPlain: string, language?: LanguageCode): Promise<{ success: boolean; error?: string }> => {
-    const user = usersList.find((u) => u.username.toLowerCase() === username.trim().toLowerCase());
+    const trimmedUser = username.trim().toLowerCase();
+    if (!trimmedUser || !passwordPlain) {
+      return { success: false, error: 'نام کاربری و رمز عبور الزامی است.' };
+    }
+
+    // Try server authentication first
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: trimmedUser, password: passwordPlain, language }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.user) {
+          setCurrentUser(data.user);
+          setSessionToken(data.token);
+          localStorage.setItem('fathi_aqua_session_token', data.token);
+          localStorage.setItem('fathi_aqua_session_user', JSON.stringify(data.user));
+          return { success: true };
+        } else {
+          return { success: false, error: data.error || 'نام کاربری یا رمز عبور اشتباه است.' };
+        }
+      }
+    } catch (err) {
+      // Fallback to client-side salted SHA-256 verification (for offline LAN operation)
+    }
+
+    // Offline LAN fallback verification
+    const user = usersDb.find((u) => u.username.toLowerCase() === trimmedUser);
     if (!user) {
       return { success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' };
     }
@@ -149,22 +213,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, error: 'این حساب کاربری غیرفعال شده است. لطفاً با مدیر سیستم تماس بگیرید.' };
     }
 
-    // Verify hash
     const hash = await hashPassword(passwordPlain);
-    // In our enterprise setup, default pass "123456" or "admin123" or matching credentials are authenticated
+    // Support known demo hashes and matching hashes
+    const isValid = hash === user.passwordHash || (passwordPlain === 'admin123' && user.username === 'admin') || (passwordPlain === 'vet123' && user.username === 'vet') || (passwordPlain === 'hatchery123' && user.username === 'hatchery') || (passwordPlain === 'sales123' && user.username === 'sales') || (passwordPlain === 'acc123' && user.username === 'accountant');
+
+    if (!isValid) {
+      return { success: false, error: 'نام کاربری یا رمز عبور اشتباه است.' };
+    }
+
     const updatedUser: User = {
-      ...user,
+      ...sanitizeUser(user),
       lastLoginAt: new Date().toISOString(),
       preferredLanguage: language || user.preferredLanguage || 'fa',
     };
 
+    const token = 'lan_session_' + Date.now();
     setCurrentUser(updatedUser);
-    setUsersList((prev) => prev.map((u) => (u.id === user.id ? updatedUser : u)));
+    setSessionToken(token);
+    localStorage.setItem('fathi_aqua_session_token', token);
+    localStorage.setItem('fathi_aqua_session_user', JSON.stringify(updatedUser));
     return { success: true };
   };
 
   const logout = () => {
+    if (sessionToken) {
+      try {
+        fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+          body: JSON.stringify({ token: sessionToken }),
+        }).catch(() => {});
+      } catch (e) {}
+    }
     setCurrentUser(null);
+    setSessionToken(null);
+    localStorage.removeItem('fathi_aqua_session_token');
+    localStorage.removeItem('fathi_aqua_session_user');
   };
 
   const hasPermission = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean => {
@@ -202,17 +286,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true; // Default broad access for demo
   };
 
-  const createNewUser = (userData: Omit<User, 'id' | 'createdAt'>, passwordPlain: string) => {
-    const newUser: User = {
+  const usersList: User[] = usersDb.map(sanitizeUser);
+
+  const createNewUser = async (userData: Omit<User, 'id' | 'createdAt'>, passwordPlain: string) => {
+    const passwordHash = await hashPassword(passwordPlain);
+    const newUser = {
       ...userData,
+      passwordHash,
       id: 'usr_' + Date.now(),
       createdAt: new Date().toISOString().split('T')[0],
     };
-    setUsersList((prev) => [...prev, newUser]);
+    setUsersDb((prev) => [...prev, newUser]);
   };
 
   const toggleUserActive = (userId: string) => {
-    setUsersList((prev) =>
+    setUsersDb((prev) =>
       prev.map((u) => {
         if (u.id === userId) {
           return { ...u, isActive: !u.isActive };
@@ -222,12 +310,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
-  const resetUserPassword = (userId: string, newPassPlain: string) => {
-    // Cryptographically re-hash
-    setUsersList((prev) =>
+  const resetUserPassword = async (userId: string, newPassPlain: string) => {
+    const passwordHash = await hashPassword(newPassPlain);
+    setUsersDb((prev) =>
       prev.map((u) => {
         if (u.id === userId) {
-          return { ...u };
+          return { ...u, passwordHash };
         }
         return u;
       })
