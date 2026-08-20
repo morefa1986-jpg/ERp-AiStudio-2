@@ -1,238 +1,64 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Plus, Scale, TrendingUp } from 'lucide-react';
 import { useI18n } from '../../i18n';
 import { useFarm } from '../../context/FarmContext';
-import {
-  TrendingUp,
-  Scale,
-  Plus,
-  Calendar,
-  Sparkles,
-  Layers,
-  ArrowUpRight,
-  Fish,
-} from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { runtimeUnitLabel } from '../../i18n/runtimeMessages';
 
 export const BiometricsView: React.FC = () => {
-  const { t, formatNumber, formatDate } = useI18n();
-  const {
-    ponds,
-    biometricSessions,
-    recordBiometry,
-  } = useFarm();
+  const { t, formatNumber, formatDate, language } = useI18n();
+  const { currentUser } = useAuth();
+  const { ponds, biometricSessions, recordBiometry } = useFarm();
+  const [selectedPondId, setSelectedPondId] = useState(ponds[0]?.id || '');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [sampleSize, setSampleSize] = useState(30);
+  const [avgWeightKg, setAvgWeightKg] = useState(0);
+  const [operator, setOperator] = useState(currentUser?.fullName || '');
+  const selectedPond = ponds.find((pond) => pond.id === selectedPondId);
+  const kg = runtimeUnitLabel(language, 'kg');
 
-  const [selectedPondId, setSelectedPondId] = useState<string>(ponds[0]?.id || '');
-  const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const metrics = useMemo(() => {
+    const latestByPond = ponds.map((pond) => biometricSessions.filter((session) => session.pondId === pond.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]).filter(Boolean);
+    const avgWeight = latestByPond.length ? latestByPond.reduce((sum, row) => sum + row.averageWeightKg, 0) / latestByPond.length : null;
+    const avgSgr = latestByPond.length ? latestByPond.reduce((sum, row) => sum + row.sgr, 0) / latestByPond.length : null;
+    const samples = biometricSessions.reduce((sum, row) => sum + row.sampleCount, 0);
+    return { avgWeight, avgSgr, samples };
+  }, [ponds, biometricSessions]);
 
-  // Form state
-  const [sampleSize, setSampleSize] = useState<number>(30);
-  const [avgWeightKg, setAvgWeightKg] = useState<number>(6.8);
-  const [operator, setOperator] = useState<string>('مهندس باقری (کارشناس بیومتری)');
-
-  const selectedPond = ponds.find((p) => p.id === selectedPondId);
-
-  const handleAddBiometry = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPond) return;
-
-    // Generate samples array based on avg
-    const samples = Array.from({ length: sampleSize }, () => ({
-      weightKg: +(avgWeightKg * (0.9 + Math.random() * 0.2)).toFixed(2),
-      lengthCm: Math.round(avgWeightKg * 14),
-    }));
-
+  const handleAddBiometry = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedPond || !Number.isInteger(sampleSize) || sampleSize <= 0 || !Number.isFinite(avgWeightKg) || avgWeightKg <= 0) return;
+    const samples = Array.from({ length: sampleSize }, () => ({ weightKg: avgWeightKg }));
     recordBiometry({
       pondId: selectedPond.id,
       pondName: selectedPond.name,
       speciesId: selectedPond.speciesId,
-      date: new Date().toISOString().split('T')[0],
-      sampleCount: Number(sampleSize),
+      date: new Date().toISOString().slice(0, 10),
+      sampleCount: sampleSize,
       samples,
-      previousAvgWeightKg: selectedPond.averageWeightKg || 6.5,
-      daysSinceLastBiometry: 14,
-      operatorName: operator,
-      notes: 'نمونه‌گیری دوره‌ای تصادفی استاندارد',
+      previousAvgWeightKg: selectedPond.averageWeightKg,
+      daysSinceLastBiometry: 0,
+      operatorName: operator.trim() || currentUser?.fullName || 'Local Operator',
+      notes: '',
     });
-
     setShowAddModal(false);
   };
 
-  return (
-    <div className="space-y-6 animate-fadeIn pb-12">
-      {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-black text-white flex items-center gap-2.5">
-            <Scale className="w-6 h-6 text-amber-400" />
-            بیومتری، نمونه‌گیری اوزان و محاسبه شاخص رشد SGR
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            پایش نرخ رشد ویژه (Specific Growth Rate)، ضریب تبدیل خوراک (FCR)، توزیع یکنواختی گله و سورتینگ
-          </p>
-        </div>
+  return <div className="space-y-6 animate-fadeIn pb-12">
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h1 className="text-xl font-black text-white flex items-center gap-2.5"><Scale className="w-6 h-6 text-amber-400" />{t('biometrics.title')}</h1><p className="text-xs text-slate-400 mt-1">{t('biometrics.subtitle')}</p></div><button onClick={() => setShowAddModal(true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5"><Plus className="w-4 h-4" />{t('biometrics.btnNewBiometry')}</button></div>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20"
-        >
-          <Plus className="w-4 h-4" />
-          ثبت نمونه‌گیری بیومتری جدید
-        </button>
-      </div>
-
-      {/* SGR Formula Card */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="font-bold text-white text-sm">فرمول استاندارد SGR:</h4>
-            <span className="font-mono text-slate-400 text-[11px]">
-              SGR (%/day) = [(ln(W₂ - Final) - ln(W₁ - Initial)) / Days] × 100
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 text-xs font-mono">
-          <div>میانگین رشد گله: <strong className="text-emerald-400 font-bold">+0.82% / روز</strong></div>
-          <div>شاخص یکنواختی CV: <strong className="text-cyan-400 font-bold">8.4% (بسیار مطلوب)</strong></div>
-        </div>
-      </div>
-
-      {/* Biometry Records List */}
-      <div className="space-y-4">
-        {biometricSessions.map((rec) => (
-          <div
-            key={rec.id}
-            className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3"
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-2.5 gap-2">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-sm text-white">{rec.pondName}</span>
-                <span className="text-xs text-slate-400">تاریخ: {rec.date}</span>
-                <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-                  {rec.sampleCount} عدد نمونه
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-slate-400">کارشناس: {rec.operatorName}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-              <div>
-                <span className="text-[11px] text-slate-400 block">میانگین وزن</span>
-                <span className="text-base font-black text-amber-400">
-                  {rec.averageWeightKg} kg
-                </span>
-              </div>
-
-              <div>
-                <span className="text-[11px] text-slate-400 block">بیومس تخمینی استخر</span>
-                <span className="text-base font-bold text-white">{formatNumber(rec.estimatedBiomassKg)} kg</span>
-              </div>
-
-              <div>
-                <span className="text-[11px] text-slate-400 block">نرخ رشد ویژه SGR</span>
-                <span className="text-base font-black text-emerald-400">+{rec.sgr}% / روز</span>
-              </div>
-
-              <div>
-                <span className="text-[11px] text-slate-400 block">دامنه اوزان</span>
-                <span className="text-xs font-mono text-slate-300">
-                  {rec.minWeightKg}kg - {rec.maxWeightKg}kg
-                </span>
-              </div>
-            </div>
-
-            {rec.notes && (
-              <p className="text-[11px] text-slate-400">{rec.notes}</p>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Modal: New Biometry */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <h3 className="font-bold text-base text-white flex items-center gap-2">
-              <Scale className="w-5 h-5 text-amber-400" />
-              ثبت داده‌های بیومتری و نمونه‌گیری وزن
-            </h3>
-
-            <form onSubmit={handleAddBiometry} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">استخر پرورشی:</label>
-                <select
-                  value={selectedPondId}
-                  onChange={(e) => setSelectedPondId(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"
-                >
-                  {ponds.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.number} — {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">تعداد نمونه (قطعه):</label>
-                  <input
-                    type="number"
-                    value={sampleSize}
-                    onChange={(e) => setSampleSize(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">میانگین وزن (kg):</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={avgWeightKg}
-                    onChange={(e) => setAvgWeightKg(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold text-amber-400"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">کارشناس ثبت‌کننده:</label>
-                <input
-                  type="text"
-                  value={operator}
-                  onChange={(e) => setOperator(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"
-                  required
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl"
-                >
-                  انصراف
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl"
-                >
-                  محاسبه SGR و ثبت
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <Metric title={t('biometrics.cardAvgWeight')} value={metrics.avgWeight == null ? t('noData') : `${formatNumber(metrics.avgWeight, { maximumFractionDigits: 3 })} ${kg}`} />
+      <Metric title={t('biometrics.cardSgr')} value={metrics.avgSgr == null ? t('noData') : `${formatNumber(metrics.avgSgr, { maximumFractionDigits: 3 })}%`} />
+      <Metric title={t('biometrics.cardSampled')} value={formatNumber(metrics.samples)} />
     </div>
-  );
+
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center gap-3 text-xs"><div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400"><TrendingUp className="w-5 h-5" /></div><div><div className="font-bold text-white">SGR</div><span className="font-mono text-slate-400">SGR (%/day) = [(ln(W2) - ln(W1)) / Days] × 100</span></div></div>
+
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4"><h3 className="font-bold text-sm text-white">{t('biometrics.historyTitle')} <span className="text-slate-500">{t('biometrics.recordsCount', { count: biometricSessions.length })}</span></h3><div className="overflow-x-auto"><table className="w-full text-xs text-start"><thead className="bg-slate-800 text-slate-400"><tr><th className="p-3">{t('biometrics.thPond')}</th><th className="p-3">{t('biometrics.thDate')}</th><th className="p-3">{t('biometrics.thSampleSize')}</th><th className="p-3">{t('biometrics.thAvgWeight')}</th><th className="p-3">{t('biometrics.thPrevWeight')}</th><th className="p-3">{t('biometrics.thGrowthRate')}</th><th className="p-3">{t('biometrics.thOperator')}</th></tr></thead><tbody className="divide-y divide-slate-800">{biometricSessions.length === 0 ? <tr><td colSpan={7} className="p-8 text-center text-slate-500">{t('noData')}</td></tr> : biometricSessions.map((row) => <tr key={row.id} className="text-slate-300"><td className="p-3 font-bold text-white">{row.pondName}</td><td className="p-3">{formatDate(row.date)}</td><td className="p-3">{formatNumber(row.sampleCount)}</td><td className="p-3">{formatNumber(row.averageWeightKg)} {kg}</td><td className="p-3">{formatNumber(row.previousAvgWeightKg)} {kg}</td><td className="p-3">{formatNumber(row.sgr)}%</td><td className="p-3">{row.operatorName}</td></tr>)}</tbody></table></div></div>
+
+    {showAddModal && <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm"><div className="bg-slate-900 border border-amber-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"><h3 className="font-bold text-base text-white flex items-center gap-2"><Scale className="w-5 h-5 text-amber-400" />{t('biometrics.modalTitle')}</h3><form onSubmit={handleAddBiometry} className="space-y-3 text-xs"><label className="block text-slate-300 font-bold">{t('biometrics.fieldPond')}<select value={selectedPondId} onChange={(e) => setSelectedPondId(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white">{ponds.map((pond) => <option key={pond.id} value={pond.id}>{pond.number} — {pond.name}</option>)}</select></label><div className="grid grid-cols-2 gap-3"><label className="block text-slate-300 font-bold">{t('biometrics.fieldSampleSize')}<input type="number" min={1} value={sampleSize} onChange={(e) => setSampleSize(Number(e.target.value))} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></label><label className="block text-slate-300 font-bold">{t('biometrics.fieldAvgWeight')}<input type="number" min={0.001} step="0.001" value={avgWeightKg || ''} onChange={(e) => setAvgWeightKg(Number(e.target.value))} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></label></div><label className="block text-slate-300 font-bold">{t('biometrics.fieldOperator')}<input value={operator} onChange={(e) => setOperator(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">{t('cancel')}</button><button type="submit" className="px-4 py-2 bg-amber-500 text-slate-950 font-bold rounded-xl">{t('biometrics.btnSubmitBiometry')}</button></div></form></div></div>}
+  </div>;
 };
+
+const Metric: React.FC<{ title: string; value: string }> = ({ title, value }) => <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4"><span className="text-xs text-slate-400 block">{title}</span><span className="text-xl font-black text-white mt-1 block">{value}</span></div>;
