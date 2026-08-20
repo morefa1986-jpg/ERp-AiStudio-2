@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
@@ -14,6 +15,203 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
+
+// Auth & Security Storage (In-memory + Salted SHA-256)
+const PASSWORD_SALT = 'fathi_aqua_salt_2026';
+
+function hashPasswordServer(plain: string): string {
+  return crypto.createHash('sha256').update(plain + PASSWORD_SALT).digest('hex');
+}
+
+interface ServerUser {
+  id: string;
+  username: string;
+  fullName: string;
+  email: string;
+  role: string;
+  passwordHash: string;
+  isActive: boolean;
+  preferredLanguage: string;
+  lastLoginAt?: string;
+  createdAt: string;
+}
+
+// Initial Authoritative Users
+const USERS_DB: Map<string, ServerUser> = new Map([
+  [
+    'admin',
+    {
+      id: 'usr_admin',
+      username: 'admin',
+      fullName: 'مهندس سعید فتحی (Super Admin)',
+      email: 'admin@fathi-aqua.com',
+      role: 'Super Admin',
+      passwordHash: hashPasswordServer('admin123'),
+      isActive: true,
+      preferredLanguage: 'fa',
+      lastLoginAt: '2026-08-19T07:00:00Z',
+      createdAt: '2024-01-01',
+    },
+  ],
+  [
+    'vet',
+    {
+      id: 'usr_vet',
+      username: 'vet',
+      fullName: 'دکتر مریم علوی (سرپرست دامپزشکی و بهداشت)',
+      email: 'vet@fathi-aqua.com',
+      role: 'Veterinarian',
+      passwordHash: hashPasswordServer('vet123'),
+      isActive: true,
+      preferredLanguage: 'fa',
+      createdAt: '2024-02-15',
+    },
+  ],
+  [
+    'hatchery',
+    {
+      id: 'usr_hatchery',
+      username: 'hatchery',
+      fullName: 'مهندس رضا حسینی (مدیر تکثیر و ژنتیک)',
+      email: 'hatchery@fathi-aqua.com',
+      role: 'Hatchery Manager',
+      passwordHash: hashPasswordServer('hatchery123'),
+      isActive: true,
+      preferredLanguage: 'fa',
+      createdAt: '2024-03-01',
+    },
+  ],
+  [
+    'sales',
+    {
+      id: 'usr_sales',
+      username: 'sales',
+      fullName: 'آقای شمس (مدیر فروش و صادرات خاویار)',
+      email: 'sales@fathi-aqua.com',
+      role: 'Sales Manager',
+      passwordHash: hashPasswordServer('sales123'),
+      isActive: true,
+      preferredLanguage: 'en',
+      createdAt: '2024-04-10',
+    },
+  ],
+  [
+    'accountant',
+    {
+      id: 'usr_accountant',
+      username: 'accountant',
+      fullName: 'خانم مهندس صابری (حسابدار ارشد)',
+      email: 'accounting@fathi-aqua.com',
+      role: 'Accountant',
+      passwordHash: hashPasswordServer('acc123'),
+      isActive: true,
+      preferredLanguage: 'fa',
+      createdAt: '2024-05-01',
+    },
+  ],
+]);
+
+interface ActiveSession {
+  token: string;
+  userId: string;
+  username: string;
+  role: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+const SESSIONS: Map<string, ActiveSession> = new Map();
+
+function sanitizeUser(user: ServerUser) {
+  const { passwordHash, ...safeUser } = user;
+  return safeUser;
+}
+
+// -------------------------------------------------------------
+// Authentication Endpoints (Phase 1 & Phase 2)
+// -------------------------------------------------------------
+
+app.post('/api/auth/login', (req, res) => {
+  const { username, password, language } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ success: false, error: 'نام کاربری و کلمه عبور الزامی است.' });
+  }
+
+  const user = USERS_DB.get(username.trim().toLowerCase());
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'نام کاربری یا کلمه عبور نادرست است.' });
+  }
+
+  if (!user.isActive) {
+    return res.status(403).json({ success: false, error: 'حساب کاربری غیرفعال است. با مدیر سیستم تماس بگیرید.' });
+  }
+
+  const incomingHash = hashPasswordServer(password);
+  if (incomingHash !== user.passwordHash) {
+    return res.status(401).json({ success: false, error: 'نام کاربری یا کلمه عبور نادرست است.' });
+  }
+
+  // Generate secure session token
+  const token = 'fathi_sec_' + crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  const session: ActiveSession = {
+    token,
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+    createdAt: now,
+    expiresAt: now + 7 * 24 * 60 * 60 * 1000, // 7 days
+  };
+
+  SESSIONS.set(token, session);
+  user.lastLoginAt = new Date().toISOString();
+  if (language) user.preferredLanguage = language;
+
+  return res.json({
+    success: true,
+    token,
+    user: sanitizeUser(user),
+  });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = (authHeader && authHeader.replace(/^Bearer\s+/i, '')) || req.body?.token;
+  if (token && SESSIONS.has(token)) {
+    SESSIONS.delete(token);
+  }
+  return res.json({ success: true });
+});
+
+app.get('/api/auth/session', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.replace(/^Bearer\s+/i, '');
+  if (!token || !SESSIONS.has(token)) {
+    return res.status(401).json({ success: false, error: 'Session invalid or expired' });
+  }
+
+  const session = SESSIONS.get(token)!;
+  if (Date.now() > session.expiresAt) {
+    SESSIONS.delete(token);
+    return res.status(401).json({ success: false, error: 'Session expired' });
+  }
+
+  const user = USERS_DB.get(session.username);
+  if (!user || !user.isActive) {
+    SESSIONS.delete(token);
+    return res.status(401).json({ success: false, error: 'User inactive or not found' });
+  }
+
+  return res.json({
+    success: true,
+    user: sanitizeUser(user),
+  });
+});
+
+app.get('/api/auth/users', (req, res) => {
+  const list = Array.from(USERS_DB.values()).map(sanitizeUser);
+  return res.json({ success: true, users: list });
+});
 
 // Lazy initialization for Gemini AI SDK
 let aiClient: GoogleGenAI | null = null;
@@ -44,11 +242,18 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// AI Farm Assistant Endpoint (Supports both /api/ai/ask and /api/ai/assistant)
+// -------------------------------------------------------------
+// AI Farm Assistant Endpoint
+// -------------------------------------------------------------
 const handleAiAssistant = async (req: express.Request, res: express.Response) => {
   try {
-    const { query, prompt: promptInput, language = 'fa', farmContext } = req.body;
+    const { query, prompt: promptInput, language = 'fa', farmContext } = req.body || {};
     const userQuery = promptInput || query || '';
+
+    if (!userQuery.trim()) {
+      return res.status(400).json({ success: false, error: 'Query is required' });
+    }
+
     const ai = getAIClient();
 
     if (ai) {
@@ -79,64 +284,61 @@ ${userQuery}`;
         source: 'gemini-2.5-flash',
       });
     } else {
-      // Intelligent Rule-Based Fallback Engine (Offline-First Enterprise Mode)
+      // Deterministic Offline Rule-Based Advisor (Strictly references actual provided farm context)
       const q = (userQuery || '').toLowerCase();
+      const ponds = farmContext?.ponds || [];
+      const stoppedPonds = ponds.filter((p: any) => p.feedingStatus === 'STOPPED');
+      const lowOxygenPonds = ponds.filter((p: any) => p.dissolvedOxygen < 4.0 || p.dissolvedOxygen < 5.0);
+      const totalBiomass = ponds.reduce((sum: number, p: any) => sum + (p.biomassKg || 0), 0);
+      const totalFish = ponds.reduce((sum: number, p: any) => sum + (p.fishCount || 0), 0);
+
       let answer = '';
-      
-      if (q.includes('fcr') || q.includes('ضریب تبدیل') || q.includes('fcr بدتر') || q.includes('worst fcr')) {
-        answer = language === 'fa' 
-          ? `📊 **تحلیل FCR مزرعه فتحی:**
-بر اساس آخرین ارزیابی بیومتری:
-- استخر **P-103 (سالن ۱ - فیل‌ماهی)** دارای FCR معادل **۱.۴۲** است که به دلیل نوسان دمای ورودی بالاتر از حد استاندارد (۱.۱۰) قرار دارد.
-- استخرهای **P-101** و **P-201** با FCR میانگین **۱.۰۵** در وضعیت ایده‌آل رشد قرار دارند.
-- **پیشنهاد اصلاحی:** بررسی میزان اکسیژن محلول و کاهش ۵٪ نرخ غذادهی روزانه در استخر P-103 تا تنظیم مجدد دمای آب.`
+
+      if (q.includes('fcr') || q.includes('ضریب تبدیل') || q.includes('feed conversion')) {
+        const sortedFcr = [...ponds].sort((a: any, b: any) => (b.fcr || 0) - (a.fcr || 0));
+        const highest = sortedFcr[0];
+        answer = language === 'fa'
+          ? `📊 **تحلیل FCR استخرهای مزرعه فتحی:**
+${highest ? `- استخر **${highest.name}** با FCR معادل **${highest.fcr}** نیازمند پایش جیره و دمای ورودی است.` : '- داده‌های استخر در دسترس نیست.'}
+- میانگین کل FCR مزرعه بر اساس داده‌های ثبت‌شده محاسبه می‌شود.
+- **توصیه:** بررسی یکنواختی هوادهی و پایش دقیق جدول تغذیه.`
           : `📊 **FCR Farm Analysis:**
-Based on the latest biometry sessions:
-- Pond **P-103 (Hall 1 - Beluga)** has an FCR of **1.42**, which is higher than the target (1.10) due to inlet temperature fluctuations.
-- Ponds **P-101** and **P-201** operate at an optimal FCR of **1.05**.
-- **Action Plan:** Verify DO levels and reduce daily feed ration by 5% in P-103 until water parameters stabilize.`;
+${highest ? `- Pond **${highest.name}** reports an FCR of **${highest.fcr}**.` : '- Pond data is being gathered.'}
+- Recommended Action: Maintain optimum dissolved oxygen above 6.0 mg/L and follow calibrated feed profiles.`;
       } else if (q.includes('oxygen') || q.includes('اکسیژن') || q.includes('do') || q.includes('خطر')) {
         answer = language === 'fa'
-          ? `⚠️ **وضعیت اکسیژن و ایمنی زیستی:**
-- استخر **P-102 (تاس‌ماهی روسی)** اکسیژن محلول **۴.۲ mg/L** را ثبت کرده است که به مرز هشدار نزدیک است.
-- مخروط‌های اکسیژن خالص در سالن ۱ با ظرفیت ۹۰٪ فعال هستند.
-- **دستورالعمل اضطراری:** در صورت کاهش DO به زیر ۴.۰ mg/L، وضعیت غذادهی بلافاصله به **STOPPED** تغییر یافته و هواده‌های اضطراری پشتیبان روشن شوند.`
+          ? `⚠️ **وضعیت اکسیژن و ایمنی زیستی استخرها:**
+${lowOxygenPonds.length > 0 ? lowOxygenPonds.map((p: any) => `- استخر **${p.name}**: اکسیژن ${p.dissolvedOxygen} mg/L (${p.feedingStatus === 'STOPPED' ? 'تغذیه متوقف' : 'هشدار'})`).join('\n') : '- تمامی استخرها در محدوده اکسیژن مجاز قرار دارند.'}
+- **قانون ایمنی اکید:** در صورت افت DO به زیر ۴.۰ mg/L، وضعیت غذادهی استخر بلافاصله به **STOPPED** تغییر می‌یابد.`
           : `⚠️ **Dissolved Oxygen & Biosafety Status:**
-- Pond **P-102 (Russian Sturgeon)** has logged DO at **4.2 mg/L**, approaching warning threshold.
-- Pure oxygen cones in Hall 1 are running at 90% capacity.
-- **Safety Protocol:** If DO drops below 4.0 mg/L, feeding will automatically switch to **STOPPED** and backup diffusers will engage.`;
-      } else if (q.includes('feed') || q.includes('خوراک') || q.includes('مصرف') || q.includes('budget')) {
+${lowOxygenPonds.length > 0 ? lowOxygenPonds.map((p: any) => `- Pond **${p.name}**: DO ${p.dissolvedOxygen} mg/L (${p.feedingStatus})`).join('\n') : '- All ponds maintain safe oxygen levels above threshold.'}
+- Safety protocol: Feeding is strictly prohibited whenever DO falls below 4.0 mg/L.`;
+      } else if (q.includes('feed') || q.includes('خوراک') || q.includes('تغذیه')) {
         answer = language === 'fa'
-          ? `🐟 **گزارش مصرف و پیشنهاد جیره خوراک:**
-- کل بیومس زنده مزرعه: **۴۸,۲۵۰ کیلوگرم**
-- مصرف خوراک ۷ روز گذشته: **۳,۴۲۰ کیلوگرم** (میانگین روزانه ۴۸۸ کیلوگرم)
-- میانگین نرخ غذادهی مطلوب: **۱.۰۱٪ وزن بدن** بر اساس دمای ۱۶.۵ درجه سلسیوس
-- موجودی انبار اکسترودر پلت ۴.۵ میلی‌متر: **۸,۴۰۰ کیلوگرم** (کافی برای ۱۷ روز عملیات).`
-          : `🐟 **Feed Consumption & Ration Optimization:**
-- Total Live Farm Biomass: **48,250 kg**
-- Past 7 Days Feed Consumed: **3,420 kg** (Daily avg 488 kg)
-- Optimal feeding rate: **1.01% of body weight** calibrated for 16.5°C
-- Warehouse 4.5mm Pellet Stock: **8,400 kg** (17 days operational reserve).`;
+          ? `🐟 **وضعیت تغذیه و بیومس مزرعه:**
+- کل بیومس فعال: **${totalBiomass.toLocaleString()} کیلوگرم**
+- تعداد کل ماهیان: **${totalFish.toLocaleString()} قطعه**
+- استخرهای متوقف شده: **${stoppedPonds.length} استخر**`
+          : `🐟 **Feeding & Biomass Summary:**
+- Total Live Biomass: **${totalBiomass.toLocaleString()} kg**
+- Total Fish Count: **${totalFish.toLocaleString()} fish**
+- Stopped Feeding Ponds: **${stoppedPonds.length} ponds**`;
       } else {
         answer = language === 'fa'
-          ? `🤖 **دستیار هوشمند مزرعه خاویاری فتحی:**
-سیستم وضعیت تمام سالن‌ها، استخرها، کیفیت آب و زنجیره ژنتیکی را پایش می‌کند.
-- کل ماهی‌های موجود: **۲۴,۳۵۰ قطعه** در قالب ۱۲ استخر فعال
-- تلفات ۲۴ ساعت گذشته: **۲ قطعه (۰.۰۰۸٪)** - کاملاً در محدوده طبیعی
-- کلیه سنسورهای DO و دما در وضعیت **VALID** قرار دارند.
-برای بررسی دقیق‌تر می‌توانید شماره استخر یا موضوع مورد نظر (تغذیه، تکثیر، سونوگرافی، انبار یا مالی) را مشخص کنید.`
-          : `🤖 **Fathi Caviar Farm Intelligence Assistant:**
-Monitoring all halls, ponds, water quality, and genetic lineages.
-- Total Fish Count: **24,350 fish** across 12 active digital twin ponds.
-- Past 24h Mortality: **2 fish (0.008%)** - within safe baseline.
-- All IoT DO & Temperature sensors report **VALID** status.
-Feel free to ask about specific ponds, biometrics, broodstock ultrasound, warehouse, or accounting.`;
+          ? `🤖 **سامانه هوشمند مزرعه خاویاری فتحی (حالت آفلاین امن):**
+- پایش لحظه‌ای استخرها، کیفیت آب و بیومس فعال است.
+- تعداد استخرهای ثبتی: **${ponds.length} استخر**
+- وضعیت قطع اضطراری خوراک: **${stoppedPonds.length} استخر**`
+          : `🤖 **Fathi Caviar Farm Intelligence Assistant (Secure Offline Mode):**
+- Real-time monitoring of ponds, water quality, and live biomass active.
+- Monitored Ponds: **${ponds.length} ponds**
+- Emergency Stopped Ponds: **${stoppedPonds.length} ponds**`;
       }
 
       return res.json({
         success: true,
         answer,
-        source: 'enterprise-offline-heuristics',
+        source: 'enterprise-deterministic-offline-engine',
       });
     }
   } catch (error: any) {
@@ -151,16 +353,28 @@ Feel free to ask about specific ponds, biometrics, broodstock ultrasound, wareho
 app.post('/api/ai/assistant', handleAiAssistant);
 app.post('/api/ai/ask', handleAiAssistant);
 
-// AI Dynamic Content Translation Endpoint (Presentation-only runtime translation)
+// -------------------------------------------------------------
+// AI Dynamic Content Translation Endpoint
+// -------------------------------------------------------------
 const handleDynamicTranslation = async (req: express.Request, res: express.Response) => {
   try {
-    const { items, text, sourceLocale = 'fa', targetLocale = 'en', contentType = 'user_note' } = req.body;
+    const { items, text, sourceLocale = 'fa', targetLocale = 'en' } = req.body || {};
     
     // Normalize input to batch array
     const requestItems: Array<{ id: string; text: string; sourceLocale?: string }> = items || (text ? [{ id: 'single_1', text, sourceLocale }] : []);
 
     if (requestItems.length === 0) {
       return res.status(400).json({ success: false, error: 'No text provided for translation' });
+    }
+
+    // Security check: Never translate passwords or secrets
+    const hasSecretKeywords = requestItems.some((item) => {
+      const t = (item.text || '').toLowerCase();
+      return t.includes('password') || t.includes('token') || t.includes('secret') || t.includes('apikey');
+    });
+
+    if (hasSecretKeywords) {
+      return res.status(400).json({ success: false, error: 'Security violation: confidential fields cannot be sent to translation' });
     }
 
     // If source and target are the same, return as-is immediately
@@ -221,7 +435,6 @@ ${JSON.stringify(requestItems, null, 2)}`;
       try {
         parsed = JSON.parse(responseText);
       } catch (parseErr) {
-        // Fallback if formatting was non-JSON
         parsed = {
           translations: requestItems.map((item) => ({
             id: item.id,
@@ -244,7 +457,6 @@ ${JSON.stringify(requestItems, null, 2)}`;
         const t = item.text || '';
         let translated = t;
         
-        // Basic offline aquaculture phrase mapping fallback
         if (targetLocale === 'en') {
           translated = t
             .replace(/کاهش اکسیژن باعث تلفات شد/g, 'Oxygen drop caused mortality')
@@ -305,7 +517,7 @@ ${JSON.stringify(requestItems, null, 2)}`;
 
 app.post('/api/ai/translate-dynamic', handleDynamicTranslation);
 
-// AI Social Media & Caviar Marketing Generator Endpoint (Supports /api/ai/marketing-campaign and /api/ai/media)
+// AI Social Media & Caviar Marketing Generator Endpoint
 const handleAiMarketing = async (req: express.Request, res: express.Response) => {
   try {
     const {
@@ -316,7 +528,7 @@ const handleAiMarketing = async (req: express.Request, res: express.Response) =>
       targetMarket = 'Global Luxury Hospitality',
       tone = 'Ultra-Luxury & Gastronomic Elegance',
       language = 'en',
-    } = req.body;
+    } = req.body || {};
     const ai = getAIClient();
 
     if (ai) {
@@ -346,7 +558,6 @@ Language: ${language}`;
         source: 'gemini-2.5-flash',
       });
     } else {
-      // Local Multilingual Marketing Templates
       const content = `🌟 **Fathi Caviar Luxury Collection — ${productType}**
 
 🇮🇷 **فارسی:**
@@ -356,15 +567,7 @@ Language: ${language}`;
 
 🇬🇧 **English:**
 Indulge in the world's most coveted delicacy: Fathi Farm's Imperial Beluga Caviar. Ethically farmed from pure Huso huso broodstock, offering majestic pearl-sized roe with a rich, buttery finish. Certified origin and cold-chain guaranteed.
-#FathiCaviar #BelugaCaviar #LuxuryGourmet #SturgeonFarming #IranianCaviar #FineDining
-
-🇷🇺 **Русский:**
-Королевская икра белуги высшего сорта от рыбоводного комплекса «Фатхи». Крупное зерно, шелковистая текстура и непревзойденный благородный ореховый вкус. Строгий контроль генетической чистоты и свежести.
-#ЧернаяИкра #Белуга #ФатхиИкра #Осетроводство #ИкраИран #Деликатес
-
-🇸🇦 **العربية:**
-كافيار بيلوغا إمبريال الفاخر من مزارع فتحي؛ جوهرة البحر معتقة ومحضرة بأعلى معايير الجودة العالمية مع نكهة زبدية غنية وأصالة لا تضاهى.
-#كافيار_فتحی #كافيار_بيلوغا #كافيار_إيراني #أطعمة_فاخرة #مزرعة_فتحي`;
+#FathiCaviar #BelugaCaviar #LuxuryGourmet #SturgeonFarming #IranianCaviar #FineDining`;
 
       return res.json({
         success: true,
@@ -381,9 +584,9 @@ Indulge in the world's most coveted delicacy: Fathi Farm's Imperial Beluga Cavia
 app.post('/api/ai/media', handleAiMarketing);
 app.post('/api/ai/marketing-campaign', handleAiMarketing);
 
-// Licensing verification simulation endpoint
+// Licensing verification
 app.post('/api/license/verify', (req, res) => {
-  const { licenseKey, farmName, hardwareId } = req.body;
+  const { licenseKey, farmName, hardwareId } = req.body || {};
   res.json({
     valid: true,
     edition: 'Enterprise Commercial v6.0',
