@@ -4,12 +4,13 @@ import { assessWaterSafetyForFeeding } from '../utils/sensorValidation';
 import { calculateFeedingRecommendation } from '../utils/feedingEngine';
 import type { LanguageCode, Pond } from '../types';
 
-const pond: Pond = {
+const pond = {
   id: 'p1', number: 'P-1', name: 'Pond 1', hallId: 'h1', speciesId: 's1', fishCount: 100,
-  biomassKg: 100, averageWeightKg: 1, capacityM3: 10, waterTemperature: 16,
-  dissolvedOxygen: 7, ph: 7.4, feedingStatus: 'STOPPED', dailyMortalityCount: 0,
-  lastBiometryDate: '2026-08-01',
-} as Pond;
+  biomassKg: 100, averageWeightKg: 1, capacityM3: 10, capacityCubicMeters: 10,
+  waterTemperature: 16, dissolvedOxygen: 7, ph: 7.4, feedingStatus: 'STOPPED',
+  dailyMortalityCount: 0, lastBiometryDate: '2026-08-01', lastFeedingKg: 0,
+  lastFeedingTime: '', fcr: 0, criticalAlerts: [],
+} as unknown as Pond;
 
 describe('Runtime i18n safety and domain labels', () => {
   it('ships runtime messages for all seven locales', () => {
