@@ -45,6 +45,8 @@ describe('SQLite persistence production store', () => {
     expect(second.getState()?.data).toMatchObject({ versionMarker: 'durable' });
     expect(second.getUserByUsername('OWNER')?.role).toBe('Farm Owner');
     expect(second.listAuditLogs()[0]).toMatchObject({ userId: 'user_1', transactionId: 'txn_1', ipAddress: '127.0.0.1', deviceId: 'device_1' });
+    second.close();
+    stores.splice(stores.indexOf(second), 1);
     rmSync(first.directory, { recursive: true, force: true });
   });
 
