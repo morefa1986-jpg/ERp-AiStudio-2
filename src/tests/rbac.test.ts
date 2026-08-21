@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { roleAllows } from '../utils/rbac';
 
 export type UserRole =
   | 'SuperAdmin'
@@ -113,5 +114,14 @@ describe('Role-Based Access Control (RBAC) Security Verification', () => {
     expect(finPerm.canApprovePayroll).toBe(true);
     expect(techPerm.canPostJournals).toBe(false);
     expect(techPerm.canApprovePayroll).toBe(false);
+  });
+
+  it('exercises the production action-level policy', () => {
+    expect(roleAllows('Technician', 'feeding', 'create')).toBe(true);
+    expect(roleAllows('Technician', 'feeding', 'approve')).toBe(false);
+    expect(roleAllows('Veterinarian', 'feeding', 'approve')).toBe(true);
+    expect(roleAllows('Farm Manager', 'backup', 'export')).toBe(true);
+    expect(roleAllows('Farm Manager', 'backup', 'approve')).toBe(false);
+    expect(roleAllows('Viewer/Auditor', 'sales', 'create')).toBe(false);
   });
 });

@@ -57,7 +57,7 @@ class DynamicTranslationService {
 
   constructor() {
     try {
-      this.isEnabled = typeof window !== 'undefined' && window.localStorage.getItem(this.settingKey) === 'true';
+      this.isEnabled = typeof window !== 'undefined' && window.sessionStorage.getItem(this.settingKey) === 'true';
     } catch {
       this.isEnabled = false;
     }
@@ -153,7 +153,7 @@ class DynamicTranslationService {
 
     const requestPromise = (async (): Promise<DynamicTranslationResult> => {
       try {
-        const token = typeof window !== 'undefined' ? window.localStorage.getItem('fathi_aqua_session_token') : null;
+        const token = typeof window !== 'undefined' ? window.sessionStorage.getItem('fathi_aqua_session_token') : null;
         if (!token || token.startsWith('lan_session_')) return fallback('offline', 'AI_REQUIRES_ONLINE_AUTHENTICATED_SESSION');
         this.metrics.apiCalls++;
         const response = await fetch('/api/ai/translate-dynamic', {
@@ -185,7 +185,7 @@ class DynamicTranslationService {
   public getMetrics(): TranslationMetrics { return { ...this.metrics }; }
   public toggleTranslation(enabled: boolean): void {
     this.isEnabled = enabled;
-    try { if (typeof window !== 'undefined') window.localStorage.setItem(this.settingKey, String(enabled)); } catch {}
+    try { if (typeof window !== 'undefined') window.sessionStorage.setItem(this.settingKey, String(enabled)); } catch {}
   }
   public isTranslationEnabled(): boolean { return this.isEnabled; }
   public clearCache(): void {

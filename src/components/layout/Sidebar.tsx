@@ -63,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { t, dir } = useI18n();
   const { hasPermission, currentUser } = useAuth();
-  const { ponds, proformas, coldStorage } = useFarm();
+  const { ponds, proformas, coldStorage, syncStatus } = useFarm();
 
   const stoppedPondsCount = ponds.filter((p) => p.feedingStatus === 'STOPPED').length;
   const pendingProformasCount = proformas.filter((p) => p.stage === 'Proforma (پیش‌فاکتور)').length;
@@ -222,11 +222,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="bg-[#18181B] border border-[#27272A] rounded-lg p-3">
             <div className="text-[10px] text-[#71717A] uppercase tracking-widest mb-1">{t('auth.sessionActive')}</div>
             <div className="text-xs font-semibold text-white truncate">
-              {currentUser?.fullName || 'Dr. Fathi'}
+              {currentUser?.fullName || '—'}
             </div>
             <div className="text-[10px] text-[#52525B] font-mono mt-0.5 flex items-center justify-between">
               <span>Enterprise v6.0</span>
-              <span className="text-emerald-400 font-semibold">● {t('online')}</span>
+              <span className={syncStatus.status === 'ONLINE' ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
+                ● {syncStatus.status === 'ONLINE' ? t('online') : t('offline')}
+              </span>
             </div>
           </div>
         </div>

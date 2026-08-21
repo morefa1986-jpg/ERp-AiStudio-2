@@ -5,6 +5,7 @@ export const fr = {
   tagline: 'Plateforme Intégrée d’Aquaculture d’Esturgeons, Traitement du Caviar & IA de Ferme',
   online: 'En ligne',
   offline: 'Hors ligne (Mode LAN)',
+  demoMode: 'MODE DÉMO — les valeurs opérationnelles sont uniquement des exemples',
   lanMode: 'Mode Réseau Local (Sans Internet Requis)',
   searchPlaceholder: 'Recherche Globale (Bassins, Puces RFID, Proformas, Espèces, Personnel)...',
   save: 'Enregistrer',
@@ -81,7 +82,7 @@ export const fr = {
     manageSecurity: 'Gérer Sécurité & Utilisateurs',
     logout: 'Déconnexion',
     notificationsTitle: 'Alertes & Événements d’Audit',
-    lanLatency: 'Réseau Local (LAN 4ms)',
+    lanLatency: 'État de la connexion au réseau local',
   },
 
   // Dynamic Translation Component
@@ -679,7 +680,7 @@ export const fr = {
   platform: {
     title: 'Distribution Multiplateforme (Windows, iOS PWA & Android)',
     subtitle: 'Installeurs autonomes pour ordinateurs de contrôle (Windows hors ligne), tablettes et smartphones du personnel',
-    syncBadge: 'Offline-First LAN Sync Architecture',
+    syncBadge: 'Base SQLite locale ; synchronisation uniquement sur connexion vérifiée',
     windowsTab: 'Installeur Windows (.exe / .msi)',
     iosTab: 'Application Web Apple iOS (PWA / Retina)',
     androidTab: 'Package Android (APK / AAB / Google Play)',
@@ -698,7 +699,7 @@ export const fr = {
     loginTitle: 'Connexion à Fathi Aqua ERP',
     subtitle: 'Authentification d’Entreprise & RBAC',
     username: 'Identifiant :',
-    usernamePlaceholder: 'admin, vet, hatchery, sales, accountant...',
+    usernamePlaceholder: 'Identifiant de l’organisation',
     password: 'Mot de Passe Sécurisé :',
     selectLanguage: 'Sélectionner la Langue Système',
     rememberMe: 'Mémoriser l’identifiant',
@@ -710,10 +711,14 @@ export const fr = {
     sessionActive: 'Session Sécurisée Active',
     auditLog: 'Journal d’Audit de Sécurité (Infalsifiable)',
     noPlaintext: 'Sécurité par Hachage SHA-256 + Sel Cryptographique',
-    demoAccountsTitle: 'Comptes de Démonstration d’Entreprise :',
+    demoAccountsTitle: 'Comptes d’organisation enregistrés :',
     errRequired: 'Veuillez renseigner votre identifiant et mot de passe.',
     errInvalidPass: 'Mot de passe saisi incorrect.',
+    errRateLimited: 'Trop de tentatives échouées. Réessayez plus tard.',
     errServer: 'Erreur de connexion au serveur d’authentification.',
+    fullName: 'Nom complet', email: 'E-mail', confirmPassword: 'Confirmer le mot de passe',
+    bootstrapTitle: 'Premier démarrage : créer l’administrateur', bootstrapHint: 'Utilisez au moins 12 caractères. Le mot de passe n’est jamais stocké dans le navigateur.',
+    bootstrapInvalid: 'Les informations administrateur ou la confirmation sont invalides.', bootstrapAlreadyDone: 'La configuration administrateur est déjà terminée.', serverAuthOnly: 'L’authentification utilise uniquement la base locale.', createAdmin: 'Créer l’administrateur et se connecter',
   },
 
   // AI Assistant & Marketing

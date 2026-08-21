@@ -5,6 +5,7 @@ export const ru = {
   tagline: 'Интегрированная Платформа Осетроводства, Переработки Икры и ИИ Фермы',
   online: 'В сети',
   offline: 'Автономно (Режим LAN)',
+  demoMode: 'ДЕМО-РЕЖИМ — операционные значения являются только примерами',
   lanMode: 'Локальный Сетевой Режим (Без Интернета)',
   searchPlaceholder: 'Глобальный Поиск (Бассейны, RFID-чипы, Проформы, Виды, Персонал)...',
   save: 'Сохранить',
@@ -81,7 +82,7 @@ export const ru = {
     manageSecurity: 'Управление Безопасностью и Пользователями',
     logout: 'Выйти',
     notificationsTitle: 'Оповещения и События Аудита',
-    lanLatency: 'Локальная Сеть (LAN 4мс)',
+    lanLatency: 'Состояние подключения к локальной сети',
   },
 
   // Dynamic Translation Component
@@ -679,7 +680,7 @@ export const ru = {
   platform: {
     title: 'Кроссплатформенный Центр Дистрибуции (Windows, iOS PWA и Android)',
     subtitle: 'Автономные установщики для компьютеров управления фермой (автономная Windows), планшетов и смартфонов персонала',
-    syncBadge: 'Offline-First LAN Sync Architecture',
+    syncBadge: 'Локальная база SQLite; синхронизация только при проверенном соединении',
     windowsTab: 'Установщик Windows (.exe / .msi)',
     iosTab: 'Веб-Приложение Apple iOS (PWA / Retina)',
     androidTab: 'Пакет Android (APK / AAB / Google Play)',
@@ -698,7 +699,7 @@ export const ru = {
     loginTitle: 'Вход в Fathi Aqua ERP',
     subtitle: 'Корпоративная Аутентификация и RBAC',
     username: 'Имя Пользователя:',
-    usernamePlaceholder: 'admin, vet, hatchery, sales, accountant...',
+    usernamePlaceholder: 'Имя пользователя организации',
     password: 'Надежный Пароль:',
     selectLanguage: 'Выбрать Системный Язык',
     rememberMe: 'Запомнить имя пользователя',
@@ -710,10 +711,14 @@ export const ru = {
     sessionActive: 'Защищенная Сессия Активна',
     auditLog: 'Журнал Аудита Безопасности (Неизменяемый)',
     noPlaintext: 'Безопасность Хэширования SHA-256 + Криптографическая Соль',
-    demoAccountsTitle: 'Корпоративные Демо-Аккаунты:',
+    demoAccountsTitle: 'Зарегистрированные аккаунты организации:',
     errRequired: 'Пожалуйста, укажите имя пользователя и пароль.',
     errInvalidPass: 'Введен неверный пароль.',
+    errRateLimited: 'Слишком много неудачных попыток. Повторите позже.',
     errServer: 'Ошибка связи с сервером аутентификации.',
+    fullName: 'Полное имя', email: 'Электронная почта', confirmPassword: 'Подтвердите пароль',
+    bootstrapTitle: 'Первый запуск: создание администратора', bootstrapHint: 'Используйте не менее 12 символов. Пароль не сохраняется в браузере.',
+    bootstrapInvalid: 'Данные администратора или подтверждение пароля недействительны.', bootstrapAlreadyDone: 'Настройка администратора уже завершена.', serverAuthOnly: 'Аутентификация выполняется только локальной базой данных.', createAdmin: 'Создать администратора и войти',
   },
 
   // AI Assistant & Marketing

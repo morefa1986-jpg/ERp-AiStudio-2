@@ -28,7 +28,7 @@ export const HrPayrollView: React.FC = () => {
   const [clockType, setClockType] = useState<'in' | 'out'>('in');
   const [shift, setShift] = useState<AttendanceRecord['shift']>('Morning (07:00 - 15:00)');
 
-  const [selectedMonth, setSelectedMonth] = useState<string>('1405-05 (مرداد)');
+  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
 
   const handleClockSubmit = (e: React.FormEvent) => {
     e.preventDefault();

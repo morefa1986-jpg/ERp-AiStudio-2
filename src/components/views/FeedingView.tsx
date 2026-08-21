@@ -39,7 +39,7 @@ export const FeedingView: React.FC = () => {
   const [selectedPondId, setSelectedPondId] = useState<string>(ponds[0]?.id || '');
   const [selectedUnit, setSelectedUnit] = useState<DisplayUnit>('kg');
   const [feedSku, setFeedSku] = useState<string>(feedItems[0]?.sku || '');
-  const [manualAmount, setManualAmount] = useState<number>(0);
+  const [manualAmount, setManualAmount] = useState<string>('0');
   const [operatorName, setOperatorName] = useState<string>(currentUser?.fullName || '');
   const [appetite, setAppetite] = useState<AppetiteTag>('NORMAL');
 
@@ -62,10 +62,10 @@ export const FeedingView: React.FC = () => {
   }, [currentUser?.fullName]);
 
   useEffect(() => {
-    setManualAmount(kgToDisplay(recommendedKg, selectedUnit));
+    setManualAmount(String(kgToDisplay(recommendedKg, selectedUnit)));
   }, [recommendedKg, selectedUnit, selectedPondId]);
 
-  const normalizedAmountKg = displayToKg(manualAmount, selectedUnit);
+  const normalizedAmountKg = displayToKg(Number(manualAmount), selectedUnit);
   const canSubmit = Boolean(
     selectedPond &&
       selectedFeed &&
@@ -105,7 +105,7 @@ export const FeedingView: React.FC = () => {
 
   const switchUnit = (unit: DisplayUnit) => {
     setSelectedUnit(unit);
-    setManualAmount(kgToDisplay(recommendedKg, unit));
+    setManualAmount(String(kgToDisplay(recommendedKg, unit)));
   };
 
   const unitLabel = selectedUnit === 'kg' ? t('feeding.unitKg') : selectedUnit === 'gram' ? t('feeding.unitGram') : t('feeding.unitCup');
@@ -215,7 +215,7 @@ export const FeedingView: React.FC = () => {
                   min="0"
                   disabled={isLocked}
                   value={manualAmount}
-                  onChange={(e) => setManualAmount(Number(e.target.value))}
+                  onChange={(e) => setManualAmount(e.target.value.replace(/^0+(?=\d)/, ''))}
                   className="w-full bg-slate-800 border border-slate-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-xl p-3 text-white font-bold text-base focus:border-amber-500"
                   required
                 />

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Bell, LogOut, Menu, RefreshCw, Search, Sparkles, User as UserIcon, Wifi, WifiOff } from 'lucide-react';
 import { LANGUAGES, useI18n } from '../../i18n';
 import { useAuth } from '../../context/AuthContext';
@@ -15,26 +15,13 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onSelectNav, onOpenSearch, onToggleMobileMenu, onOpenAuth }) => {
   const { t, language, setLanguage, meta, dir } = useI18n();
   const { currentUser, logout, usersList } = useAuth();
-  const { ponds } = useFarm();
+  const { ponds, syncStatus } = useFarm();
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [showAiTransDetails, setShowAiTransDetails] = useState(false);
   const [dynamicAiEnabled, setDynamicAiEnabled] = useState(dynamicTranslationService.isTranslationEnabled());
-  const [networkOnline, setNetworkOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const online = () => setNetworkOnline(true);
-    const offline = () => setNetworkOnline(false);
-    window.addEventListener('online', online);
-    window.addEventListener('offline', offline);
-    return () => {
-      window.removeEventListener('online', online);
-      window.removeEventListener('offline', offline);
-    };
-  }, []);
-
   const stoppedPonds = ponds.filter((pond) => pond.feedingStatus === 'STOPPED');
+  const networkOnline = syncStatus.status === 'ONLINE';
   const metrics = dynamicTranslationService.getMetrics();
 
   const toggleDynamicTranslation = () => {
@@ -51,7 +38,7 @@ export const Header: React.FC<HeaderProps> = ({ onSelectNav, onOpenSearch, onTog
             type="button"
             onClick={onToggleMobileMenu}
             className="p-1.5 rounded-lg bg-[#18181B] border border-[#27272A] text-[#A1A1AA] hover:text-white lg:hidden cursor-pointer"
-            aria-label="menu"
+            aria-label="Open navigation menu"
           >
             <Menu className="w-5 h-5" />
           </button>
@@ -189,7 +176,7 @@ export const Header: React.FC<HeaderProps> = ({ onSelectNav, onOpenSearch, onTog
           <button type="button" onClick={() => setShowUserDropdown((value) => !value)} className="flex items-center gap-2.5 p-1.5 bg-[#18181B] hover:bg-[#1F1F22] border border-[#27272A] rounded-lg text-xs cursor-pointer transition-colors">
             <div className="w-6 h-6 rounded-full bg-[#1F1F22] border border-[#D4AF37]/40 text-[#D4AF37] font-serif italic font-bold flex items-center justify-center text-xs">{currentUser?.fullName?.slice(0, 1) || 'U'}</div>
             <div className="hidden lg:block text-start">
-              <div className="text-[11px] font-semibold text-white leading-tight">{currentUser?.fullName?.split(' ')[0] || 'Admin'}</div>
+              <div className="text-[11px] font-semibold text-white leading-tight">{currentUser?.fullName?.split(' ')[0] || '—'}</div>
               <div className="text-[9px] text-[#D4AF37] font-mono">{currentUser?.role}</div>
             </div>
           </button>

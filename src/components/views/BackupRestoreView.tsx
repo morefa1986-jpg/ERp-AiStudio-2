@@ -13,32 +13,34 @@ import {
 
 export const BackupRestoreView: React.FC = () => {
   const { t, formatDate } = useI18n();
-  const { createBackupSnapshot, restoreFromSnapshotJson, backups } = useFarm();
+  const { createEncryptedBackup, restoreFromSnapshotJson, backups } = useFarm();
 
   const [restoreJson, setRestoreJson] = useState<string>('');
+  const [backupPassphrase, setBackupPassphrase] = useState<string>('');
+  const [restorePassphrase, setRestorePassphrase] = useState<string>('');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleDownloadBackup = () => {
-    const snapshot = createBackupSnapshot('Manual Export');
-    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `fathi-aqua-erp-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    setStatusMessage({
-      type: 'success',
-      text: 'فایل پشتیبان کامل سیستم به همراه چک‌سام اعتبارسنجی با موفقیت دانلود شد.',
-    });
+  const handleDownloadBackup = async () => {
+    try {
+      const envelope = await createEncryptedBackup(backupPassphrase);
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fathi-aqua-erp-encrypted-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatusMessage({ type: 'success', text: 'فایل پشتیبان رمزنگاری‌شده با موفقیت دانلود شد.' });
+    } catch (error) {
+      setStatusMessage({ type: 'error', text: error instanceof Error && error.message === 'BACKUP_PASSPHRASE_TOO_SHORT' ? 'عبارت عبور باید حداقل ۱۲ نویسه باشد.' : 'تهیه فایل پشتیبان انجام نشد.' });
+    }
   };
 
-  const handleRestore = (e: React.FormEvent) => {
+  const handleRestore = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!restoreJson.trim()) return;
 
-    const res = restoreFromSnapshotJson(restoreJson);
+    const res = await restoreFromSnapshotJson(restoreJson, restorePassphrase);
     if (res.success) {
       setStatusMessage({
         type: 'success',
@@ -102,16 +104,24 @@ export const BackupRestoreView: React.FC = () => {
               تهیه فایل پشتیبان کامل (Instant Backup)
             </h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              دانلود کلیه جداول شامل استخرها، سوابق تغذیه، شجره‌نامه ماهیان مولد RFID، مجوزهای سایتس، فاکتورهای فروش، انبار و اسناد حسابداری.
+              دانلود کلیه جداول با رمزنگاری AES-GCM، کنترل چک‌سام SHA-256 و نسخه schema.
             </p>
           </div>
 
+          <input
+            type="password"
+            minLength={12}
+            value={backupPassphrase}
+            onChange={(e) => setBackupPassphrase(e.target.value)}
+            placeholder="عبارت عبور رمزنگاری (حداقل ۱۲ نویسه)"
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-xs focus:border-amber-500"
+          />
           <button
-            onClick={handleDownloadBackup}
+            onClick={() => void handleDownloadBackup()}
             className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20 transition-all"
           >
             <Download className="w-4 h-4" />
-            دانلود فایل پشتیبان کامل (.json)
+            دانلود پشتیبان رمزنگاری‌شده (.json)
           </button>
         </div>
 
@@ -137,6 +147,14 @@ export const BackupRestoreView: React.FC = () => {
               placeholder="کد JSON فایل پشتیبان را اینجا جای‌گذاری (Paste) کنید..."
               className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-[11px] focus:border-blue-500"
               required
+            />
+
+            <input
+              type="password"
+              value={restorePassphrase}
+              onChange={(e) => setRestorePassphrase(e.target.value)}
+              placeholder="عبارت عبور فایل رمزنگاری‌شده (در صورت نیاز)"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-mono text-xs focus:border-blue-500"
             />
 
             <button

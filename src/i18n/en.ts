@@ -5,6 +5,7 @@ export const en = {
   tagline: 'Integrated Sturgeon Aquaculture, Caviar Processing & Farm AI Platform',
   online: 'Online',
   offline: 'Offline (LAN Mode)',
+  demoMode: 'DEMO MODE — operational values are sample data only',
   lanMode: 'Local Area Network Mode (No Internet Required)',
   searchPlaceholder: 'Global Search (Ponds, RFID Microchips, Proformas, Species, Staff)...',
   save: 'Save',
@@ -81,7 +82,7 @@ export const en = {
     manageSecurity: 'Manage Security & Users',
     logout: 'Logout',
     notificationsTitle: 'Audit Alerts & Events',
-    lanLatency: 'Local Network (LAN 4ms)',
+    lanLatency: 'Local network connection status',
   },
 
   // Dynamic Translation Component
@@ -679,7 +680,7 @@ export const en = {
   platform: {
     title: 'Multi-Platform Distribution (Windows, iOS PWA & Android)',
     subtitle: 'Standalone installers for farm control computers (offline Windows), feeding tablets and personnel smartphones',
-    syncBadge: 'Offline-First LAN Sync Architecture',
+    syncBadge: 'Local SQLite database; sync only when a verified connection exists',
     windowsTab: 'Windows Desktop Installer (.exe / .msi)',
     iosTab: 'Apple iOS Web App (iOS PWA / Retina)',
     androidTab: 'Android Package (APK / AAB / Google Play)',
@@ -698,7 +699,7 @@ export const en = {
     loginTitle: 'Sign in to Fathi Aqua ERP',
     subtitle: 'Enterprise Authentication & RBAC',
     username: 'Username:',
-    usernamePlaceholder: 'admin, vet, hatchery, sales, accountant...',
+    usernamePlaceholder: 'Organization username',
     password: 'Secure Password:',
     selectLanguage: 'Select System Language',
     rememberMe: 'Remember username',
@@ -710,10 +711,14 @@ export const en = {
     sessionActive: 'Secure Session Active',
     auditLog: 'Security Audit Log (Immutable)',
     noPlaintext: 'SHA-256 + Salted Hashing Security',
-    demoAccountsTitle: 'Enterprise Demo Accounts:',
+    demoAccountsTitle: 'Registered organization accounts:',
     errRequired: 'Please provide both username and password.',
     errInvalidPass: 'Invalid password entered.',
+    errRateLimited: 'Too many failed attempts. Try again later.',
     errServer: 'Authentication server error.',
+    fullName: 'Full name', email: 'Email', confirmPassword: 'Confirm password',
+    bootstrapTitle: 'First run: create the administrator', bootstrapHint: 'Use at least 12 characters. The password is never stored in the browser.',
+    bootstrapInvalid: 'Administrator details or password confirmation are invalid.', bootstrapAlreadyDone: 'Administrator setup has already been completed.', serverAuthOnly: 'Authentication is provided only by the local database.', createAdmin: 'Create administrator and sign in',
   },
 
   // AI Assistant & Marketing

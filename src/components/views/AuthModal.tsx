@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useI18n } from '../../i18n';
 import { Lock, User as UserIcon, Key, ShieldCheck, X, Eye, EyeOff } from 'lucide-react';
@@ -11,42 +11,59 @@ interface AuthModalProps {
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlocking = false }) => {
   const { t, dir } = useI18n();
-  const { currentUser, login, logout } = useAuth();
-  const [username, setUsername] = useState<string>('admin');
+  const { currentUser, login, bootstrapAdmin, logout } = useAuth();
+  const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [confirmPassword, setConfirmPassword] = useState<string>('');
+  const [fullName, setFullName] = useState<string>('');
+  const [email, setEmail] = useState<string>('');
+  const [needsBootstrap, setNeedsBootstrap] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    fetch('/api/auth/status')
+      .then((response) => response.json())
+      .then((data) => setNeedsBootstrap(Boolean(data?.needsBootstrap)))
+      .catch(() => setNeedsBootstrap(false));
+  }, [isOpen]);
 
   if (!isOpen && !isBlocking) return null;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password) {
-      setError(t('authModal.enterUsernamePassword'));
+      setError(t('auth.errRequired'));
+      return;
+    }
+    if (needsBootstrap && (password.length < 12 || password !== confirmPassword || !fullName.trim() || !email.includes('@'))) {
+      setError(t('auth.bootstrapInvalid'));
       return;
     }
     setError('');
     setIsLoading(true);
     try {
-      const res = await login(username.trim(), password);
+      const res = needsBootstrap
+        ? await bootstrapAdmin({ username: username.trim(), password, fullName: fullName.trim(), email: email.trim() })
+        : await login(username.trim(), password);
       if (res.success) {
         setPassword('');
         onClose();
       } else {
-        setError(res.error || t('authModal.invalidPassword'));
+        const errorKey: Record<string, string> = {
+          INVALID_CREDENTIALS: 'auth.errInvalidPass', LOGIN_RATE_LIMITED: 'auth.errRateLimited',
+          AUTH_SERVER_UNAVAILABLE: 'auth.errServer', BOOTSTRAP_FAILED: 'auth.bootstrapInvalid',
+          BOOTSTRAP_ALREADY_COMPLETED: 'auth.bootstrapAlreadyDone', USERNAME_PASSWORD_REQUIRED: 'auth.errRequired',
+        };
+        setError(t(errorKey[res.error || ''] || 'auth.errInvalidPass'));
       }
     } catch (err) {
-      setError(t('authModal.networkError'));
+      setError(t('auth.errServer'));
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const setDemoAccount = (user: string, pass: string) => {
-    setUsername(user);
-    setPassword(pass);
-    setError('');
   };
 
   return (
@@ -62,15 +79,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-semibold text-sm text-white">{t('authModal.title')}</h3>
+              <h3 className="font-semibold text-sm text-white">{t('auth.loginTitle')}</h3>
               <p className="text-[10px] text-[#71717A] uppercase tracking-wider font-mono">
-                {t('authModal.subtitle')}
+                {t('auth.subtitle')}
               </p>
             </div>
           </div>
           {!isBlocking && (
             <button
+              type="button"
               onClick={onClose}
+              aria-label="Close authentication dialog"
               className="p-1 text-[#71717A] hover:text-white rounded-lg hover:bg-[#18181B] cursor-pointer transition-colors"
             >
               <X className="w-4 h-4" />
@@ -89,22 +108,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
           <div>
             <label className="block text-[#A1A1AA] font-medium mb-1.5 flex items-center gap-1.5">
               <UserIcon className="w-3.5 h-3.5 text-[#D4AF37]" />
-              <span>{t('authModal.username')}:</span>
+              <span>{t('auth.username')}</span>
             </label>
-            <input
-              type="text"
+              <input
+                type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="admin, vet, hatchery, sales, accountant..."
+              placeholder={t('auth.usernamePlaceholder')}
               className="w-full bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-white font-mono focus:border-[#D4AF37] focus:outline-none transition-colors"
-              required
-            />
+                required
+              />
           </div>
+
+          {needsBootstrap && (
+            <>
+              <div>
+                <label className="block text-[#A1A1AA] font-medium mb-1.5">{t('auth.fullName')}:</label>
+                <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-white focus:border-[#D4AF37] focus:outline-none" required />
+              </div>
+              <div>
+                <label className="block text-[#A1A1AA] font-medium mb-1.5">{t('auth.email')}:</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-white focus:border-[#D4AF37] focus:outline-none" required />
+              </div>
+            </>
+          )}
 
           <div>
             <label className="block text-[#A1A1AA] font-medium mb-1.5 flex items-center gap-1.5">
               <Key className="w-3.5 h-3.5 text-[#D4AF37]" />
-              <span>{t('authModal.password')}:</span>
+              <span>{t('auth.password')}</span>
             </label>
             <div className="relative">
               <input
@@ -112,12 +144,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
+                minLength={12}
                 className="w-full bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-white font-mono focus:border-[#D4AF37] focus:outline-none transition-colors"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A] hover:text-white cursor-pointer"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -125,45 +159,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
             </div>
           </div>
 
-          {/* Quick Demo Credentials */}
-          <div className="bg-[#18181B]/80 border border-[#27272A] rounded-xl p-2.5 space-y-1.5">
-            <p className="text-[10px] font-semibold text-[#71717A] uppercase tracking-wider">
-              {t('authModal.demoAccounts')}
-            </p>
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => setDemoAccount('admin', 'admin123')}
-                className="text-left px-2 py-1 bg-[#121214] hover:bg-[#27272A] text-[10px] font-mono text-[#E4E4E7] rounded border border-[#27272A] cursor-pointer flex justify-between"
-              >
-                <span>admin</span>
-                <span className="text-[#71717A]">admin123</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemoAccount('vet', 'vet123')}
-                className="text-left px-2 py-1 bg-[#121214] hover:bg-[#27272A] text-[10px] font-mono text-[#E4E4E7] rounded border border-[#27272A] cursor-pointer flex justify-between"
-              >
-                <span>vet</span>
-                <span className="text-[#71717A]">vet123</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemoAccount('hatchery', 'hatchery123')}
-                className="text-left px-2 py-1 bg-[#121214] hover:bg-[#27272A] text-[10px] font-mono text-[#E4E4E7] rounded border border-[#27272A] cursor-pointer flex justify-between"
-              >
-                <span>hatchery</span>
-                <span className="text-[#71717A]">hatchery123</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDemoAccount('accountant', 'acc123')}
-                className="text-left px-2 py-1 bg-[#121214] hover:bg-[#27272A] text-[10px] font-mono text-[#E4E4E7] rounded border border-[#27272A] cursor-pointer flex justify-between"
-              >
-                <span>accountant</span>
-                <span className="text-[#71717A]">acc123</span>
-              </button>
+          {needsBootstrap && (
+            <div>
+              <label className="block text-[#A1A1AA] font-medium mb-1.5">{t('auth.confirmPassword')}:</label>
+              <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} minLength={12} className="w-full bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-white font-mono focus:border-[#D4AF37] focus:outline-none" required />
+              <p className="text-[10px] text-[#71717A] mt-1">{t('auth.bootstrapHint')}</p>
             </div>
+          )}
+
+          <div className="bg-[#18181B]/80 border border-[#27272A] rounded-xl p-2.5 text-[10px] text-[#A1A1AA]">
+            {needsBootstrap ? t('auth.bootstrapTitle') : t('auth.serverAuthOnly')}
           </div>
 
           <div className="flex justify-between items-center pt-2">
@@ -176,10 +181,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
                 }}
                 className="px-4 py-2 bg-[#18181B] hover:bg-[#1F1F22] text-rose-300 rounded-lg text-xs cursor-pointer border border-[#27272A]"
               >
-                {t('authModal.logout')}
+                {t('auth.logout')}
               </button>
             ) : (
-              <span className="text-[10px] text-[#71717A]">{t('authModal.securityBadge')}</span>
+              <span className="text-[10px] text-[#71717A]">{t('auth.noPlaintext')}</span>
             )}
 
             <button
@@ -187,7 +192,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, isBlockin
               disabled={isLoading}
               className="px-5 py-2 bg-[#D4AF37] hover:bg-[#c5a030] text-black font-semibold rounded-lg text-xs cursor-pointer shadow-sm disabled:opacity-50"
             >
-              {isLoading ? t('authModal.loggingIn') : t('authModal.login')}
+              {isLoading ? t('auth.loggingIn') : needsBootstrap ? t('auth.createAdmin') : t('auth.loginBtn')}
             </button>
           </div>
         </form>

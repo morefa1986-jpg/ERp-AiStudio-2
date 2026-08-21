@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Building2, ClipboardList, Factory, FlaskConical, Package, Snowflake, Users, Wrench } from 'lucide-react';
 import { useFarm } from '../../context/FarmContext';
+import { useAuth } from '../../context/AuthContext';
 import { useI18n } from '../../i18n';
 
 export type OperationsModuleId =
@@ -30,6 +31,9 @@ interface TableModel {
 export const OperationsModuleView: React.FC<Props> = ({ moduleId }) => {
   const { t, formatNumber, formatDate, formatCurrency } = useI18n();
   const farm = useFarm();
+  const { hasPermission } = useAuth();
+  const exportModule = ({ farmHalls: 'halls', mortality: 'mortality', treatments: 'treatments', transfers: 'transfers', nursery: 'nursery', feedFactory: 'feed_factory', laboratory: 'laboratory', coldStorage: 'cold_storage', crm: 'crm', maintenance: 'settings', reports: 'reports' } as const)[moduleId];
+  const canExport = hasPermission(exportModule, 'export');
 
   const model = useMemo<TableModel>(() => {
     switch (moduleId) {
@@ -157,6 +161,7 @@ export const OperationsModuleView: React.FC<Props> = ({ moduleId }) => {
   const totalRows = model.rows.length;
 
   const exportCsv = () => {
+    if (!canExport) return;
     const encode = (value: React.ReactNode) => `"${String(value ?? '').replace(/"/g, '""')}"`;
     const csv = [model.headers.map(encode).join(','), ...model.rows.map((row) => row.map(encode).join(','))].join('\n');
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
@@ -180,7 +185,7 @@ export const OperationsModuleView: React.FC<Props> = ({ moduleId }) => {
             <p className="text-xs text-[#71717A] mt-1">{t('status')}: {formatNumber(totalRows)}</p>
           </div>
         </div>
-        <button type="button" onClick={exportCsv} disabled={totalRows === 0} className="px-4 py-2 rounded-xl bg-[#18181B] border border-[#D4AF37]/30 text-[#D4AF37] text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed">
+        <button type="button" onClick={exportCsv} disabled={!canExport || totalRows === 0} className="px-4 py-2 rounded-xl bg-[#18181B] border border-[#D4AF37]/30 text-[#D4AF37] text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed">
           {t('exportExcel')}
         </button>
       </div>

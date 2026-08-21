@@ -7,6 +7,8 @@ export interface LocalMediaAsset {
   blob: Blob;
 }
 
+import { nextId } from '../utils/id';
+
 export interface ImageEditOptions {
   rotationDeg?: 0 | 90 | 180 | 270;
   /** Backward-compatible alias used by the social media editor UI. */
@@ -54,7 +56,7 @@ async function putMediaAsset(asset: LocalMediaAsset): Promise<LocalMediaAsset> {
 
 export async function saveMediaFile(file: File): Promise<LocalMediaAsset> {
   const asset: LocalMediaAsset = {
-    id: `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: nextId('media'),
     name: file.name,
     mimeType: file.type || 'application/octet-stream',
     size: file.size,
@@ -66,7 +68,7 @@ export async function saveMediaFile(file: File): Promise<LocalMediaAsset> {
 
 export async function saveMediaBlob(blob: Blob, name: string, mimeType?: string): Promise<LocalMediaAsset> {
   const asset: LocalMediaAsset = {
-    id: `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: nextId('media'),
     name,
     mimeType: mimeType || blob.type || 'application/octet-stream',
     size: blob.size,

@@ -24,33 +24,36 @@ export const BiometricsView: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
 
   // Form state
-  const [sampleSize, setSampleSize] = useState<number>(30);
-  const [avgWeightKg, setAvgWeightKg] = useState<number>(6.8);
-  const [operator, setOperator] = useState<string>('مهندس باقری (کارشناس بیومتری)');
+  const [sampleSize, setSampleSize] = useState<number>(1);
+  const [avgWeightKg, setAvgWeightKg] = useState<number>(0);
+  const [operator, setOperator] = useState<string>('');
 
   const selectedPond = ponds.find((p) => p.id === selectedPondId);
+  const observedSessions = biometricSessions.filter((session) => Number.isFinite(session.sgr));
+  const averageSgr = observedSessions.length ? observedSessions.reduce((sum, session) => sum + session.sgr, 0) / observedSessions.length : null;
+  const latestSamples = biometricSessions[0]?.samples || [];
+  const sampleMean = latestSamples.length ? latestSamples.reduce((sum, sample) => sum + sample.weightKg, 0) / latestSamples.length : 0;
+  const sampleVariance = latestSamples.length ? latestSamples.reduce((sum, sample) => sum + ((sample.weightKg - sampleMean) ** 2), 0) / latestSamples.length : 0;
+  const coefficientOfVariation = sampleMean > 0 ? (Math.sqrt(sampleVariance) / sampleMean) * 100 : null;
 
   const handleAddBiometry = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPond) return;
 
-    // Generate samples array based on avg
-    const samples = Array.from({ length: sampleSize }, () => ({
-      weightKg: +(avgWeightKg * (0.9 + Math.random() * 0.2)).toFixed(2),
-      lengthCm: Math.round(avgWeightKg * 14),
-    }));
+    if (!Number.isFinite(avgWeightKg) || avgWeightKg <= 0 || !operator.trim()) return;
+    const samples = [{ weightKg: Number(avgWeightKg.toFixed(3)), lengthCm: Math.round(avgWeightKg * 14) }];
 
     recordBiometry({
       pondId: selectedPond.id,
       pondName: selectedPond.name,
       speciesId: selectedPond.speciesId,
       date: new Date().toISOString().split('T')[0],
-      sampleCount: Number(sampleSize),
+      sampleCount: 1,
       samples,
-      previousAvgWeightKg: selectedPond.averageWeightKg || 6.5,
-      daysSinceLastBiometry: 14,
+      previousAvgWeightKg: selectedPond.averageWeightKg,
+      daysSinceLastBiometry: 0,
       operatorName: operator,
-      notes: 'نمونه‌گیری دوره‌ای تصادفی استاندارد',
+      notes: 'ثبت یک اندازه‌گیری دستی؛ برای تحلیل نمونه‌های متعدد، هر اندازه‌گیری جداگانه ثبت شود.',
     });
 
     setShowAddModal(false);
@@ -94,8 +97,8 @@ export const BiometricsView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4 text-xs font-mono">
-          <div>میانگین رشد گله: <strong className="text-emerald-400 font-bold">+0.82% / روز</strong></div>
-          <div>شاخص یکنواختی CV: <strong className="text-cyan-400 font-bold">8.4% (بسیار مطلوب)</strong></div>
+          <div>میانگین رشد گله: <strong className="text-emerald-400 font-bold">{averageSgr === null ? '—' : `+${averageSgr.toFixed(2)}% / روز`}</strong></div>
+          <div>شاخص یکنواختی CV: <strong className="text-cyan-400 font-bold">{coefficientOfVariation === null ? '—' : `${coefficientOfVariation.toFixed(2)}%`}</strong></div>
         </div>
       </div>
 

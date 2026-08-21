@@ -36,6 +36,8 @@ function startLocalServer() {
   process.env.PORT = String(APP_PORT);
   process.env.APP_VERSION = app.getVersion();
   process.env.FATHI_DESKTOP = '1';
+  process.env.FATHI_BIND_HOST = APP_HOST;
+  process.env.FATHI_DATA_DIR = userDataPath;
 
   const serverEntry = path.join(appRoot, 'dist', 'server.cjs');
   if (!fs.existsSync(serverEntry)) {

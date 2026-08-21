@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { nextId, nextReference } from '../../utils/id';
 import { useI18n } from '../../i18n';
 import { useFarm } from '../../context/FarmContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   Users,
   Receipt,
@@ -19,6 +21,7 @@ import { Customer, ProformaInvoice } from '../../types';
 
 export const SalesCrmView: React.FC = () => {
   const { t, formatNumber, formatCurrency, formatDate } = useI18n();
+  const { hasPermission } = useAuth();
   const {
     customers,
     proformas,
@@ -26,6 +29,10 @@ export const SalesCrmView: React.FC = () => {
     createProformaInvoice,
     updateProformaStage,
   } = useFarm();
+  const canCreateSales = hasPermission('sales', 'create');
+  const canCreateCrm = hasPermission('crm', 'create');
+  const canEditSales = hasPermission('sales', 'edit');
+  const canPrintSales = hasPermission('sales', 'print');
 
   const [activeTab, setActiveTab] = useState<'proformas' | 'customers'>('proformas');
   const [showNewCustomerModal, setShowNewCustomerModal] = useState<boolean>(false);
@@ -38,18 +45,18 @@ export const SalesCrmView: React.FC = () => {
   const [newCustCategory, setNewCustCategory] = useState<Customer['category']>('Export Luxury Distributor');
   const [newCustPhone, setNewCustPhone] = useState<string>('');
   const [newCustEmail, setNewCustEmail] = useState<string>('');
-  const [newCustCountry, setNewCustCountry] = useState<string>('UAE');
-  const [newCustCity, setNewCustCity] = useState<string>('Dubai');
-  const [newCustCurrency, setNewCustCurrency] = useState<string>('USD');
+  const [newCustCountry, setNewCustCountry] = useState<string>('');
+  const [newCustCity, setNewCustCity] = useState<string>('');
+  const [newCustCurrency, setNewCustCurrency] = useState<string>('');
 
   // New Proforma Form state
   const [profCustId, setProfCustId] = useState<string>(customers[0]?.id || '');
-  const [profCurrency, setProfCurrency] = useState<string>('USD');
-  const [profItemName, setProfItemName] = useState<string>('خاویار امپریال بلوگا فتحی (قوطی ۵۰ گرمی)');
-  const [profItemQty, setProfItemQty] = useState<number>(200);
-  const [profItemPrice, setProfItemPrice] = useState<number>(110);
-  const [profPaymentTerms, setProfPaymentTerms] = useState<string>('50% Advance T/T, 50% Before Airport Dispatch');
-  const [profDeliveryTerms, setProfDeliveryTerms] = useState<string>('CIF Dubai Airport with CITES Certificate');
+  const [profCurrency, setProfCurrency] = useState<string>('');
+  const [profItemName, setProfItemName] = useState<string>('');
+  const [profItemQty, setProfItemQty] = useState<number>(0);
+  const [profItemPrice, setProfItemPrice] = useState<number>(0);
+  const [profPaymentTerms, setProfPaymentTerms] = useState<string>('');
+  const [profDeliveryTerms, setProfDeliveryTerms] = useState<string>('');
 
   const handleAddCustomer = (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,14 +68,15 @@ export const SalesCrmView: React.FC = () => {
       email: newCustEmail,
       country: newCustCountry,
       city: newCustCity,
-      address: 'دفتر مرکزی / انبار تحویل',
-      currency: profCurrency,
+      address: '',
+      currency: newCustCurrency || 'IRR',
       status: 'Active VIP',
-      notes: 'مشتری مستقیم بین‌المللی',
+      notes: '',
     });
     setShowNewCustomerModal(false);
     setNewCustName('');
     setNewCustCompany('');
+    setNewCustCountry(''); setNewCustCity(''); setNewCustCurrency(''); setNewCustPhone(''); setNewCustEmail('');
   };
 
   const handleCreateProforma = (e: React.FormEvent) => {
@@ -79,7 +87,7 @@ export const SalesCrmView: React.FC = () => {
     const itemTotal = profItemQty * profItemPrice;
 
     createProformaInvoice({
-      invoiceNumber: `PI-${new Date().getFullYear()}-EXP-${Math.floor(100 + Math.random() * 900)}`,
+      invoiceNumber: nextReference(`PI-${new Date().getFullYear()}-EXP`),
       customerId: cust.id,
       customerName: cust.name,
       customerCompany: cust.companyName,
@@ -89,7 +97,7 @@ export const SalesCrmView: React.FC = () => {
       stage: 'Proforma (پیش‌فاکتور)',
       items: [
         {
-          id: 'item_' + Date.now(),
+          id: nextId('item'),
           productName: profItemName,
           sku: 'CAV-BEL-50G',
           quantity: profItemQty,
@@ -102,7 +110,7 @@ export const SalesCrmView: React.FC = () => {
       ],
       taxTotal: 0,
       discountTotal: 0,
-      currency: profCurrency,
+      currency: (profCurrency || 'IRR') as ProformaInvoice['currency'],
       paymentTerms: profPaymentTerms,
       deliveryTerms: profDeliveryTerms,
       citesPermitRequired: true,
@@ -157,7 +165,8 @@ export const SalesCrmView: React.FC = () => {
           <div className="flex justify-end">
             <button
               onClick={() => setShowNewProformaModal(true)}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20"
+              disabled={!canCreateSales}
+              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Plus className="w-4 h-4" />
               صدور پیش‌فاکتور جدید (ارزی / ریالی)
@@ -231,18 +240,21 @@ export const SalesCrmView: React.FC = () => {
                 <div className="flex justify-between items-center pt-2 border-t border-slate-800 gap-2">
                   <select
                     value={prof.stage}
-                    onChange={(e) => updateProformaStage(prof.id, e.target.value as any)}
+                    onChange={(e) => updateProformaStage(prof.id, e.target.value as ProformaInvoice['stage'])}
+                    disabled={!canEditSales || Boolean(prof.fulfilledAt)}
                     className="bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs"
                   >
                     <option value="Draft">پیش‌نویس</option>
                     <option value="Proforma (پیش‌فاکتور)">Proforma (پیش‌فاکتور)</option>
-                    <option value="Confirmed Order">سفارش قطعی شده</option>
-                    <option value="Final Commercial Invoice">فاکتور تجاری نهایی</option>
-                    <option value="Paid">تسویه کامل شده</option>
+                    <option value="Order Confirmed (تایید سفارش)">سفارش قطعی شده</option>
+                    <option value="Invoice Issued (صدور فاکتور)">فاکتور تجاری نهایی</option>
+                    <option value="Payment Received (تسویه)">تسویه کامل شده</option>
+                    <option value="Dispatched / Delivery (تحویل)">تحویل / ارسال</option>
                   </select>
 
                   <button
-                    onClick={() => setPrintProforma(prof)}
+                    onClick={() => { if (canPrintSales) setPrintProforma(prof); }}
+                    disabled={!canPrintSales}
                     className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs flex items-center gap-1.5 cursor-pointer border border-slate-700"
                   >
                     <Printer className="w-3.5 h-3.5" />
@@ -261,7 +273,8 @@ export const SalesCrmView: React.FC = () => {
           <div className="flex justify-end">
             <button
               onClick={() => setShowNewCustomerModal(true)}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-600/20"
+              disabled={!canCreateCrm}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-600/20 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Plus className="w-4 h-4" />
               افزودن خریدار جدید
@@ -426,12 +439,17 @@ export const SalesCrmView: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="block text-slate-300 font-bold mb-1">شرح کالا:</label>
+                  <input type="text" value={profItemName} onChange={(e) => setProfItemName(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required />
+                </div>
                 <div>
                   <label className="block text-slate-300 font-bold mb-1">ارز فاکتور:</label>
                   <select
                     value={profCurrency}
                     onChange={(e) => setProfCurrency(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold"
+                    required
                   >
                     <option value="USD">دلار آمریکا (USD $)</option>
                     <option value="EUR">یورو اروپا (EUR €)</option>
@@ -456,9 +474,10 @@ export const SalesCrmView: React.FC = () => {
 
               <div>
                 <label className="block text-slate-300 font-bold mb-1">قیمت واحد ({profCurrency}):</label>
-                <input
-                  type="number"
-                  step="0.01"
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
                   value={profItemPrice}
                   onChange={(e) => setProfItemPrice(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold text-amber-400"
@@ -476,11 +495,34 @@ export const SalesCrmView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl cursor-pointer"
+                  disabled={!canCreateSales}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl cursor-pointer disabled:opacity-40"
                 >
                   صدور پیش‌فاکتور
                 </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showNewCustomerModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-white">ثبت مشتری جدید</h3>
+              <button type="button" aria-label="بستن فرم مشتری" onClick={() => setShowNewCustomerModal(false)} className="text-slate-400 hover:text-white text-xl">×</button>
+            </div>
+            <form onSubmit={handleAddCustomer} className="grid grid-cols-2 gap-3 text-xs">
+              <label className="col-span-2">نام مشتری<input value={newCustName} onChange={(e) => setNewCustName(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required /></label>
+              <label className="col-span-2">شرکت<input value={newCustCompany} onChange={(e) => setNewCustCompany(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required /></label>
+              <label>کشور<input value={newCustCountry} onChange={(e) => setNewCustCountry(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required /></label>
+              <label>شهر<input value={newCustCity} onChange={(e) => setNewCustCity(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required /></label>
+              <label>تلفن<input value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required /></label>
+              <label>ایمیل<input type="email" value={newCustEmail} onChange={(e) => setNewCustEmail(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></label>
+              <label>ارز پایه<select value={newCustCurrency} onChange={(e) => setNewCustCurrency(e.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required><option value="">انتخاب ارز</option><option>IRR</option><option>USD</option><option>EUR</option><option>AED</option><option>RUB</option></select></label>
+              <label>دسته<select value={newCustCategory} onChange={(e) => setNewCustCategory(e.target.value as Customer['category'])} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"><option>Export Luxury Distributor</option><option>5-Star Hotel / Restaurant</option><option>Domestic Gourmet Chain</option><option>Private VIP Client</option><option>Aquaculture Farm (Fingerlings)</option></select></label>
+              <div className="col-span-2 flex justify-end gap-2 pt-2"><button type="button" onClick={() => setShowNewCustomerModal(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">انصراف</button><button type="submit" disabled={!canCreateCrm} className="px-4 py-2 bg-emerald-600 text-white font-bold rounded-xl disabled:opacity-40">ثبت مشتری</button></div>
             </form>
           </div>
         </div>

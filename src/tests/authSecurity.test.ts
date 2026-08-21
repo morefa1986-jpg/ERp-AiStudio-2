@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { PASSWORD_SALT, hashPasswordWithSalt, verifyPasswordSecurely } from '../utils/authSecurity';
+import { hashPasswordServer, verifyPasswordServer } from '../../server/auth';
 import { roleAllows } from '../utils/rbac';
 
 describe('Enterprise authentication security', () => {
-  it('uses deterministic salted SHA-256 without exposing plaintext credentials', async () => {
-    const expected = await hashPasswordWithSalt('admin123', PASSWORD_SALT);
-    expect(expected).toHaveLength(64);
-    expect(expected).not.toContain('admin123');
-    await expect(verifyPasswordSecurely('admin123', PASSWORD_SALT, expected)).resolves.toBe(true);
+  it('uses salted scrypt without exposing plaintext credentials', () => {
+    const expected = hashPasswordServer('a-secure-password');
+    expect(expected).toMatch(/^scrypt\$/);
+    expect(expected).not.toContain('a-secure-password');
+    expect(verifyPasswordServer('a-secure-password', expected)).toBe(true);
   });
 
-  it('rejects wrong credentials and malformed stored hashes', async () => {
-    const expected = await hashPasswordWithSalt('correct-password', PASSWORD_SALT);
-    await expect(verifyPasswordSecurely('wrong-password', PASSWORD_SALT, expected)).resolves.toBe(false);
-    await expect(verifyPasswordSecurely('correct-password', PASSWORD_SALT, 'not-a-valid-hash')).resolves.toBe(false);
+  it('rejects wrong credentials and malformed stored hashes', () => {
+    const expected = hashPasswordServer('correct-password');
+    expect(verifyPasswordServer('wrong-password', expected)).toBe(false);
+    expect(verifyPasswordServer('correct-password', 'not-a-valid-hash')).toBe(false);
   });
 
   it('applies fail-closed production RBAC', () => {

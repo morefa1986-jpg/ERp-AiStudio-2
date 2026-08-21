@@ -21,20 +21,36 @@ export const WaterQualityView: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
 
   // Form State
-  const [testDO, setTestDO] = useState<number>(6.5);
-  const [testTemp, setTestTemp] = useState<number>(16.2);
-  const [testPh, setTestPh] = useState<number>(7.4);
-  const [testAmmonia, setTestAmmonia] = useState<number>(0.02);
-  const [testNitrite, setTestNitrite] = useState<number>(0.01);
-  const [testNitrate, setTestNitrate] = useState<number>(12);
-  const [testSalinity, setTestSalinity] = useState<number>(0.3);
-  const [tester, setTester] = useState<string>('دکتر معتمدی (آزمایشگاه آب)');
+  const [testDO, setTestDO] = useState<number | ''>('');
+  const [testTemp, setTestTemp] = useState<number | ''>('');
+  const [testPh, setTestPh] = useState<number | ''>('');
+  const [testAmmonia, setTestAmmonia] = useState<number | ''>('');
+  const [testNitrite, setTestNitrite] = useState<number | ''>('');
+  const [testNitrate, setTestNitrate] = useState<number | ''>('');
+  const [testSalinity, setTestSalinity] = useState<number | ''>('');
+  const [tester, setTester] = useState<string>('');
 
   const selectedPond = ponds.find((p) => p.id === selectedPondId);
+  const latestLogs = Array.from(waterLogs.filter((log) => log.sensorStatus === 'VALID').reduce((latest, log) => {
+    const existing = latest.get(log.pondId);
+    if (!existing || new Date(log.timestamp).getTime() > new Date(existing.timestamp).getTime()) latest.set(log.pondId, log);
+    return latest;
+  }, new Map<string, WaterQualityLog>()).values()).filter((log) => {
+    const ageHours = (Date.now() - new Date(log.timestamp).getTime()) / 3_600_000;
+    return Number.isFinite(ageHours) && ageHours >= -0.25 && ageHours <= 6;
+  });
+  const average = (selector: (log: WaterQualityLog) => number | undefined): number | null => {
+    const values = latestLogs.map(selector).filter((value): value is number => Number.isFinite(value));
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  };
+  const averageDo = average((log) => log.dissolvedOxygen);
+  const averageTemp = average((log) => log.temperature);
+  const averagePh = average((log) => log.ph);
+  const averageAmmonia = average((log) => log.ammonia);
 
   const handleRecordTest = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPond) return;
+    if (!selectedPond || [testDO, testTemp, testPh, testAmmonia, testNitrite, testNitrate, testSalinity].some((value) => value === '') || !tester.trim()) return;
 
     recordWaterTest({
       pondId: selectedPond.id,
@@ -74,7 +90,7 @@ export const WaterQualityView: React.FC = () => {
           className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-600/20"
         >
           <Plus className="w-4 h-4" />
-          {t('waterQuality.newTest')}
+          {t('waterQuality.btnRecordTest')}
         </button>
       </div>
 
@@ -82,9 +98,9 @@ export const WaterQualityView: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
           <div>
-            <span className="text-xs text-slate-400 block">{t('waterQuality.avgDo')}</span>
-            <span className="text-2xl font-black text-cyan-400">6.4 mg/L</span>
-            <span className="text-[11px] text-emerald-400 block mt-1">{t('waterQuality.avgDoStatus')}</span>
+            <span className="text-xs text-slate-400 block">{t('waterQuality.avgDoTitle')}</span>
+            <span className="text-2xl font-black text-cyan-400">{averageDo === null ? '—' : `${formatNumber(averageDo)} mg/L`}</span>
+            <span className="text-[11px] text-emerald-400 block mt-1">{latestLogs.length ? t('waterQuality.avgDoSafe') : t('noData')}</span>
           </div>
           <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl">
             <Wind className="w-6 h-6" />
@@ -93,9 +109,9 @@ export const WaterQualityView: React.FC = () => {
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
           <div>
-            <span className="text-xs text-slate-400 block">{t('waterQuality.avgTemp')}</span>
-            <span className="text-2xl font-black text-orange-400">16.3 °C</span>
-            <span className="text-[11px] text-slate-400 block mt-1">{t('waterQuality.avgTempStatus')}</span>
+            <span className="text-xs text-slate-400 block">{t('waterQuality.avgTempTitle')}</span>
+            <span className="text-2xl font-black text-orange-400">{averageTemp === null ? '—' : `${formatNumber(averageTemp)} °C`}</span>
+            <span className="text-[11px] text-slate-400 block mt-1">{latestLogs.length ? t('waterQuality.avgTempDesc') : t('noData')}</span>
           </div>
           <div className="p-3 bg-orange-500/10 text-orange-400 rounded-xl">
             <Thermometer className="w-6 h-6" />
@@ -104,9 +120,9 @@ export const WaterQualityView: React.FC = () => {
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
           <div>
-            <span className="text-xs text-slate-400 block">{t('waterQuality.avgPh')}</span>
-            <span className="text-2xl font-black text-emerald-400">7.42</span>
-            <span className="text-[11px] text-emerald-400 block mt-1">{t('waterQuality.avgPhStatus')}</span>
+            <span className="text-xs text-slate-400 block">{t('waterQuality.avgPhTitle')}</span>
+            <span className="text-2xl font-black text-emerald-400">{averagePh === null ? '—' : formatNumber(averagePh)}</span>
+            <span className="text-[11px] text-emerald-400 block mt-1">{latestLogs.length ? t('waterQuality.avgPhDesc') : t('noData')}</span>
           </div>
           <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl">
             <Activity className="w-6 h-6" />
@@ -115,9 +131,9 @@ export const WaterQualityView: React.FC = () => {
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
           <div>
-            <span className="text-xs text-slate-400 block">{t('waterQuality.toxicAmmonia')}</span>
-            <span className="text-2xl font-black text-slate-200">0.01 mg/L</span>
-            <span className="text-[11px] text-emerald-400 block mt-1">{t('waterQuality.ammoniaStatus')}</span>
+            <span className="text-xs text-slate-400 block">{t('waterQuality.avgAmmoniaTitle')}</span>
+            <span className="text-2xl font-black text-slate-200">{averageAmmonia === null ? '—' : `${formatNumber(averageAmmonia)} mg/L`}</span>
+            <span className="text-[11px] text-emerald-400 block mt-1">{latestLogs.length ? t('waterQuality.avgAmmoniaSafe') : t('noData')}</span>
           </div>
           <div className="p-3 bg-slate-800 text-slate-400 rounded-xl">
             <Layers className="w-6 h-6" />
@@ -144,7 +160,7 @@ export const WaterQualityView: React.FC = () => {
                 <th className="p-3">{t('waterQuality.thAmmonia')}</th>
                 <th className="p-3">{t('waterQuality.thNitrite')}</th>
                 <th className="p-3">{t('waterQuality.thSalinity')}</th>
-                <th className="p-3">{t('waterQuality.thOperator')}</th>
+                <th className="p-3">{t('waterQuality.thTester')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -177,7 +193,7 @@ export const WaterQualityView: React.FC = () => {
 
             <form onSubmit={handleRecordTest} className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.selectPond')}:</label>
+                <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.fieldPond')}:</label>
                 <select
                   value={selectedPondId}
                   onChange={(e) => setSelectedPondId(e.target.value)}
@@ -193,7 +209,7 @@ export const WaterQualityView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.doField')}:</label>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.fieldDo')}:</label>
                   <input
                     type="number"
                     step="0.1"
@@ -205,7 +221,7 @@ export const WaterQualityView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.tempField')}:</label>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.fieldTemp')}:</label>
                   <input
                     type="number"
                     step="0.1"
@@ -219,7 +235,7 @@ export const WaterQualityView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.phField')}:</label>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.fieldPh')}:</label>
                   <input
                     type="number"
                     step="0.01"
@@ -231,7 +247,7 @@ export const WaterQualityView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.ammoniaField')}:</label>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.fieldAmmonia')}:</label>
                   <input
                     type="number"
                     step="0.001"
@@ -243,8 +259,23 @@ export const WaterQualityView: React.FC = () => {
                 </div>
               </div>
 
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.fieldNitrite')}:</label>
+                  <input type="number" min="0" step="0.001" value={testNitrite} onChange={(e) => setTestNitrite(e.target.value === '' ? '' : Number(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.fieldNitrate')}:</label>
+                  <input type="number" min="0" step="0.1" value={testNitrate} onChange={(e) => setTestNitrate(e.target.value === '' ? '' : Number(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.fieldSalinity')}:</label>
+                  <input type="number" min="0" step="0.01" value={testSalinity} onChange={(e) => setTestSalinity(e.target.value === '' ? '' : Number(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" required />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.operatorField')}:</label>
+                <label className="block text-slate-300 font-bold mb-1">{t('waterQuality.fieldTester')}:</label>
                 <input
                   type="text"
                   value={tester}
@@ -260,13 +291,13 @@ export const WaterQualityView: React.FC = () => {
                   onClick={() => setShowAddModal(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl"
                 >
-                  {t('waterQuality.cancel')}
+                  {t('cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl"
                 >
-                  {t('waterQuality.submit')}
+                  {t('waterQuality.btnSubmitTest')}
                 </button>
               </div>
             </form>

@@ -5,6 +5,7 @@ export const ar = {
   tagline: 'منصة استزراع الحفش، معالجة الكافيار والذكاء الاصطناعي المتكاملة',
   online: 'متصل بالشبكة',
   offline: 'غير متصل (وضع الشبكة المحلية LAN)',
+  demoMode: 'الوضع التجريبي — القيم التشغيلية بيانات نموذجية فقط',
   lanMode: 'وضع الشبكة المحلية (يعمل بدون إنترنت)',
   searchPlaceholder: 'البحث الشامل (الأحواض، شرائح RFID، الفواتير، السلالات، الموظفون)...',
   save: 'حفظ',
@@ -81,7 +82,7 @@ export const ar = {
     manageSecurity: 'إدارة الأمان والمستخدمين',
     logout: 'تسجيل الخروج',
     notificationsTitle: 'تنبيهات وأحداث التدقيق',
-    lanLatency: 'الشبكة المحلية (LAN 4ms)',
+    lanLatency: 'حالة اتصال الشبكة المحلية',
   },
 
   // Dynamic Translation Component
@@ -679,7 +680,7 @@ export const ar = {
   platform: {
     title: 'مركز التوزيع المتعدد للمنصات (Windows، iOS PWA و Android)',
     subtitle: 'حزم تثبيت مستقلة لحواسيب التحكم بالمزرعة (Windows بدون إنترنت)، الأجهزة اللوحية وهواتف الكادر',
-    syncBadge: 'Offline-First LAN Sync Architecture',
+    syncBadge: 'قاعدة SQLite محلية؛ المزامنة عند وجود اتصال موثوق فقط',
     windowsTab: 'مثبت سطح المكتب لنظام Windows (.exe / .msi)',
     iosTab: 'تطبيق ويب أبل iOS (PWA / Retina)',
     androidTab: 'حزمة أندرويد (APK / AAB / Google Play)',
@@ -698,7 +699,7 @@ export const ar = {
     loginTitle: 'تسجيل الدخول إلى فتحي أكوا ERP',
     subtitle: 'المصادقة المؤسسية وإدارة الصلاحيات RBAC',
     username: 'اسم المستخدم:',
-    usernamePlaceholder: 'admin, vet, hatchery, sales, accountant...',
+    usernamePlaceholder: 'اسم مستخدم المؤسسة',
     password: 'كلمة المرور المشفرة:',
     selectLanguage: 'اختيار لغة النظام',
     rememberMe: 'تذكر اسم المستخدم',
@@ -710,10 +711,14 @@ export const ar = {
     sessionActive: 'الجلسة الآمنة نشطة',
     auditLog: 'سجل تدقيق الأمان (غير قابل للتعديل)',
     noPlaintext: 'أمان فائق بتشفير SHA-256 مع إضافة الملح العشوائي',
-    demoAccountsTitle: 'حسابات العرض التوضيحي:',
+    demoAccountsTitle: 'حسابات المؤسسة المسجلة:',
     errRequired: 'يرجى إدخال اسم المستخدم وكلمة المرور.',
     errInvalidPass: 'كلمة المرور المدخلة غير صحيحة.',
+    errRateLimited: 'عدد محاولات الدخول الفاشلة كبير؛ حاول لاحقاً.',
     errServer: 'خطأ في الاتصال بخادم المصادقة.',
+    fullName: 'الاسم الكامل', email: 'البريد الإلكتروني', confirmPassword: 'تأكيد كلمة المرور',
+    bootstrapTitle: 'التشغيل الأول: إنشاء المسؤول', bootstrapHint: 'استخدم 12 حرفاً على الأقل. لا تُحفظ كلمة المرور في المتصفح.',
+    bootstrapInvalid: 'بيانات المسؤول أو تأكيد كلمة المرور غير صالح.', bootstrapAlreadyDone: 'تم إعداد المسؤول مسبقاً.', serverAuthOnly: 'تتم المصادقة عبر قاعدة البيانات المحلية فقط.', createAdmin: 'إنشاء المسؤول وتسجيل الدخول',
   },
 
   // AI Assistant & Marketing

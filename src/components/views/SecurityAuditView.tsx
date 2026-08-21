@@ -117,7 +117,7 @@ export const SecurityAuditView: React.FC = () => {
 
                 <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-[11px] text-slate-400">
                   <span>تاریخ ایجاد: {u.createdAt}</span>
-                  <span className="font-mono text-emerald-400">SHA-256 Hashed</span>
+                  <span className="font-mono text-emerald-400">scrypt hashed</span>
                 </div>
               </div>
             ))}
@@ -165,7 +165,7 @@ export const SecurityAuditView: React.FC = () => {
                     <td className="p-3 text-slate-300 font-semibold">{log.entity}</td>
                     <td className="p-3 text-white font-bold">{log.userName}</td>
                     <td className="p-3 text-slate-200">{log.details}</td>
-                    <td className="p-3 font-mono text-slate-400">{log.ipAddress || '192.168.1.100'}</td>
+                    <td className="p-3 font-mono text-slate-400">{log.ipAddress || '—'}</td>
                     <td className="p-3 text-slate-400">{formatDate(log.timestamp)} {formatTime(log.timestamp)}</td>
                   </tr>
                 ))}

@@ -17,7 +17,7 @@ function periodStart(period: Period, now = new Date()): number {
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectNav }) => {
   const { t, formatNumber, formatCurrency, formatDate } = useI18n();
-  const { ponds, halls, feedingRecords, mortalityRecords, proformas, treatments, inventory, auditLogs } = useFarm();
+  const { ponds, halls, feedingRecords, mortalityRecords, proformas, treatments, inventory, waterLogs, auditLogs } = useFarm();
   const [timeFilter, setTimeFilter] = useState<Period>('week');
   const startTime = periodStart(timeFilter);
   const now = Date.now();
@@ -32,7 +32,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectNav }) => 
   }), [mortalityRecords, startTime, now]);
   const filteredProformas = useMemo(() => proformas.filter((row) => {
     const time = new Date(row.date).getTime();
-    return Number.isFinite(time) && time >= startTime && time <= now;
+    // Revenue cards use fulfilled orders only; drafts and quotations are not cash realization.
+    return Boolean(row.fulfilledAt) && row.status !== 'Cancelled' && Number.isFinite(time) && time >= startTime && time <= now;
   }), [proformas, startTime, now]);
 
   const totalBiomassKg = ponds.reduce((sum, pond) => sum + (Number.isFinite(pond.biomassKg) ? pond.biomassKg : 0), 0);
@@ -44,10 +45,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectNav }) => 
   const stoppedPonds = ponds.filter((pond) => pond.feedingStatus === 'STOPPED');
   const activeTreatments = treatments.filter((row) => row.status === 'ACTIVE').length;
   const activeHalls = halls.filter((hall) => hall.isActive).length;
-  const avgDO = ponds.length ? ponds.reduce((sum, pond) => sum + pond.dissolvedOxygen, 0) / ponds.length : 0;
-  const avgTemp = ponds.length ? ponds.reduce((sum, pond) => sum + pond.waterTemperature, 0) / ponds.length : 0;
-  const avgFCR = ponds.length ? ponds.reduce((sum, pond) => sum + pond.fcr, 0) / ponds.length : 0;
-  const feedReserveKg = inventory.filter((row) => row.category.includes('Feed') && row.unit === 'kg').reduce((sum, row) => sum + row.quantity, 0);
+  const trustedTelemetryPonds = ponds.filter((pond) => {
+    const latest = waterLogs.filter((log) => log.pondId === pond.id).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+    const ageHours = latest ? (Date.now() - new Date(latest.timestamp).getTime()) / 3_600_000 : Number.POSITIVE_INFINITY;
+    return latest?.sensorStatus === 'VALID' && ageHours >= -0.25 && ageHours <= 6
+      && Number.isFinite(latest.dissolvedOxygen) && latest.dissolvedOxygen > 0
+      && Number.isFinite(latest.temperature) && Number.isFinite(latest.ph) && latest.ph > 0;
+  });
+  const avgDO = trustedTelemetryPonds.length ? trustedTelemetryPonds.reduce((sum, pond) => sum + pond.dissolvedOxygen, 0) / trustedTelemetryPonds.length : null;
+  const avgTemp = trustedTelemetryPonds.length ? trustedTelemetryPonds.reduce((sum, pond) => sum + pond.waterTemperature, 0) / trustedTelemetryPonds.length : null;
+  const measuredFcrPonds = ponds.filter((pond) => Number.isFinite(pond.fcr) && pond.fcr > 0);
+  const avgFCR = measuredFcrPonds.length ? measuredFcrPonds.reduce((sum, pond) => sum + pond.fcr, 0) / measuredFcrPonds.length : null;
+  const feedReserveKg = inventory.filter((row) => row.category.includes('Feed')).reduce((sum, row) => sum + (row.unit === 'gram' ? row.quantity / 1000 : row.unit === 'kg' ? row.quantity : 0), 0);
 
   const salesByCurrency = useMemo(() => {
     const totals = new Map<string, number>();
@@ -84,8 +93,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectNav }) => 
     { label: t('dashboard.totalBiomass'), value: `${formatNumber(totalBiomassKg)} kg`, sub: `${formatNumber(totalFishCount)} ${t('unit')}`, icon: Fish },
     { label: t('nav.feeding'), value: `${formatNumber(periodFeedKg)} kg`, sub: t(`dashboard.${timeFilter}`), icon: Utensils },
     { label: t('dashboard.mortalityRate'), value: `${formatNumber(mortalityRate, { maximumFractionDigits: 3 })}%`, sub: `${formatNumber(mortalityCount)} ${t('unit')}`, icon: Activity },
-    { label: t('dashboard.fcrAverage'), value: formatNumber(avgFCR, { maximumFractionDigits: 2 }), sub: `DO ${formatNumber(avgDO, { maximumFractionDigits: 2 })} mg/L`, icon: Droplets },
-    { label: t('dashboard.avgTemp'), value: `${formatNumber(avgTemp, { maximumFractionDigits: 1 })}°C`, sub: `${formatNumber(stoppedPonds.length)} ${t('dashboard.criticalAlerts')}`, icon: Thermometer },
+    { label: t('dashboard.fcrAverage'), value: avgFCR === null ? '—' : formatNumber(avgFCR, { maximumFractionDigits: 2 }), sub: avgDO === null ? t('noData') : `DO ${formatNumber(avgDO, { maximumFractionDigits: 2 })} mg/L`, icon: Droplets },
+    { label: t('dashboard.avgTemp'), value: avgTemp === null ? '—' : `${formatNumber(avgTemp, { maximumFractionDigits: 1 })}°C`, sub: `${formatNumber(stoppedPonds.length)} ${t('dashboard.criticalAlerts')}`, icon: Thermometer },
     { label: t('dashboard.activeHalls'), value: formatNumber(activeHalls), sub: `${formatNumber(ponds.length)} ${t('nav.ponds')}`, icon: Building2 },
     { label: t('dashboard.activeTreatments'), value: formatNumber(activeTreatments), sub: t('nav.treatments'), icon: AlertTriangle },
     { label: t('dashboard.feedStockReserve'), value: `${formatNumber(feedReserveKg)} kg`, sub: t('nav.warehouse'), icon: Package },
@@ -163,7 +172,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectNav }) => 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl overflow-hidden">
           <div className="p-4 border-b border-[#1F1F22] text-sm text-white font-medium">{t('nav.ponds')}</div>
-          <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-[#0C0C0E] text-[#71717A]"><tr><th className="p-3 text-start">{t('name')}</th><th className="p-3 text-start">DO</th><th className="p-3 text-start">{t('pond.waterTemp')}</th><th className="p-3 text-start">{t('status')}</th></tr></thead><tbody className="divide-y divide-[#1F1F22]">{ponds.slice(0, 12).map((pond) => <tr key={pond.id}><td className="p-3 text-white">{pond.name}</td><td className={`p-3 ${pond.dissolvedOxygen < 4 ? 'text-rose-400' : 'text-cyan-300'}`}>{formatNumber(pond.dissolvedOxygen)} mg/L</td><td className="p-3 text-[#D4D4D8]">{formatNumber(pond.waterTemperature)}°C</td><td className={`p-3 ${pond.feedingStatus === 'STOPPED' ? 'text-rose-400' : 'text-emerald-400'}`}>{pond.feedingStatus === 'STOPPED' ? t('pond.stopped') : t('pond.active')}</td></tr>)}</tbody></table></div>
+          <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-[#0C0C0E] text-[#71717A]"><tr><th className="p-3 text-start">{t('name')}</th><th className="p-3 text-start">DO</th><th className="p-3 text-start">{t('pond.waterTemp')}</th><th className="p-3 text-start">{t('status')}</th></tr></thead><tbody className="divide-y divide-[#1F1F22]">{ponds.slice(0, 12).map((pond) => { const trusted = trustedTelemetryPonds.some((item) => item.id === pond.id); return <tr key={pond.id}><td className="p-3 text-white">{pond.name}</td><td className={`p-3 ${trusted && pond.dissolvedOxygen < 4 ? 'text-rose-400' : 'text-cyan-300'}`}>{trusted ? `${formatNumber(pond.dissolvedOxygen)} mg/L` : '—'}</td><td className="p-3 text-[#D4D4D8]">{trusted ? `${formatNumber(pond.waterTemperature)}°C` : '—'}</td><td className={`p-3 ${pond.feedingStatus === 'STOPPED' ? 'text-rose-400' : 'text-emerald-400'}`}>{pond.feedingStatus === 'STOPPED' ? t('pond.stopped') : t('pond.active')}</td></tr>; })}</tbody></table></div>
         </div>
 
         <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl p-5">

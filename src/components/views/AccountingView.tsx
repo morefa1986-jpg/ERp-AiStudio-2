@@ -25,13 +25,13 @@ export const AccountingView: React.FC = () => {
   const [showNewSanadModal, setShowNewSanadModal] = useState<boolean>(false);
 
   // New Sanad form rows
-  const [sanadDesc, setSanadDesc] = useState<string>('خرید محموله غذای اکسترود فرانسوی');
-  const [sanadRef, setSanadRef] = useState<string>('INV-9942');
+  const [sanadDesc, setSanadDesc] = useState<string>('');
+  const [sanadRef, setSanadRef] = useState<string>('');
   const [rows, setRows] = useState<
     Array<{ accountCode: string; accountName: string; debit: number; credit: number; note: string }>
   >([
-    { accountCode: '1110', accountName: 'موجودی انبار دان و غذا', debit: 450000000, credit: 0, note: 'خرید ۵ تن دان' },
-    { accountCode: '1020', accountName: 'بانک ملت ارزی/ریالی', debit: 0, credit: 450000000, note: 'انتقال وجه ساتنا' },
+    { accountCode: '', accountName: '', debit: 0, credit: 0, note: '' },
+    { accountCode: '', accountName: '', debit: 0, credit: 0, note: '' },
   ]);
 
   const totalDebit = rows.reduce((s, r) => s + Number(r.debit || 0), 0);
@@ -41,7 +41,7 @@ export const AccountingView: React.FC = () => {
   const handleAddRow = () => {
     setRows([
       ...rows,
-      { accountCode: '5010', accountName: 'بهای تمام شده غذای مصرفی', debit: 0, credit: 0, note: '' },
+      { accountCode: '', accountName: '', debit: 0, credit: 0, note: '' },
     ]);
   };
 
@@ -305,6 +305,7 @@ export const AccountingView: React.FC = () => {
                         onChange={(e) => handleUpdateRow(idx, 'accountCode', e.target.value)}
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white text-[11px]"
                       >
+                        <option value="">انتخاب حساب</option>
                         {accounts.map((acc) => (
                           <option key={acc.code} value={acc.code}>
                             {acc.code} — {acc.name}

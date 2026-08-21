@@ -5,11 +5,16 @@ import {
 } from '../utils/sensorValidation';
 
 describe('Feeding Safety Engine & Water Quality Rules', () => {
+  const fresh = new Date().toISOString();
+
   it('strictly blocks feeding when Dissolved Oxygen is below 4.0 mg/L', () => {
     const safety = assessWaterSafetyForFeeding({
       dissolvedOxygen: 3.8,
       waterTemperature: 16.5,
       ph: 7.5,
+      ammonia: 0.01,
+      nitrite: 0.05,
+      timestamp: fresh,
     });
 
     expect(safety.isSafeForFeeding).toBe(false);
@@ -23,6 +28,9 @@ describe('Feeding Safety Engine & Water Quality Rules', () => {
       dissolvedOxygen: 6.8,
       waterTemperature: 16.5,
       ph: 7.4,
+      ammonia: 0.01,
+      nitrite: 0.05,
+      timestamp: fresh,
     });
 
     expect(safety.isSafeForFeeding).toBe(true);
@@ -36,6 +44,9 @@ describe('Feeding Safety Engine & Water Quality Rules', () => {
       dissolvedOxygen: 8.0,
       waterTemperature: 2.5,
       ph: 7.2,
+      ammonia: 0.01,
+      nitrite: 0.05,
+      timestamp: fresh,
     });
 
     expect(safety.isSafeForFeeding).toBe(false);
@@ -49,6 +60,9 @@ describe('Feeding Safety Engine & Water Quality Rules', () => {
       dissolvedOxygen: 6.0,
       waterTemperature: 26.5,
       ph: 7.2,
+      ammonia: 0.01,
+      nitrite: 0.05,
+      timestamp: fresh,
     });
 
     expect(safety.isSafeForFeeding).toBe(false);

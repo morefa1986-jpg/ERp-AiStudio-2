@@ -26,6 +26,7 @@ export interface PondWaterParams {
   ammonia?: number | null | undefined;
   nitrite?: number | null | undefined;
   timestamp?: string;
+  sensorStatus?: 'VALID' | 'STALE' | 'INVALID' | 'OFFLINE' | 'MANUAL';
 }
 
 export interface WaterSafetyAssessment {
@@ -50,7 +51,9 @@ export const SENSOR_BOUNDS = {
 };
 
 function staleResult(value: number, timestamp: string | undefined, code: string, label: string): SensorValidationResult | null {
-  if (!timestamp) return null;
+  if (!timestamp) {
+    return { isValid: false, status: 'SENSOR_FAULT', sanitizedValue: value, message: `زمان ثبت ${label} موجود نیست؛ داده قابل اعتماد نیست.`, errors: [`${code}_TIMESTAMP_MISSING`] };
+  }
   const ts = new Date(timestamp).getTime();
   if (!Number.isFinite(ts)) {
     return { isValid: false, status: 'SENSOR_FAULT', sanitizedValue: value, message: `زمان ثبت ${label} نامعتبر است.`, errors: [`${code}_TIMESTAMP_INVALID`] };
@@ -105,8 +108,8 @@ export function validatePh(rawPh: number | null | undefined, timestamp?: string)
   return { isValid: true, status: 'VALID', sanitizedValue: value, errors: [] };
 }
 
-function validateChemical(raw: number | null | undefined, safeMax: number, criticalMax: number, code: string, label: string, timestamp?: string): SensorValidationResult | undefined {
-  if (raw === null || raw === undefined) return undefined;
+function validateChemical(raw: number | null | undefined, safeMax: number, criticalMax: number, code: string, label: string, timestamp?: string): SensorValidationResult {
+  if (raw === null || raw === undefined) return { isValid: false, status: 'SENSOR_FAULT', sanitizedValue: 0, message: `${label} موجود نیست؛ داده قابل اعتماد نیست.`, errors: [`${code}_VALUE_MISSING`] };
   const value = numericValue(raw);
   if (value === null || value < 0) return { isValid: false, status: 'SENSOR_FAULT', sanitizedValue: 0, message: `${label} نامعتبر است.`, errors: [`${code}_INVALID`] };
   const stale = staleResult(value, timestamp, code, label);
@@ -119,9 +122,15 @@ function validateChemical(raw: number | null | undefined, safeMax: number, criti
 export function assessWaterSafetyForFeeding(params: PondWaterParams): WaterSafetyAssessment {
   const doStatus = validateDissolvedOxygen(params.dissolvedOxygen, params.timestamp);
   const tempStatus = validateWaterTemperature(params.waterTemperature, params.timestamp);
-  const phStatus = params.ph === undefined ? undefined : validatePh(params.ph, params.timestamp);
+  const phStatus = validatePh(params.ph, params.timestamp);
   const ammoniaStatus = validateChemical(params.ammonia, SENSOR_BOUNDS.AMMONIA_NH3.SAFE_MAX, SENSOR_BOUNDS.AMMONIA_NH3.CRITICAL_MAX, 'NH3', 'آمونیاک', params.timestamp);
   const nitriteStatus = validateChemical(params.nitrite, SENSOR_BOUNDS.NITRITE_NO2.SAFE_MAX, SENSOR_BOUNDS.NITRITE_NO2.CRITICAL_MAX, 'NO2', 'نیتریت', params.timestamp);
+  if (params.sensorStatus === 'OFFLINE' || params.sensorStatus === 'INVALID' || params.sensorStatus === 'STALE') {
+    doStatus.isValid = false;
+    doStatus.status = params.sensorStatus === 'STALE' ? 'STALE' : params.sensorStatus === 'OFFLINE' ? 'DISCONNECTED' : 'SENSOR_FAULT';
+    doStatus.errors.push(`SENSOR_STATUS_${params.sensorStatus}`);
+    doStatus.message = 'وضعیت سنسور معتبر نیست؛ تغذیه مسدود شد.';
+  }
   const statuses = [doStatus, tempStatus, phStatus, ammoniaStatus, nitriteStatus].filter(Boolean) as SensorValidationResult[];
   const invalid = statuses.find((s) => !s.isValid || s.status === 'STALE' || s.status === 'SENSOR_FAULT' || s.status === 'DISCONNECTED');
   const critical = statuses.find((s) => s.status === 'CRITICAL');

@@ -1,7 +1,7 @@
-# 🐟 Fathi Sturgeon Farm Super ERP Enterprise (v6.0)
+# 🐟 Fathi Sturgeon Farm Super ERP Enterprise (v6.1)
 ### سامانه جامع مدیریت هوشمند تکثیر، پرورش، فرآوری و بازرگانی ماهیان خاویاری فتحی
 
-[![CI Pipeline](https://github.com/morefa1986-jpg/ERp-AiStudio-1/actions/workflows/ci.yml/badge.svg)](https://github.com/morefa1986-jpg/ERp-AiStudio-1/actions)
+[![CI Pipeline](https://github.com/morefa1986-jpg/ERp-AiStudio-2/actions/workflows/ci.yml/badge.svg)](https://github.com/morefa1986-jpg/ERp-AiStudio-2/actions)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19.0-61dafb.svg)](https://react.dev/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4-38bdf8.svg)](https://tailwindcss.com/)
@@ -11,9 +11,9 @@
 
 ## 🌟 Overview & Capabilities
 
-**Fathi Aqua Super ERP Enterprise** is a high-availability, mission-critical Aquaculture Resource Planning system engineered for industrial sturgeon farming (*Acipenseridae*), caviar extraction, genetic lineage tracking, and multi-currency global commerce.
+**Fathi Aqua Super ERP Enterprise** is an offline-capable Aquaculture Resource Planning system for sturgeon farming (*Acipenseridae*), caviar processing, lineage tracking, and multi-currency commerce. Operational readiness depends on entering verified farm data and completing the deployment checks below.
 
-### 🌐 7 Native Languages with Full Cultural Localization
+### 🌐 7 locale dictionaries with direction-aware formatting
 - 🇮🇷 **Persian (فارسی)** — Native RTL, Jalali/Shamsi calendar, IRR/Toman formatting
 - 🇬🇧 **English** — Native LTR, Gregorian calendar, USD/EUR
 - 🇩🇪 **German (Deutsch)** — Native LTR, DIN/ISO formats, EUR
@@ -60,7 +60,8 @@
 │   ├── tests/                     # Vitest automated test suites
 │   ├── types/                     # TypeScript type contracts
 │   └── utils/                     # Sensor validation & number sanitizers
-├── server.ts                      # Express backend & Gemini AI proxy
+├── server/                        # SQLite persistence and durable server storage
+├── server.ts                      # Express backend & optional Gemini proxy
 └── vite.config.ts                 # Vite bundler configuration
 ```
 
@@ -69,14 +70,14 @@
 ## 🚀 Getting Started & Local Deployment
 
 ### Prerequisites
-- Node.js >= 20.0.0
+- Node.js >= 22.5.0 (uses the built-in node:sqlite runtime)
 - npm >= 10.0.0
 
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/morefa1986-jpg/ERp-AiStudio-1.git
-cd ERp-AiStudio-1
+git clone https://github.com/morefa1986-jpg/ERp-AiStudio-2.git
+cd ERp-AiStudio-2
 
 # Install dependencies
 npm install
@@ -87,6 +88,15 @@ cp .env.example .env
 # Run development server (Port 3000)
 npm run dev
 ```
+
+The first local run creates the administrator in the server-backed SQLite
+database. No default credentials are shipped. Production data is not seeded;
+set `VITE_DEMO_MODE=true` only for an explicitly labelled demo environment.
+
+The server binds to `127.0.0.1` by default. LAN access requires explicit
+`FATHI_LAN_MODE=true`, `FATHI_LAN_HOST=<trusted-host-ip>` and a setup token for
+first-run bootstrap; every state mutation still requires authenticated,
+action-level authorization and optimistic versioning.
 
 ### Running Automated Tests
 ```bash
@@ -103,12 +113,13 @@ npm start
 ---
 
 ## 🔒 Security & RBAC Matrix
-| Role | Emergency Stop | Resume Feeding | Transfer Fish | Post Journals | Manage Users |
+| Role | Stop Feeding | Resume Feeding | Transfer Fish | Post Journals | Manage Users |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Super Admin** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Veterinarian** | ✅ | ✅ | ✅ | ❌ | ❌ |
-| **Feeding Tech** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Financial Manager** | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **Super Admin / Farm Owner** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Farm Manager** | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **Hall Manager / Technician** | ✅ | Hall Manager only | ✅ | ❌ | ❌ |
+| **Veterinarian** | ❌ | ✅ | ❌ | ❌ | ❌ |
+| **Accountant** | ❌ | ❌ | ❌ | ✅ | ❌ |
 
 ---
 

@@ -1,5 +1,5 @@
 /**
- * Fathi Aqua Super ERP Enterprise v6.0
+ * Fathi Aqua Super ERP Enterprise v6.1
  * Comprehensive Cross-Platform Aquaculture Management & ERP Domain Types
  */
 
@@ -162,6 +162,10 @@ export interface Pond {
   waterTemperature: number;
   dissolvedOxygen: number;
   ph: number;
+  ammonia?: number;
+  nitrite?: number;
+  lastTelemetryTimestamp?: string;
+  sensorQuality?: SensorQuality;
   activeTreatmentId?: string;
   lastBiometryDate: string;
   lastTransferDate?: string;
@@ -195,6 +199,7 @@ export interface FeedingRecord {
   feedTypeName: string;
   waterTemperature: number;
   dissolvedOxygen: number;
+  telemetryTimestamp?: string;
   feedingStatus: FeedingStatus;
   reasonIfZero?: string;
   operatorName: string;
@@ -318,7 +323,7 @@ export interface BroodstockFish {
   estimatedAgeYears: number;
   weightKg: number;
   lengthCm: number;
-  maturityStage: 'Stage II' | 'Stage III' | 'Stage IV (Ready)' | 'Stage V (Ovulated)' | 'Spent';
+  maturityStage: 'Not Assessed' | 'Stage II' | 'Stage III' | 'Stage IV (Ready)' | 'Stage V (Ovulated)' | 'Spent';
   photoUrl?: string;
   lastUltrasoundDate?: string;
   ultrasoundEggDiameterMm?: number;
@@ -370,13 +375,15 @@ export interface LarvalBatch {
   fertilizationBatchId: string;
   motherBroodstockIds: string[];
   fatherBroodstockIds: string[];
+  speciesId?: string;
   speciesName: string;
   hatchDate: string;
   larvalCount: number;
+  totalBiomassKg?: number;
   survivalRatePercent: number;
   deformityPercent: number;
   initialFeedType: 'Artemia Nauplii' | 'Daphnia' | 'Micro-pellet 0.2mm' | 'Larval Mash';
-  currentTankId: string;
+  currentTankId?: string;
   destination: 'Nursery' | 'Fingerling Pond' | 'Sale';
   status: 'Nursery Rearing' | 'Transferred' | 'Graduated';
 }
@@ -386,6 +393,7 @@ export interface NurseryTank {
   code: string;
   volumeLiters: number;
   currentBatchId?: string;
+  speciesId?: string;
   fishCount: number;
   avgWeightGrams: number;
   totalBiomassGrams: number;
@@ -478,10 +486,13 @@ export interface ProcessingBatch {
   qualityScore: number;
   citesPermitNumber?: string;
   status: 'Completed' | 'Packaging' | 'Stored In Cold Room';
+  outputLotIds?: string[];
+  transactionId?: string;
 }
 
 export interface ColdStoragePallet {
   id: string;
+  sku?: string;
   slotCode: string;
   temperatureC: number;
   productType: 'Caviar (Cans/Jars)' | 'Frozen Sturgeon Whole' | 'Vacuumed Fillet' | 'Smoked Sturgeon' | 'Raw Broodstock Eggs';
@@ -559,6 +570,8 @@ export interface ProformaInvoice {
   deliveryTerms: string;
   citesPermitRequired: boolean;
   status: 'Draft' | 'Sent' | 'Accepted' | 'Converted to Invoice' | 'Cancelled';
+  fulfilledAt?: string;
+  fulfillmentTransactionId?: string;
 }
 
 export interface Account {
@@ -683,6 +696,9 @@ export interface FarmAuditLog {
   beforeState?: string;
   afterState?: string;
   ipAddress?: string;
+  referenceId?: string;
+  transactionId?: string;
+  deviceId?: string;
 }
 
 export interface BackupSnapshot {
@@ -693,7 +709,7 @@ export interface BackupSnapshot {
   dataSizeKb: number;
   tablesCount: number;
   checksum: string;
-  checksumAlgorithm?: 'FNV1A32';
+  checksumAlgorithm?: 'SHA-256' | 'FNV1A32';
   schemaVersion?: number;
   creator: string;
   type: 'Automatic Daily' | 'Pre-Restore Safety Snapshot' | 'Manual Export';
