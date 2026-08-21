@@ -1,23 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { PASSWORD_SALT, hashPasswordWithSalt, verifyPasswordSecurely } from '../utils/authSecurity';
+import { hashPasswordServer, verifyPasswordServer } from '../../server/auth';
 import { roleAllows } from '../utils/rbac';
 
 describe('Auth security and RBAC production policy', () => {
-  it('generates consistent SHA-256 hashes for the configured compatibility salt', async () => {
-    const hash1 = await hashPasswordWithSalt('admin123', PASSWORD_SALT);
-    const hash2 = await hashPasswordWithSalt('admin123', PASSWORD_SALT);
-    expect(hash1).toBe(hash2);
-    expect(hash1).toHaveLength(64);
+  it('uses salted scrypt hashes with independent salts', () => {
+    const hash1 = hashPasswordServer('a-strong-password');
+    const hash2 = hashPasswordServer('a-strong-password');
+    expect(hash1).not.toBe(hash2);
+    expect(hash1).toMatch(/^scrypt\$16384\$8\$1\$[a-f0-9]{32}\$[a-f0-9]{128}$/);
+    expect(hash1).not.toContain('a-strong-password');
+    expect(verifyPasswordServer('a-strong-password', hash1)).toBe(true);
   });
 
-  it('rejects incorrect passwords and accepts the correct password', async () => {
-    const expectedHash = await hashPasswordWithSalt('valid-password', PASSWORD_SALT);
-    await expect(verifyPasswordSecurely('wrong-password', PASSWORD_SALT, expectedHash)).resolves.toBe(false);
-    await expect(verifyPasswordSecurely('valid-password', PASSWORD_SALT, expectedHash)).resolves.toBe(true);
+  it('rejects incorrect passwords and accepts the correct password', () => {
+    const expectedHash = hashPasswordServer('valid-password');
+    expect(verifyPasswordServer('wrong-password', expectedHash)).toBe(false);
+    expect(verifyPasswordServer('valid-password', expectedHash)).toBe(true);
   });
 
-  it('rejects malformed stored hashes', async () => {
-    await expect(verifyPasswordSecurely('anything', PASSWORD_SALT, 'weak-hash')).resolves.toBe(false);
+  it('rejects malformed stored hashes', () => {
+    expect(verifyPasswordServer('anything', 'weak-hash')).toBe(false);
   });
 
   it('is fail-closed for unknown roles', () => {

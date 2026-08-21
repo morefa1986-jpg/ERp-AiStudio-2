@@ -5,6 +5,7 @@ export const fa = {
   tagline: 'سیستم یکپارچه مدیریت پرورش، تکثیر، فرآوری خاویار و هوش مصنوعی مزرعه',
   online: 'آنلاین',
   offline: 'آفلاین (شبکه محلی LAN)',
+  demoMode: 'حالت نمایشی — همه داده‌های عملیاتی نمونه هستند',
   lanMode: 'حالت محلی بدون نیاز به اینترنت',
   searchPlaceholder: 'جستجوی سراسری (استخر، میکروچیپ، پیش‌فاکتور، گونه، پرسنل)...',
   save: 'ذخیره',
@@ -81,7 +82,7 @@ export const fa = {
     manageSecurity: 'مدیریت امنیت و کاربران',
     logout: 'خروج از حساب',
     notificationsTitle: 'هشدارها و رخدادهای ممیزی',
-    lanLatency: 'شبکه محلی (LAN ۴ میلی‌ثانیه)',
+    lanLatency: 'وضعیت اتصال شبکه محلی',
   },
 
   // Dynamic Translation Component
@@ -679,7 +680,7 @@ export const fa = {
   platform: {
     title: 'مرکز توزیع چندسکویی (Windows Installer, iOS PWA & Android)',
     subtitle: 'بسته‌های اجرایی مستقل برای کامپیوترهای مزرعه (ویندوز دسکتاپ آفلاین)، تبلت‌های سالن پرورش و گوشی‌های هوشمند پرسنل',
-    syncBadge: 'Offline-First LAN Sync Architecture',
+    syncBadge: 'پایگاه‌داده محلی SQLite؛ همگام‌سازی فقط در صورت اتصال معتبر',
     windowsTab: 'نسخه ویندوز (Desktop Installer .exe / .msi)',
     iosTab: 'نسخه وب‌اپلیکیشن آیفون (iOS PWA / Retina)',
     androidTab: 'نسخه اندروید (APK / AAB / Google Play)',
@@ -698,7 +699,7 @@ export const fa = {
     loginTitle: 'ورود به سامانه Fathi Aqua ERP',
     subtitle: 'Enterprise Authentication & RBAC',
     username: 'نام کاربری (Username):',
-    usernamePlaceholder: 'admin, vet, hatchery, sales, accountant...',
+    usernamePlaceholder: 'نام کاربری سازمانی',
     password: 'کلمه عبور امنیتی (Password):',
     selectLanguage: 'انتخاب زبان سیستم',
     rememberMe: 'به‌خاطر سپردن نام کاربری',
@@ -710,10 +711,14 @@ export const fa = {
     sessionActive: 'نشست امن فعال',
     auditLog: 'لاگ ممیزی امنیتی (غیرقابل ویرایش)',
     noPlaintext: 'امنیت SHA-256 + Salted Hashing',
-    demoAccountsTitle: 'حساب‌های سازمانی تست:',
+    demoAccountsTitle: 'حساب‌های سازمانی ثبت‌شده:',
     errRequired: 'نام کاربری و رمز عبور را وارد کنید.',
     errInvalidPass: 'کلمه عبور نادرست است.',
+    errRateLimited: 'تعداد تلاش‌های ناموفق زیاد است؛ بعداً دوباره تلاش کنید.',
     errServer: 'خطا در برقراری ارتباط با سرور احراز هویت.',
+    fullName: 'نام و نام خانوادگی', email: 'ایمیل', confirmPassword: 'تکرار رمز عبور',
+    bootstrapTitle: 'اولین اجرا: ساخت مدیر اصلی', bootstrapHint: 'رمز عبور باید حداقل ۱۲ نویسه داشته باشد و در این برنامه ذخیره نمی‌شود.',
+    bootstrapInvalid: 'اطلاعات مدیر یا تکرار رمز عبور معتبر نیست.', bootstrapAlreadyDone: 'راه‌اندازی مدیر قبلاً انجام شده است.', serverAuthOnly: 'احراز هویت فقط از پایگاه‌داده محلی انجام می‌شود.', createAdmin: 'ساخت مدیر و ورود',
   },
 
   // AI Assistant & Marketing
@@ -751,4 +756,3 @@ export const fa = {
     errMarketing: 'خطا در تولید محتوای تبلیغاتی. لطفاً از اتصال سرور و کلید هوش مصنوعی اطمینان حاصل فرمایید.',
   },
 };
-

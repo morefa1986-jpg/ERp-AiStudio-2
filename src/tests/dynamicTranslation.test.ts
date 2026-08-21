@@ -14,7 +14,7 @@ function createStorage() {
 function installBrowserSession(token = 'fathi_sec_test_token') {
   const localStorage = createStorage();
   const sessionStorage = createStorage();
-  localStorage.setItem('fathi_aqua_session_token', token);
+  sessionStorage.setItem('fathi_aqua_session_token', token);
   (globalThis as any).window = { localStorage, sessionStorage };
   return { localStorage, sessionStorage };
 }

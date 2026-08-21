@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   calculateFeedingRecommendation,
+  inventoryQuantityForFeedKg,
   normalizeFeedAmountToKg,
   validateFeedingSubmission,
 } from '../utils/feedingEngine';
@@ -44,6 +45,10 @@ const mockSafePond: Pond = {
   waterTemperature: 16.5,
   dissolvedOxygen: 7.2,
   ph: 7.5,
+  ammonia: 0.01,
+  nitrite: 0.05,
+  lastTelemetryTimestamp: new Date().toISOString(),
+  sensorQuality: 'VALID',
   lastBiometryDate: '2026-08-01',
   criticalAlerts: [],
 };
@@ -147,6 +152,12 @@ describe('Feeding Engine - Domain Safety & Unit Normalization', () => {
     expect(normalizeFeedAmountToKg(1, 'kg')).toBe(1);
     expect(normalizeFeedAmountToKg(1000, 'gram')).toBe(1);
     expect(normalizeFeedAmountToKg(4, 'cup250g')).toBe(1);
+  });
+
+  it('converts normalized feed consumption into the inventory unit', () => {
+    expect(inventoryQuantityForFeedKg(mockInventory[0], 2.5)).toBe(2.5);
+    expect(inventoryQuantityForFeedKg({ ...mockInventory[0], unit: 'gram', quantity: 5000 }, 2.5)).toBe(2500);
+    expect(inventoryQuantityForFeedKg({ ...mockInventory[0], unit: 'liter' as any }, 2.5)).toBe(0);
   });
 
   it('rejects unknown feed SKU and insufficient stock', () => {

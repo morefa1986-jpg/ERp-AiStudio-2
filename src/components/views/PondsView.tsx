@@ -34,6 +34,8 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
     ponds,
     halls,
     species,
+    inventory,
+    calculateRecommendedFeed,
     stopPondFeeding,
     resumePondFeeding,
     recordFeeding,
@@ -51,18 +53,18 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
   const [stopDetails, setStopDetails] = useState<string>('');
 
   const [feedModalPond, setFeedModalPond] = useState<Pond | null>(null);
-  const [feedAmountKg, setFeedAmountKg] = useState<number>(10);
-  const [feedOperator, setFeedOperator] = useState<string>(currentUser?.fullName || 'اپراتور');
+  const [feedAmountKg, setFeedAmountKg] = useState<number>(0);
+  const [feedOperator, setFeedOperator] = useState<string>(currentUser?.fullName || '');
 
   const [mortalityModalPond, setMortalityModalPond] = useState<Pond | null>(null);
-  const [mortalityCount, setMortalityCount] = useState<number>(1);
-  const [mortalityWeightKg, setMortalityWeightKg] = useState<number>(4.0);
-  const [mortalityReason, setMortalityReason] = useState<string>('عارضه طبیعی');
+  const [mortalityCount, setMortalityCount] = useState<number>(0);
+  const [mortalityWeightKg, setMortalityWeightKg] = useState<number>(0);
+  const [mortalityReason, setMortalityReason] = useState<string>('');
 
   const [transferModalPond, setTransferModalPond] = useState<Pond | null>(null);
   const [destPondId, setDestPondId] = useState<string>('');
-  const [transferCount, setTransferCount] = useState<number>(10);
-  const [transferReason, setTransferReason] = useState<string>('سورتینگ و یکنواخت‌سازی');
+  const [transferCount, setTransferCount] = useState<number>(0);
+  const [transferReason, setTransferReason] = useState<string>('');
 
   const filteredPonds = ponds.filter((p) => {
     const matchHall = selectedHall === 'all' || p.hallId === selectedHall;
@@ -84,14 +86,19 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
   const handleConfirmFeed = (e: React.FormEvent) => {
     e.preventDefault();
     if (!feedModalPond) return;
+    const feedItem = inventory.find((item) => item.category.includes('Feed') && (item.unit === 'kg' || item.unit === 'gram'));
+    if (!feedItem) {
+      alert('خوراک معتبر در انبار ثبت نشده است.');
+      return;
+    }
     const res = recordFeeding({
       pondId: feedModalPond.id,
       pondName: feedModalPond.name,
-      hallName: 'سالن پرورش',
-      speciesName: 'Huso huso',
+      hallName: halls.find((hall) => hall.id === feedModalPond.hallId)?.name || '',
+      speciesName: species.find((item) => item.id === feedModalPond.speciesId)?.enName || '',
       biomassKg: feedModalPond.biomassKg,
-      feedTypeSku: 'FEED-EXT-4.5MM',
-      feedTypeName: 'اکسترودر ۴.۵ میلی‌متر',
+      feedTypeSku: feedItem.sku,
+      feedTypeName: feedItem.name,
       recommendedAmountKg: feedAmountKg,
       actualAmountKg: feedAmountKg,
       unit: 'kg',
@@ -114,12 +121,12 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
       pondId: mortalityModalPond.id,
       pondName: mortalityModalPond.name,
       speciesId: mortalityModalPond.speciesId,
-      speciesName: 'Huso huso',
+      speciesName: species.find((item) => item.id === mortalityModalPond.speciesId)?.enName || '',
       count: mortalityCount,
       estimatedWeightKg: mortalityWeightKg,
       reason: mortalityReason,
-      description: 'سوزاندن در کوره لاشه‌سوز و ضدعفونی بستر',
-      recordedBy: currentUser?.fullName || 'دکتر دامپزشک',
+      description: mortalityReason.trim(),
+      recordedBy: currentUser?.fullName || '',
     });
     setMortalityModalPond(null);
   };
@@ -138,13 +145,13 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
       destinationId: destPond.id,
       destinationName: destPond.name,
       speciesId: transferModalPond.speciesId,
-      speciesName: 'Huso huso',
+      speciesName: species.find((item) => item.id === transferModalPond.speciesId)?.enName || '',
       fishCount: transferCount,
       averageWeightKg: transferModalPond.averageWeightKg,
       totalBiomassKg: transferCount * transferModalPond.averageWeightKg,
       reason: transferReason,
       date: new Date().toISOString().split('T')[0],
-      operator: currentUser?.fullName || 'مسئول سالن',
+      operator: currentUser?.fullName || '',
     });
 
     if (!res.success) {
@@ -253,7 +260,7 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
 
                 <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2">
                   <span>سالن: <strong className="text-slate-300">{hall?.number || 'H-01'}</strong></span>
-                  <span>گونه: <strong className="text-amber-400">{sp?.faName || 'فیل‌ماهی'}</strong></span>
+                  <span>گونه: <strong className="text-amber-400">{sp?.faName || 'ثبت نشده'}</strong></span>
                 </div>
               </div>
 
@@ -367,12 +374,14 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                 <div className="flex items-center gap-1">
                   {/* Quick Feed */}
                   <button
-                    disabled={isStopped || pond.dissolvedOxygen < 4.0}
+                    disabled={calculateRecommendedFeed(pond.id).isLocked}
                     onClick={() => {
+                      const recommendation = calculateRecommendedFeed(pond.id);
+                      if (recommendation.isLocked) return;
                       setFeedModalPond(pond);
-                      setFeedAmountKg(Math.round(pond.biomassKg * 0.009));
+                      setFeedAmountKg(recommendation.recommendedKg);
                     }}
-                    title={t('pond.quickFeed')}
+                    title={calculateRecommendedFeed(pond.id).lockReason || t('pond.quickFeed')}
                     className="p-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-amber-400 rounded-xl transition-colors cursor-pointer border border-slate-700"
                   >
                     <Utensils className="w-4 h-4" />

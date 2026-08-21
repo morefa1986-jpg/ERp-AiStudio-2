@@ -10,9 +10,13 @@ on:
       - 'src/**'
       - 'desktop/**'
       - 'server.ts'
+      - 'server/**'
       - 'package.json'
-      - 'bun.lock'
+      - 'package-lock.json'
       - 'electron-builder.yml'
+      - 'playwright.config.mjs'
+      - 'tests/**'
+      - 'vitest.config.ts'
       - '.github/workflows/windows-desktop-installer.yml'
   pull_request:
     branches:
@@ -29,33 +33,32 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.14.0'
+          cache: npm
 
       - name: Install locked application dependencies
-        run: bun install --frozen-lockfile
+        run: npm ci
 
       - name: Typecheck
-        run: bun run lint
+        run: npm run lint
 
       - name: Test
-        run: bun run test
+        run: npm test
 
       - name: Build web app and local server
-        run: bun run build
+        run: npm run build
 
-      - name: Install Windows packaging tools without changing package metadata
-        run: npm install --no-save electron electron-builder
+      - name: Install Chromium for browser smoke tests
+        run: npx playwright install chromium
+
+      - name: Browser smoke tests
+        run: npm run e2e
 
       - name: Build Windows NSIS installer
-        run: npx electron-builder --win nsis --x64 --publish never
+        run: npm run desktop:package
 
       - name: Create portable ZIP
         shell: pwsh

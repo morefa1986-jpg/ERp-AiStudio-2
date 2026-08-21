@@ -1,22 +1,26 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { getStoredSessionToken, useAuth } from './AuthContext';
 import {
   Account, AttendanceRecord, BackupSnapshot, BiometricSession, BroodstockFish, ColdStoragePallet, Customer,
   Employee, Equipment, FeedingRecord, FertilizationBatch, FishTransfer, FarmAuditLog, Hall, IncubatorUnit,
   InventoryItem, InventoryTransaction, JournalEntry, LabSample, LarvalBatch, MortalityRecord, NurseryTank,
-  PayrollRecord, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost, SturgeonSpecies, TreatmentRecord,
-  WaterQualityLog,
+  PayrollRecord, PermissionAction, PermissionModule, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost,
+  SturgeonSpecies, TreatmentRecord, WaterQualityLog,
 } from '../types';
 import {
-  INITIAL_ACCOUNTS, INITIAL_AUDIT_LOGS, INITIAL_BROODSTOCK, INITIAL_COLD_STORAGE, INITIAL_CUSTOMERS,
-  INITIAL_EQUIPMENT, INITIAL_FERTILIZATIONS, INITIAL_HALLS, INITIAL_INCUBATORS, INITIAL_INVENTORY,
-  INITIAL_INVENTORY_TXS, INITIAL_JOURNALS, INITIAL_LARVAE, INITIAL_PONDS, INITIAL_PROCESSING_BATCHES,
-  INITIAL_PROFORMAS, INITIAL_SPECIES, INITIAL_EMPLOYEES,
+  INITIAL_ACCOUNTS, INITIAL_BROODSTOCK, INITIAL_COLD_STORAGE, INITIAL_CUSTOMERS, INITIAL_EQUIPMENT,
+  INITIAL_FERTILIZATIONS, INITIAL_HALLS, INITIAL_INCUBATORS, INITIAL_INVENTORY, INITIAL_INVENTORY_TXS,
+  INITIAL_JOURNALS, INITIAL_LARVAE, INITIAL_PONDS, INITIAL_PROCESSING_BATCHES, INITIAL_PROFORMAS,
+  INITIAL_SPECIES, INITIAL_EMPLOYEES,
 } from '../data/initialData';
-import { BACKUP_SCHEMA_VERSION, checksumBackupData, validateBackupDocument } from '../utils/backupEngine';
+import { BACKUP_SCHEMA_VERSION, checksumBackupData, decryptBackupDocument, encryptBackupDocument, EncryptedBackupEnvelope, validateBackupDocument } from '../utils/backupEngine';
 import { validateAndExecuteJournalEntry } from '../utils/accountingEngine';
-import { calculateFeedingRecommendation, validateFeedingSubmission } from '../utils/feedingEngine';
+import { calculateFeedingRecommendation, inventoryQuantityForFeedKg, validateFeedingSubmission } from '../utils/feedingEngine';
 import { assessWaterSafetyForFeeding } from '../utils/sensorValidation';
 import { executeAtomicFishTransfer } from '../utils/transferEngine';
+import { executeAtomicProcessing } from '../utils/processingEngine';
+import { fulfillProforma } from '../utils/salesEngine';
+import { nextId } from '../utils/id';
 
 export interface FeedingRecommendationResult {
   recommendedKg: number;
@@ -51,15 +55,16 @@ interface FarmContextType {
   recordTreatment: (treatment: Omit<TreatmentRecord, 'id'>) => void;
   executeAtomicTransfer: (transferData: Omit<FishTransfer, 'id' | 'status'>) => { success: boolean; error?: string };
   addInventoryTransaction: (tx: Omit<InventoryTransaction, 'id' | 'timestamp' | 'resultingQuantity'>) => void;
-  createProcessingBatch: (batch: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>) => void;
+  createProcessingBatch: (batch: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>) => { success: boolean; error?: string };
   createProformaInvoice: (proforma: Omit<ProformaInvoice, 'id' | 'subtotal' | 'grandTotal'>) => void;
   updateProformaStage: (id: string, newStage: ProformaInvoice['stage']) => void;
   createJournalEntry: (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>) => { success: boolean; error?: string };
   clockAttendance: (employeeId: string, type: 'in' | 'out', shift: AttendanceRecord['shift']) => void;
   generateMonthlyPayroll: (monthString: string) => void;
-  createAuditLog: (action: string, entity: string, entityId: string, details: string, beforeState?: string, afterState?: string) => void;
+  createAuditLog: (action: string, entity: string, entityId: string, details: string, beforeState?: string, afterState?: string, transactionId?: string) => void;
   createBackupSnapshot: (type?: BackupSnapshot['type']) => BackupSnapshot;
-  restoreFromSnapshotJson: (jsonString: string) => { success: boolean; message: string };
+  createEncryptedBackup: (passphrase: string) => Promise<EncryptedBackupEnvelope>;
+  restoreFromSnapshotJson: (jsonString: string, passphrase?: string) => Promise<{ success: boolean; message: string }>;
   addBroodstock: (fish: Omit<BroodstockFish, 'id'>) => void;
   recordFertilization: (fert: Omit<FertilizationBatch, 'id' | 'fertilizationTimestamp' | 'status'>) => void;
   addCustomer: (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => void;
@@ -67,66 +72,172 @@ interface FarmContextType {
 }
 
 const FarmContext = createContext<FarmContextType | null>(null);
-const ROOT_STORAGE_KEY = 'fathi_erp_state_v2';
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
+const EMPTY_ARRAY = <T,>(): T[] => [];
 
-function loadRoot(): Record<string, any> {
-  try { const raw = localStorage.getItem(ROOT_STORAGE_KEY); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+function demoPonds(): Pond[] {
+  return INITIAL_PONDS.map((pond) => pond.feedingStatus === 'ACTIVE'
+    ? { ...pond, feedingStatus: 'STOPPED', stopFeedingReason: 'Manual Decision', stopFeedingDetails: 'داده نمایشی؛ تا ثبت تله‌متری معتبر تغذیه متوقف است.' }
+    : { ...pond });
 }
-function loadCollection<T>(name: string, legacyKey: string, fallback: T): T {
-  try {
-    const root = loadRoot();
-    if (root && root[name] !== undefined) return root[name] as T;
-    const legacy = localStorage.getItem(legacyKey);
-    return legacy ? JSON.parse(legacy) as T : fallback;
-  } catch { return fallback; }
-}
-function nextId(prefix: string): string { return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`; }
+
 function inventoryStatus(item: InventoryItem, quantity: number): InventoryItem['status'] {
   if (item.expiryDate && new Date(item.expiryDate).getTime() < Date.now()) return 'Expired';
   if (quantity <= item.minimumStockThreshold) return 'Critical Low';
   if (quantity <= item.reorderLevel) return 'Low Stock';
   return 'Adequate';
 }
-function stripBackupData(snapshot: BackupSnapshot): BackupSnapshot { const { data: _data, ...metadata } = snapshot; return metadata; }
+
+function stripBackupData(snapshot: BackupSnapshot): BackupSnapshot {
+  const { data: _data, ...metadata } = snapshot;
+  return metadata;
+}
+
+type StateOperation = { module: PermissionModule; action: PermissionAction; entity?: string; entityId?: string; referenceId?: string; transactionId?: string };
 
 export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [halls, setHalls] = useState<Hall[]>(() => loadCollection('halls', 'fathi_halls', INITIAL_HALLS));
-  const [ponds, setPonds] = useState<Pond[]>(() => loadCollection('ponds', 'fathi_ponds', INITIAL_PONDS));
-  const [species, setSpecies] = useState<SturgeonSpecies[]>(() => loadCollection('species', 'fathi_species', INITIAL_SPECIES));
-  const [feedingRecords, setFeedingRecords] = useState<FeedingRecord[]>(() => loadCollection('feedingRecords', 'fathi_feeding', []));
-  const [biometricSessions, setBiometricSessions] = useState<BiometricSession[]>(() => loadCollection('biometricSessions', 'fathi_biometrics', []));
-  const [waterLogs, setWaterLogs] = useState<WaterQualityLog[]>(() => loadCollection('waterLogs', 'fathi_water', []));
-  const [mortalityRecords, setMortalityRecords] = useState<MortalityRecord[]>(() => loadCollection('mortalityRecords', 'fathi_mortality', []));
-  const [treatments, setTreatments] = useState<TreatmentRecord[]>(() => loadCollection('treatments', 'fathi_treatments', []));
-  const [transfers, setTransfers] = useState<FishTransfer[]>(() => loadCollection('transfers', 'fathi_transfers', []));
-  const [broodstock, setBroodstock] = useState<BroodstockFish[]>(() => loadCollection('broodstock', 'fathi_broodstock', INITIAL_BROODSTOCK));
-  const [fertilizations, setFertilizations] = useState<FertilizationBatch[]>(() => loadCollection('fertilizations', 'fathi_fert', INITIAL_FERTILIZATIONS));
-  const [incubators, setIncubators] = useState<IncubatorUnit[]>(() => loadCollection('incubators', 'fathi_incubators', INITIAL_INCUBATORS));
-  const [larvae, setLarvae] = useState<LarvalBatch[]>(() => loadCollection('larvae', 'fathi_larvae', INITIAL_LARVAE));
-  const [nurseryTanks, setNurseryTanks] = useState<NurseryTank[]>(() => loadCollection('nurseryTanks', 'fathi_nursery', []));
-  const [inventory, setInventory] = useState<InventoryItem[]>(() => loadCollection('inventory', 'fathi_inventory', INITIAL_INVENTORY));
-  const [inventoryTxs, setInventoryTxs] = useState<InventoryTransaction[]>(() => loadCollection('inventoryTxs', 'fathi_inv_txs', INITIAL_INVENTORY_TXS));
-  const [labSamples, setLabSamples] = useState<LabSample[]>(() => loadCollection('labSamples', 'fathi_lab', []));
-  const [processingBatches, setProcessingBatches] = useState<ProcessingBatch[]>(() => loadCollection('processingBatches', 'fathi_processing', INITIAL_PROCESSING_BATCHES));
-  const [coldStorage, setColdStorage] = useState<ColdStoragePallet[]>(() => loadCollection('coldStorage', 'fathi_cold_storage', INITIAL_COLD_STORAGE));
-  const [customers, setCustomers] = useState<Customer[]>(() => loadCollection('customers', 'fathi_customers', INITIAL_CUSTOMERS));
-  const [proformas, setProformas] = useState<ProformaInvoice[]>(() => loadCollection('proformas', 'fathi_proformas', INITIAL_PROFORMAS));
-  const [accounts, setAccounts] = useState<Account[]>(() => loadCollection('accounts', 'fathi_accounts', INITIAL_ACCOUNTS));
-  const [journals, setJournals] = useState<JournalEntry[]>(() => loadCollection('journals', 'fathi_journals', INITIAL_JOURNALS));
-  const [employees, setEmployees] = useState<Employee[]>(() => loadCollection('employees', 'fathi_employees', INITIAL_EMPLOYEES));
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => loadCollection('attendance', 'fathi_attendance', []));
-  const [payrolls, setPayrolls] = useState<PayrollRecord[]>(() => loadCollection('payrolls', 'fathi_payrolls', []));
-  const [equipment, setEquipment] = useState<Equipment[]>(() => loadCollection('equipment', 'fathi_equipment', INITIAL_EQUIPMENT));
-  const [socialPosts, setSocialPosts] = useState<SocialMediaPost[]>(() => loadCollection('socialPosts', 'fathi_social', []));
-  const [auditLogs, setAuditLogs] = useState<FarmAuditLog[]>(() => loadCollection('auditLogs', 'fathi_audit', INITIAL_AUDIT_LOGS));
-  const [backups, setBackups] = useState<BackupSnapshot[]>(() => loadCollection('backups', 'fathi_backups', []));
+  const { currentUser, hasPermission } = useAuth();
+  const [halls, setHalls] = useState<Hall[]>(() => DEMO_MODE ? INITIAL_HALLS : EMPTY_ARRAY<Hall>());
+  const [ponds, setPonds] = useState<Pond[]>(() => DEMO_MODE ? demoPonds() : EMPTY_ARRAY<Pond>());
+  const [species, setSpecies] = useState<SturgeonSpecies[]>(() => DEMO_MODE ? INITIAL_SPECIES : EMPTY_ARRAY<SturgeonSpecies>());
+  const [feedingRecords, setFeedingRecords] = useState<FeedingRecord[]>(EMPTY_ARRAY);
+  const [biometricSessions, setBiometricSessions] = useState<BiometricSession[]>(EMPTY_ARRAY);
+  const [waterLogs, setWaterLogs] = useState<WaterQualityLog[]>(EMPTY_ARRAY);
+  const [mortalityRecords, setMortalityRecords] = useState<MortalityRecord[]>(EMPTY_ARRAY);
+  const [treatments, setTreatments] = useState<TreatmentRecord[]>(EMPTY_ARRAY);
+  const [transfers, setTransfers] = useState<FishTransfer[]>(EMPTY_ARRAY);
+  const [broodstock, setBroodstock] = useState<BroodstockFish[]>(() => DEMO_MODE ? INITIAL_BROODSTOCK : EMPTY_ARRAY<BroodstockFish>());
+  const [fertilizations, setFertilizations] = useState<FertilizationBatch[]>(() => DEMO_MODE ? INITIAL_FERTILIZATIONS : EMPTY_ARRAY<FertilizationBatch>());
+  const [incubators, setIncubators] = useState<IncubatorUnit[]>(() => DEMO_MODE ? INITIAL_INCUBATORS : EMPTY_ARRAY<IncubatorUnit>());
+  const [larvae, setLarvae] = useState<LarvalBatch[]>(() => DEMO_MODE ? INITIAL_LARVAE : EMPTY_ARRAY<LarvalBatch>());
+  const [nurseryTanks, setNurseryTanks] = useState<NurseryTank[]>(EMPTY_ARRAY);
+  const [inventory, setInventory] = useState<InventoryItem[]>(() => DEMO_MODE ? INITIAL_INVENTORY : EMPTY_ARRAY<InventoryItem>());
+  const [inventoryTxs, setInventoryTxs] = useState<InventoryTransaction[]>(() => DEMO_MODE ? INITIAL_INVENTORY_TXS : EMPTY_ARRAY<InventoryTransaction>());
+  const [labSamples, setLabSamples] = useState<LabSample[]>(EMPTY_ARRAY);
+  const [processingBatches, setProcessingBatches] = useState<ProcessingBatch[]>(() => DEMO_MODE ? INITIAL_PROCESSING_BATCHES : EMPTY_ARRAY<ProcessingBatch>());
+  const [coldStorage, setColdStorage] = useState<ColdStoragePallet[]>(() => DEMO_MODE ? INITIAL_COLD_STORAGE : EMPTY_ARRAY<ColdStoragePallet>());
+  const [customers, setCustomers] = useState<Customer[]>(() => DEMO_MODE ? INITIAL_CUSTOMERS : EMPTY_ARRAY<Customer>());
+  const [proformas, setProformas] = useState<ProformaInvoice[]>(() => DEMO_MODE ? INITIAL_PROFORMAS : EMPTY_ARRAY<ProformaInvoice>());
+  const [accounts, setAccounts] = useState<Account[]>(() => DEMO_MODE ? INITIAL_ACCOUNTS : EMPTY_ARRAY<Account>());
+  const [journals, setJournals] = useState<JournalEntry[]>(() => DEMO_MODE ? INITIAL_JOURNALS : EMPTY_ARRAY<JournalEntry>());
+  const [employees, setEmployees] = useState<Employee[]>(() => DEMO_MODE ? INITIAL_EMPLOYEES : EMPTY_ARRAY<Employee>());
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(EMPTY_ARRAY);
+  const [payrolls, setPayrolls] = useState<PayrollRecord[]>(EMPTY_ARRAY);
+  const [equipment, setEquipment] = useState<Equipment[]>(() => DEMO_MODE ? INITIAL_EQUIPMENT : EMPTY_ARRAY<Equipment>());
+  const [socialPosts, setSocialPosts] = useState<SocialMediaPost[]>(EMPTY_ARRAY);
+  const [auditLogs, setAuditLogs] = useState<FarmAuditLog[]>(EMPTY_ARRAY);
+  const [backups, setBackups] = useState<BackupSnapshot[]>(EMPTY_ARRAY);
   const [syncStatus, setSyncStatus] = useState<OfflineSyncStatus>({ status: 'OFFLINE', pendingChangesCount: 0, lastSyncTimestamp: '' });
+  const [stateReady, setStateReady] = useState(false);
+  const [serverVersion, setServerVersion] = useState<number | null>(null);
+  const pendingOperation = useRef<StateOperation | null>(null);
+  const persistenceInFlight = useRef(false);
+  const failedRevision = useRef<number | null>(null);
+  const revision = useRef(0);
+
+  const stateData = useMemo<Record<string, unknown>>(() => ({
+    halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers,
+    broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples,
+    processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls,
+    equipment, socialPosts, auditLogs, backups: backups.map(stripBackupData),
+  }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups]);
+
+  const applyState = (data: Record<string, unknown>, serverAudit: FarmAuditLog[] = []) => {
+    const rows = <T,>(key: string): T[] => Array.isArray(data[key]) ? data[key] as T[] : [];
+    const loadedWaterLogs = rows<WaterQualityLog>('waterLogs');
+    const loadedPonds = rows<Pond>('ponds').map((pond) => {
+      const latest = loadedWaterLogs.filter((log) => log.pondId === pond.id).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+      return latest ? { ...pond, dissolvedOxygen: latest.dissolvedOxygen, waterTemperature: latest.temperature, ph: latest.ph, ammonia: latest.ammonia, nitrite: latest.nitrite, lastTelemetryTimestamp: latest.timestamp, sensorQuality: latest.sensorStatus } : pond;
+    });
+    setHalls(rows<Hall>('halls')); setPonds(loadedPonds); setSpecies(rows<SturgeonSpecies>('species'));
+    setFeedingRecords(rows<FeedingRecord>('feedingRecords')); setBiometricSessions(rows<BiometricSession>('biometricSessions'));
+    setWaterLogs(loadedWaterLogs); setMortalityRecords(rows<MortalityRecord>('mortalityRecords'));
+    setTreatments(rows<TreatmentRecord>('treatments')); setTransfers(rows<FishTransfer>('transfers'));
+    setBroodstock(rows<BroodstockFish>('broodstock')); setFertilizations(rows<FertilizationBatch>('fertilizations'));
+    setIncubators(rows<IncubatorUnit>('incubators')); setLarvae(rows<LarvalBatch>('larvae')); setNurseryTanks(rows<NurseryTank>('nurseryTanks'));
+    setInventory(rows<InventoryItem>('inventory')); setInventoryTxs(rows<InventoryTransaction>('inventoryTxs')); setLabSamples(rows<LabSample>('labSamples'));
+    setProcessingBatches(rows<ProcessingBatch>('processingBatches')); setColdStorage(rows<ColdStoragePallet>('coldStorage'));
+    setCustomers(rows<Customer>('customers')); setProformas(rows<ProformaInvoice>('proformas')); setAccounts(rows<Account>('accounts'));
+    setJournals(rows<JournalEntry>('journals')); setEmployees(rows<Employee>('employees')); setAttendance(rows<AttendanceRecord>('attendance'));
+    setPayrolls(rows<PayrollRecord>('payrolls')); setEquipment(rows<Equipment>('equipment')); setSocialPosts(rows<SocialMediaPost>('socialPosts'));
+    const mappedServerAudit = serverAudit.map((log: any): FarmAuditLog => ({
+      id: String(log.id), timestamp: String(log.timestamp), userId: String(log.userId || ''), userName: String(log.userName || log.userId || '—'),
+      userRole: String(log.userRole || '—'), action: String(log.action || '—'), entity: String(log.entity || '—'), entityId: String(log.entityId || '—'),
+      details: `${String(log.action || '—')} ${String(log.entity || '—')}`, beforeState: log.beforeState, afterState: log.afterState,
+      referenceId: log.referenceId, transactionId: log.transactionId, ipAddress: log.ipAddress, deviceId: log.deviceId,
+    }));
+    setAuditLogs(mappedServerAudit.length ? mappedServerAudit : rows<FarmAuditLog>('auditLogs')); setBackups(rows<BackupSnapshot>('backups'));
+  };
 
   useEffect(() => {
-    try {
-      localStorage.setItem(ROOT_STORAGE_KEY, JSON.stringify({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups: backups.map(stripBackupData) }));
-    } catch { setSyncStatus((previous) => ({ ...previous, status: 'ERROR' })); }
-  }, [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups]);
+    let cancelled = false;
+    setStateReady(false);
+    if (!currentUser) {
+      setServerVersion(null);
+      pendingOperation.current = null;
+      revision.current += 1;
+      setSyncStatus({ status: 'OFFLINE', pendingChangesCount: 0, lastSyncTimestamp: '' });
+      return () => { cancelled = true; };
+    }
+    const token = getStoredSessionToken();
+    if (!token) return () => { cancelled = true; };
+    const load = async () => {
+      setSyncStatus((previous) => ({ ...previous, status: 'SYNCING' }));
+      try {
+        const response = await fetch('/api/state', { headers: { Authorization: `Bearer ${token}` } });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.success) throw new Error(payload.error || 'STATE_LOAD_FAILED');
+        if (cancelled) return;
+        if (payload.state?.data) {
+          applyState(payload.state.data, Array.isArray(payload.auditLogs) ? payload.auditLogs : []);
+          setServerVersion(Number(payload.state.version));
+        } else {
+          setServerVersion(null);
+          pendingOperation.current = { module: 'settings', action: 'manage', entity: 'StateInitialization', entityId: 'state' };
+          revision.current += 1;
+          setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: previous.pendingChangesCount + 1 }));
+        }
+        setStateReady(true);
+        setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', lastSyncTimestamp: new Date().toISOString() }));
+      } catch {
+        if (!cancelled) {
+          setStateReady(true);
+          setSyncStatus((previous) => ({ ...previous, status: 'ERROR' }));
+        }
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!stateReady || !currentUser || !pendingOperation.current || persistenceInFlight.current) return;
+    const operation = pendingOperation.current;
+    pendingOperation.current = null;
+    const token = getStoredSessionToken();
+    if (!token) return;
+    const requestRevision = revision.current;
+    if (failedRevision.current === requestRevision) return;
+    persistenceInFlight.current = true;
+    setSyncStatus((previous) => ({ ...previous, status: 'SYNCING' }));
+    fetch('/api/state', { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: stateData, version: serverVersion, operation }) })
+      .then(async (response) => ({ response, payload: await response.json().catch(() => ({})) }))
+      .then(({ response, payload }) => {
+        if (!response.ok || !payload.success) {
+          failedRevision.current = requestRevision;
+          setSyncStatus((previous) => ({ ...previous, status: response.status === 409 ? 'ERROR' : 'OFFLINE' }));
+          return;
+        }
+        setServerVersion(Number(payload.state.version));
+        failedRevision.current = null;
+        setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', pendingChangesCount: 0, lastSyncTimestamp: new Date().toISOString() }));
+      })
+      .catch(() => {
+        failedRevision.current = requestRevision;
+        setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE' }));
+      })
+      .finally(() => { persistenceInFlight.current = false; });
+  }, [stateData, stateReady, currentUser?.id, serverVersion, syncStatus.pendingChangesCount]);
 
   useEffect(() => {
     setHalls((previous) => previous.map((hall) => {
@@ -136,148 +247,242 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }));
   }, [ponds]);
 
-  const markLocalChange = () => setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: previous.pendingChangesCount + 1 }));
-  const createAuditLog = (action: string, entity: string, entityId: string, details: string, beforeState?: string, afterState?: string) => {
-    const log: FarmAuditLog = { id: nextId('audit'), timestamp: new Date().toISOString(), userId: 'local-session', userName: 'Local Operator', userRole: 'Authenticated Session', action, entity, entityId, details, beforeState, afterState };
+  const can = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean =>
+    stateReady && syncStatus.status !== 'OFFLINE' && syncStatus.status !== 'ERROR' && hasPermission(module, action, scopeId);
+  const markLocalChange = (operation: StateOperation) => {
+    pendingOperation.current = operation;
+    revision.current += 1;
+    failedRevision.current = null;
+    setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: previous.pendingChangesCount + 1 }));
+  };
+  const createAuditLog = (action: string, entity: string, entityId: string, details: string, beforeState?: string, afterState?: string, transactionId?: string) => {
+    if (!currentUser) return;
+    const log: FarmAuditLog = { id: nextId('audit'), timestamp: new Date().toISOString(), userId: currentUser.id, userName: currentUser.fullName, userRole: currentUser.role, action, entity, entityId, details, beforeState, afterState, transactionId };
     setAuditLogs((previous) => [log, ...previous].slice(0, 1000));
   };
-  const latestWaterTimestamp = (pondId: string): string | undefined => waterLogs.filter((log) => log.pondId === pondId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0]?.timestamp;
+
+  const latestWaterLog = (pondId: string): WaterQualityLog | undefined => waterLogs.filter((log) => log.pondId === pondId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+  const authoritativePond = (pond: Pond): Pond => {
+    const log = latestWaterLog(pond.id);
+    return { ...pond, dissolvedOxygen: log?.dissolvedOxygen ?? pond.dissolvedOxygen, waterTemperature: log?.temperature ?? pond.waterTemperature, ph: log?.ph ?? pond.ph, ammonia: log?.ammonia, nitrite: log?.nitrite, lastTelemetryTimestamp: log?.timestamp, sensorQuality: log?.sensorStatus };
+  };
 
   const calculateRecommendedFeed = (pondId: string): FeedingRecommendationResult => {
     const pond = ponds.find((item) => item.id === pondId);
     const activeTreatment = pond?.activeTreatmentId ? treatments.find((item) => item.id === pond.activeTreatmentId && item.status === 'ACTIVE') : undefined;
-    const base = calculateFeedingRecommendation(pond, species, activeTreatment);
-    if (!pond || base.isLocked) return base;
-    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: pond.dissolvedOxygen, waterTemperature: pond.waterTemperature, ph: pond.ph, timestamp: latestWaterTimestamp(pond.id) });
-    if (!safety.isSafeForFeeding) return { recommendedKg: 0, isLocked: true, lockReason: safety.feedingProhibitionReason, waterSafety: { isSafe: false, doStatus: safety.doStatus.status, tempStatus: safety.tempStatus.status } };
-    return base;
+    return calculateFeedingRecommendation(pond ? authoritativePond(pond) : undefined, species, activeTreatment);
   };
 
   const recordFeeding = (recordData: Omit<FeedingRecord, 'id' | 'timestamp'>): { success: boolean; error?: string } => {
+    if (!can('feeding', 'create', recordData.pondId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const pond = ponds.find((item) => item.id === recordData.pondId);
-    if (!pond) return { success: false, error: 'استخر یافت نشد.' };
-    const recommendation = calculateRecommendedFeed(recordData.pondId);
-    if (recommendation.isLocked) return { success: false, error: recommendation.lockReason || 'تغذیه قفل است.' };
-    const validation = validateFeedingSubmission(recordData, pond, inventory);
-    if (!validation.success || !validation.feedItem) return { success: false, error: validation.error || 'اعتبارسنجی خوراک ناموفق بود.' };
+    if (!pond) return { success: false, error: 'POND_NOT_FOUND' };
+    const validatedPond = authoritativePond(pond);
+    const recommendation = calculateFeedingRecommendation(validatedPond, species, validatedPond.activeTreatmentId ? treatments.find((item) => item.id === validatedPond.activeTreatmentId && item.status === 'ACTIVE') : undefined);
+    if (recommendation.isLocked) return { success: false, error: recommendation.lockReason || 'FEEDING_LOCKED' };
+    const validation = validateFeedingSubmission(recordData, validatedPond, inventory);
+    if (!validation.success || !validation.feedItem) return { success: false, error: validation.error || 'FEEDING_VALIDATION_FAILED' };
     const amountKg = validation.normalizedAmountKg;
     const feedItem = validation.feedItem;
-    const resultingQuantity = Number((feedItem.quantity - amountKg).toFixed(4));
-    if (resultingQuantity < 0) return { success: false, error: 'موجودی خوراک کافی نیست.' };
+    const inventoryAmount = inventoryQuantityForFeedKg(feedItem, amountKg);
+    if (inventoryAmount <= 0) return { success: false, error: 'FEED_UNIT_UNSUPPORTED' };
+    const quantityChange = -inventoryAmount;
+    const resultingQuantity = Number((feedItem.quantity + quantityChange).toFixed(4));
+    if (resultingQuantity < 0) return { success: false, error: 'INSUFFICIENT_FEED_STOCK' };
     const timestamp = new Date().toISOString();
-    const newRecord: FeedingRecord = { ...recordData, id: nextId('feed'), timestamp, actualAmountKg: amountKg, unit: 'kg', dissolvedOxygen: pond.dissolvedOxygen, waterTemperature: pond.waterTemperature, feedingStatus: 'ACTIVE' };
-    const tx: InventoryTransaction = { id: nextId('invtx'), itemId: feedItem.id, itemName: feedItem.name, sku: feedItem.sku, type: 'Consumption (مصرف روزانه)', quantityChange: -amountKg, resultingQuantity, unit: feedItem.unit, unitPrice: feedItem.purchasePricePerUnit, totalValue: Number((amountKg * feedItem.purchasePricePerUnit).toFixed(2)), referenceDoc: newRecord.id, pondId: pond.id, operator: recordData.operatorName, timestamp, notes: 'Feeding consumption' };
+    const newRecord: FeedingRecord = { ...recordData, id: nextId('feed'), timestamp, actualAmountKg: amountKg, unit: 'kg', dissolvedOxygen: validatedPond.dissolvedOxygen, waterTemperature: validatedPond.waterTemperature, telemetryTimestamp: validatedPond.lastTelemetryTimestamp, feedingStatus: 'ACTIVE' };
+    const tx: InventoryTransaction = { id: nextId('invtx'), itemId: feedItem.id, itemName: feedItem.name, sku: feedItem.sku, type: 'Consumption (مصرف روزانه)', quantityChange, resultingQuantity, unit: feedItem.unit, unitPrice: feedItem.purchasePricePerUnit, totalValue: Number((amountKg * feedItem.purchasePricePerUnit).toFixed(2)), referenceDoc: newRecord.id, pondId: pond.id, operator: currentUser?.fullName || recordData.operatorName, timestamp, notes: 'Feeding consumption' };
     setInventory((previous) => previous.map((item) => item.id === feedItem.id ? { ...item, quantity: resultingQuantity, status: inventoryStatus(item, resultingQuantity) } : item));
-    setInventoryTxs((previous) => [tx, ...previous]);
-    setFeedingRecords((previous) => [newRecord, ...previous]);
+    setInventoryTxs((previous) => [tx, ...previous]); setFeedingRecords((previous) => [newRecord, ...previous]);
     setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, lastFeedingKg: amountKg, lastFeedingTime: timestamp } : item));
-    createAuditLog('CREATE', 'FeedingRecord', newRecord.id, `Feeding ${amountKg} kg registered for ${pond.name}`); markLocalChange();
+    createAuditLog('CREATE', 'FeedingRecord', newRecord.id, `Feeding ${amountKg} kg registered for ${pond.name}`);
+    markLocalChange({ module: 'feeding', action: 'create', entity: 'FeedingRecord', entityId: newRecord.id, referenceId: newRecord.id });
     return { success: true };
   };
 
   const stopPondFeeding = (pondId: string, reason: Pond['stopFeedingReason'], details: string, operator: string) => {
+    if (!can('feeding', 'edit', pondId)) return;
+    const pond = ponds.find((item) => item.id === pondId); if (!pond) return;
     const timestamp = new Date().toISOString();
-    setPonds((previous) => previous.map((pond) => pond.id === pondId ? { ...pond, feedingStatus: 'STOPPED', stopFeedingReason: reason || 'Other', stopFeedingDetails: details.trim(), stopFeedingTimestamp: timestamp, stopFeedingUser: operator } : pond));
-    createAuditLog('UPDATE', 'Pond', pondId, `Feeding stopped: ${reason || 'Other'} - ${details}`); markLocalChange();
+    setPonds((previous) => previous.map((item) => item.id === pondId ? { ...item, feedingStatus: 'STOPPED', stopFeedingReason: reason || 'Other', stopFeedingDetails: details.trim(), stopFeedingTimestamp: timestamp, stopFeedingUser: currentUser?.fullName || operator } : item));
+    createAuditLog('UPDATE', 'Pond', pondId, `Feeding stopped: ${reason || 'Other'} - ${details}`); markLocalChange({ module: 'feeding', action: 'edit', entity: 'Pond', entityId: pondId });
   };
 
   const resumePondFeeding = (pondId: string, operator: string): { success: boolean; error?: string } => {
-    const pond = ponds.find((item) => item.id === pondId);
-    if (!pond) return { success: false, error: 'استخر یافت نشد.' };
-    if (pond.activeTreatmentId && treatments.some((treatment) => treatment.id === pond.activeTreatmentId && treatment.status === 'ACTIVE')) return { success: false, error: 'درمان فعال است؛ تغذیه قابل وصل نیست.' };
-    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: pond.dissolvedOxygen, waterTemperature: pond.waterTemperature, ph: pond.ph, timestamp: latestWaterTimestamp(pond.id) });
-    if (!safety.isSafeForFeeding) return { success: false, error: safety.feedingProhibitionReason || 'کیفیت آب ایمن نیست.' };
-    setPonds((previous) => previous.map((item) => item.id === pondId ? { ...item, feedingStatus: 'ACTIVE', stopFeedingReason: undefined, stopFeedingDetails: undefined, stopFeedingTimestamp: undefined, stopFeedingUser: operator } : item));
-    createAuditLog('UPDATE', 'Pond', pondId, 'Feeding resumed after safety validation'); markLocalChange(); return { success: true };
+    if (!can('feeding', 'approve', pondId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const pond = ponds.find((item) => item.id === pondId); if (!pond) return { success: false, error: 'POND_NOT_FOUND' };
+    if (pond.activeTreatmentId && treatments.some((treatment) => treatment.id === pond.activeTreatmentId && treatment.status === 'ACTIVE')) return { success: false, error: 'ACTIVE_TREATMENT' };
+    // The recommendation engine correctly refuses a STOPPED pond. For a resume
+    // decision, evaluate only the water/treatment gates with a temporary active
+    // status, then apply the explicit approval below.
+    const safety = calculateFeedingRecommendation({ ...authoritativePond(pond), feedingStatus: 'ACTIVE' }, species, undefined);
+    if (safety.isLocked) return { success: false, error: safety.lockReason || 'WATER_UNSAFE' };
+    setPonds((previous) => previous.map((item) => item.id === pondId ? { ...item, feedingStatus: 'ACTIVE', stopFeedingReason: undefined, stopFeedingDetails: undefined, stopFeedingTimestamp: undefined, stopFeedingUser: currentUser?.fullName || operator } : item));
+    createAuditLog('APPROVE', 'Pond', pondId, 'Feeding resumed after safety validation'); markLocalChange({ module: 'feeding', action: 'approve', entity: 'Pond', entityId: pondId }); return { success: true };
   };
 
   const recordMortality = (record: Omit<MortalityRecord, 'id' | 'timestamp'>) => {
+    if (!can('mortality', 'create', record.pondId)) return;
     const pond = ponds.find((item) => item.id === record.pondId);
-    if (!pond || !Number.isInteger(record.count) || record.count <= 0 || record.count > pond.fishCount || !Number.isFinite(record.estimatedWeightKg) || record.estimatedWeightKg < 0 || record.estimatedWeightKg > pond.biomassKg) { createAuditLog('REJECT', 'MortalityRecord', record.pondId, 'Invalid mortality transaction rejected'); return; }
+    if (!pond || !Number.isInteger(record.count) || record.count <= 0 || record.count > pond.fishCount || !Number.isFinite(record.estimatedWeightKg) || record.estimatedWeightKg < 0 || record.estimatedWeightKg > pond.biomassKg) return;
     const newRecord: MortalityRecord = { ...record, id: nextId('mort'), timestamp: new Date().toISOString() };
     const newCount = pond.fishCount - record.count; const newBiomass = Number((pond.biomassKg - record.estimatedWeightKg).toFixed(2));
-    setMortalityRecords((previous) => [newRecord, ...previous]);
-    setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, fishCount: newCount, biomassKg: newBiomass, averageWeightKg: newCount > 0 ? Number((newBiomass / newCount).toFixed(3)) : 0, dailyMortalityCount: item.dailyMortalityCount + record.count } : item));
-    createAuditLog('CREATE', 'MortalityRecord', newRecord.id, `${record.count} mortality recorded in ${pond.name}`); markLocalChange();
+    setMortalityRecords((previous) => [newRecord, ...previous]); setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, fishCount: newCount, biomassKg: newBiomass, averageWeightKg: newCount > 0 ? Number((newBiomass / newCount).toFixed(3)) : 0, dailyMortalityCount: item.dailyMortalityCount + record.count } : item));
+    createAuditLog('CREATE', 'MortalityRecord', newRecord.id, `${record.count} mortality recorded in ${pond.name}`); markLocalChange({ module: 'mortality', action: 'create', entity: 'MortalityRecord', entityId: newRecord.id });
   };
 
   const recordBiometry = (session: Omit<BiometricSession, 'id' | 'averageWeightKg' | 'minWeightKg' | 'maxWeightKg' | 'estimatedBiomassKg' | 'estimatedCount' | 'growthRateKgPerDay' | 'sgr'>) => {
+    if (!can('biometrics', 'create', session.pondId)) return;
     const pond = ponds.find((item) => item.id === session.pondId); const validSamples = session.samples.filter((sample) => Number.isFinite(sample.weightKg) && sample.weightKg > 0); if (!pond || !validSamples.length) return;
     const weights = validSamples.map((sample) => sample.weightKg); const average = weights.reduce((sum, value) => sum + value, 0) / weights.length;
     const previousSession = biometricSessions.filter((item) => item.pondId === pond.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
     const previousAverage = previousSession?.averageWeightKg || pond.averageWeightKg || average; const previousDate = previousSession?.date || pond.lastBiometryDate;
     const days = Math.max(1, Math.round((new Date(session.date).getTime() - new Date(previousDate).getTime()) / 86_400_000)); const growthRate = (average - previousAverage) / days; const sgr = previousAverage > 0 ? (Math.log(average / previousAverage) / days) * 100 : 0; const estimatedBiomass = Number((pond.fishCount * average).toFixed(2));
     const newSession: BiometricSession = { ...session, id: nextId('bio'), sampleCount: validSamples.length, samples: validSamples, averageWeightKg: Number(average.toFixed(3)), minWeightKg: Math.min(...weights), maxWeightKg: Math.max(...weights), estimatedBiomassKg: estimatedBiomass, estimatedCount: pond.fishCount, previousAvgWeightKg: previousAverage, daysSinceLastBiometry: days, growthRateKgPerDay: Number(growthRate.toFixed(4)), sgr: Number(sgr.toFixed(3)) };
-    setBiometricSessions((previous) => [newSession, ...previous]); setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, averageWeightKg: newSession.averageWeightKg, biomassKg: estimatedBiomass, lastBiometryDate: session.date } : item)); createAuditLog('CREATE', 'BiometricSession', newSession.id, `Biometry recorded for ${pond.name}`); markLocalChange();
+    setBiometricSessions((previous) => [newSession, ...previous]); setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, averageWeightKg: newSession.averageWeightKg, biomassKg: estimatedBiomass, lastBiometryDate: session.date } : item));
+    createAuditLog('CREATE', 'BiometricSession', newSession.id, `Biometry recorded for ${pond.name}`); markLocalChange({ module: 'biometrics', action: 'create', entity: 'BiometricSession', entityId: newSession.id });
   };
 
   const recordWaterTest = (test: Omit<WaterQualityLog, 'id' | 'timestamp'>) => {
+    if (!can('water_quality', 'create', test.pondId)) return;
     const pond = ponds.find((item) => item.id === test.pondId); if (!pond) return; const timestamp = new Date().toISOString();
     const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, ammonia: test.ammonia, nitrite: test.nitrite, timestamp });
-    const invalid = !safety.doStatus.isValid || !safety.tempStatus.isValid || safety.phStatus?.isValid === false; const severity: WaterQualityLog['severity'] = safety.isCriticalAlert ? 'CRITICAL' : safety.isSafeForFeeding ? 'INFO' : 'HIGH'; const sensorStatus: WaterQualityLog['sensorStatus'] = invalid ? 'INVALID' : 'VALID';
+    const invalid = [safety.doStatus, safety.tempStatus, safety.phStatus, safety.ammoniaStatus, safety.nitriteStatus].some((status) => !status?.isValid); const severity: WaterQualityLog['severity'] = safety.isCriticalAlert ? 'CRITICAL' : safety.isSafeForFeeding ? 'INFO' : 'HIGH'; const sensorStatus: WaterQualityLog['sensorStatus'] = invalid ? 'INVALID' : safety.staleTelemetry ? 'STALE' : 'VALID';
     const newLog: WaterQualityLog = { ...test, id: nextId('water'), timestamp, severity, sensorStatus, alertMessage: safety.feedingProhibitionReason }; setWaterLogs((previous) => [newLog, ...previous]);
-    setPonds((previous) => previous.map((item) => {
-      if (item.id !== pond.id) return item;
-      if (invalid) return { ...item, feedingStatus: 'STOPPED', stopFeedingReason: 'Other', stopFeedingDetails: safety.feedingProhibitionReason || 'Invalid sensor data', stopFeedingTimestamp: timestamp };
-      return { ...item, dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, feedingStatus: safety.isSafeForFeeding ? item.feedingStatus : 'STOPPED', stopFeedingReason: safety.isSafeForFeeding ? item.stopFeedingReason : (test.temperature < 4 ? 'Low Temperature' : test.dissolvedOxygen < 4 ? 'Low Oxygen' : 'Other'), stopFeedingDetails: safety.isSafeForFeeding ? item.stopFeedingDetails : safety.feedingProhibitionReason, stopFeedingTimestamp: safety.isSafeForFeeding ? item.stopFeedingTimestamp : timestamp };
-    })); createAuditLog('CREATE', 'WaterQualityLog', newLog.id, safety.isSafeForFeeding ? 'Water quality recorded' : `Water safety alert: ${safety.feedingProhibitionReason}`); markLocalChange();
+    setPonds((previous) => previous.map((item) => item.id !== pond.id ? item : { ...item, dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, ammonia: test.ammonia, nitrite: test.nitrite, lastTelemetryTimestamp: timestamp, sensorQuality: sensorStatus, feedingStatus: safety.isSafeForFeeding ? item.feedingStatus : 'STOPPED', stopFeedingReason: safety.isSafeForFeeding ? item.stopFeedingReason : (test.temperature < 4 ? 'Low Temperature' : test.dissolvedOxygen < 4 ? 'Low Oxygen' : 'Other'), stopFeedingDetails: safety.isSafeForFeeding ? item.stopFeedingDetails : safety.feedingProhibitionReason, stopFeedingTimestamp: safety.isSafeForFeeding ? item.stopFeedingTimestamp : timestamp }));
+    createAuditLog('CREATE', 'WaterQualityLog', newLog.id, safety.isSafeForFeeding ? 'Water quality recorded' : `Water safety alert: ${safety.feedingProhibitionReason}`); markLocalChange({ module: 'water_quality', action: 'create', entity: 'WaterQualityLog', entityId: newLog.id });
   };
 
   const recordTreatment = (treatment: Omit<TreatmentRecord, 'id'>) => {
-    if (!Number.isFinite(treatment.dose) || treatment.dose <= 0 || Number.isNaN(new Date(treatment.startDate).getTime())) return; const id = nextId('treat'); const newTreatment: TreatmentRecord = { ...treatment, id }; setTreatments((previous) => [newTreatment, ...previous]);
-    if (treatment.status === 'ACTIVE') setPonds((previous) => previous.map((pond) => pond.id === treatment.pondId ? { ...pond, activeTreatmentId: id, feedingStatus: 'STOPPED', stopFeedingReason: 'Treatment', stopFeedingDetails: `${treatment.drugName}: ${treatment.diagnosis}`, stopFeedingTimestamp: new Date().toISOString(), stopFeedingUser: treatment.veterinarian } : pond));
-    createAuditLog('CREATE', 'TreatmentRecord', id, `${treatment.drugName} treatment recorded for ${treatment.pondName}`); markLocalChange();
+    if (!can('treatments', 'create', treatment.pondId)) return;
+    if (!Number.isFinite(treatment.dose) || treatment.dose <= 0 || Number.isNaN(new Date(treatment.startDate).getTime())) return;
+    const id = nextId('treat'); const newTreatment: TreatmentRecord = { ...treatment, id }; setTreatments((previous) => [newTreatment, ...previous]);
+    if (treatment.status === 'ACTIVE') setPonds((previous) => previous.map((pond) => pond.id === treatment.pondId ? { ...pond, activeTreatmentId: id, feedingStatus: 'STOPPED', stopFeedingReason: 'Treatment', stopFeedingDetails: `${treatment.drugName}: ${treatment.diagnosis}`, stopFeedingTimestamp: new Date().toISOString(), stopFeedingUser: currentUser?.fullName || treatment.veterinarian } : pond));
+    createAuditLog('CREATE', 'TreatmentRecord', id, `${treatment.drugName} treatment recorded for ${treatment.pondName}`); markLocalChange({ module: 'treatments', action: 'create', entity: 'TreatmentRecord', entityId: id });
   };
 
   const executeAtomicTransfer = (transferData: Omit<FishTransfer, 'id' | 'status'>): { success: boolean; error?: string } => {
-    const result = executeAtomicFishTransfer(transferData, ponds); if (!result.success || !result.updatedPonds || !result.newTransfer) return { success: false, error: result.error }; setPonds(result.updatedPonds); setTransfers((previous) => [result.newTransfer!, ...previous]); createAuditLog('CREATE', 'FishTransfer', result.newTransfer.id, `${transferData.sourceName} → ${transferData.destinationName}: ${transferData.fishCount} fish`); markLocalChange(); return { success: true };
+    if (!can('transfers', 'create', transferData.sourceId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const result = executeAtomicFishTransfer(transferData, ponds, nurseryTanks, larvae);
+    if (!result.success || !result.updatedPonds || !result.updatedNurseryTanks || !result.updatedLarvae || !result.newTransfer) return { success: false, error: result.error };
+    setPonds(result.updatedPonds);
+    setNurseryTanks(result.updatedNurseryTanks);
+    setLarvae(result.updatedLarvae);
+    setTransfers((previous) => [result.newTransfer!, ...previous]);
+    createAuditLog('CREATE', 'FishTransfer', result.newTransfer.id, `${transferData.sourceName} → ${transferData.destinationName}: ${transferData.fishCount} fish`, undefined, undefined, `txn_${result.newTransfer.id}`);
+    markLocalChange({ module: 'transfers', action: 'create', entity: 'FishTransfer', entityId: result.newTransfer.id, transactionId: `txn_${result.newTransfer.id}` });
+    return { success: true };
   };
 
   const addInventoryTransaction = (tx: Omit<InventoryTransaction, 'id' | 'timestamp' | 'resultingQuantity'>) => {
+    if (!can('warehouse', 'create')) return;
     const item = inventory.find((row) => row.id === tx.itemId || row.sku === tx.sku); if (!item || !Number.isFinite(tx.quantityChange) || tx.quantityChange === 0 || (tx.unit && tx.unit !== item.unit)) return; const resultingQuantity = Number((item.quantity + tx.quantityChange).toFixed(4));
-    if (resultingQuantity < 0) { createAuditLog('REJECT', 'InventoryTransaction', item.id, 'Inventory transaction rejected because it would create negative stock'); return; }
-    const newTx: InventoryTransaction = { ...tx, id: nextId('invtx'), timestamp: new Date().toISOString(), resultingQuantity, itemId: item.id, itemName: item.name, sku: item.sku };
-    setInventory((previous) => previous.map((row) => row.id === item.id ? { ...row, quantity: resultingQuantity, status: inventoryStatus(row, resultingQuantity) } : row)); setInventoryTxs((previous) => [newTx, ...previous]); createAuditLog('CREATE', 'InventoryTransaction', newTx.id, `${tx.quantityChange} ${item.unit} ${item.sku}`); markLocalChange();
+    if (resultingQuantity < 0) return;
+    const newTx: InventoryTransaction = { ...tx, id: nextId('invtx'), timestamp: new Date().toISOString(), resultingQuantity, itemId: item.id, itemName: item.name, sku: item.sku, operator: currentUser?.fullName || tx.operator };
+    setInventory((previous) => previous.map((row) => row.id === item.id ? { ...row, quantity: resultingQuantity, status: inventoryStatus(row, resultingQuantity) } : row)); setInventoryTxs((previous) => [newTx, ...previous]); createAuditLog('CREATE', 'InventoryTransaction', newTx.id, `${tx.quantityChange} ${item.unit} ${item.sku}`); markLocalChange({ module: 'warehouse', action: 'create', entity: 'InventoryTransaction', entityId: newTx.id });
   };
 
-  const createProcessingBatch = (batch: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>) => {
-    if (!Number.isInteger(batch.fishCount) || batch.fishCount <= 0 || !Number.isFinite(batch.liveBiomassKg) || batch.liveBiomassKg <= 0) return; const outputs = [batch.caviarYieldKg, batch.filletMeatYieldKg, batch.smokedMeatYieldKg, batch.byProductAndWasteKg]; if (outputs.some((value) => !Number.isFinite(value) || value < 0) || outputs.reduce((sum, value) => sum + value, 0) > batch.liveBiomassKg + 0.1) return;
-    const newBatch: ProcessingBatch = { ...batch, id: nextId('proc'), caviarYieldPercent: Number(((batch.caviarYieldKg / batch.liveBiomassKg) * 100).toFixed(2)), filletYieldPercent: Number(((batch.filletMeatYieldKg / batch.liveBiomassKg) * 100).toFixed(2)) }; setProcessingBatches((previous) => [newBatch, ...previous]); createAuditLog('CREATE', 'ProcessingBatch', newBatch.id, `Processing batch ${batch.batchCode} created`); markLocalChange();
+  const createProcessingBatch = (batch: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>): { success: boolean; error?: string } => {
+    if (!can('processing', 'create', batch.sourcePondId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const sourcePond = ponds.find((pond) => pond.id === batch.sourcePondId); if (!sourcePond) return { success: false, error: 'POND_NOT_FOUND' };
+    const result = executeAtomicProcessing(batch, ponds, coldStorage);
+    if (!result.success || !result.batch || !result.ponds || !result.coldStorage) return { success: false, error: result.error };
+    setPonds(result.ponds); setProcessingBatches((previous) => [result.batch!, ...previous]); setColdStorage(result.coldStorage);
+    createAuditLog('CREATE', 'ProcessingBatch', result.batch.id, `Atomic processing ${batch.batchCode}: ${batch.liveBiomassKg} kg consumed from ${sourcePond.name}`);
+    markLocalChange({ module: 'processing', action: 'create', entity: 'ProcessingBatch', entityId: result.batch.id, referenceId: result.batch.batchCode, transactionId: result.transactionId }); return { success: true };
   };
 
   const createProformaInvoice = (proforma: Omit<ProformaInvoice, 'id' | 'subtotal' | 'grandTotal'>) => {
-    if (!proforma.items.length || proforma.items.some((item) => !Number.isFinite(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.unitPrice) || item.unitPrice < 0)) return; const subtotal = proforma.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); const taxTotal = proforma.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice * item.taxPercent) / 100, 0); const discountTotal = proforma.items.reduce((sum, item) => sum + Math.max(0, item.discount), 0); const grandTotal = Math.max(0, subtotal + taxTotal - discountTotal);
-    const newProforma: ProformaInvoice = { ...proforma, id: nextId('prof'), subtotal: Number(subtotal.toFixed(2)), taxTotal: Number(taxTotal.toFixed(2)), discountTotal: Number(discountTotal.toFixed(2)), grandTotal: Number(grandTotal.toFixed(2)) }; setProformas((previous) => [newProforma, ...previous]); createAuditLog('CREATE', 'ProformaInvoice', newProforma.id, `Proforma ${newProforma.invoiceNumber} created`); markLocalChange();
+    const validCurrencies = new Set(['USD', 'EUR', 'IRR', 'RUB', 'AED']);
+    if (!can('sales', 'create') || !proforma.customerId || !proforma.customerName.trim() || !validCurrencies.has(proforma.currency) || !proforma.items.length || proforma.items.some((item) => !item.productName.trim() || !item.sku.trim() || !Number.isFinite(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.unitPrice) || item.unitPrice < 0 || item.taxPercent < 0 || item.discount < 0)) return;
+    const subtotal = proforma.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); const taxTotal = proforma.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice * item.taxPercent) / 100, 0); const discountTotal = proforma.items.reduce((sum, item) => sum + item.discount, 0); const grandTotal = Math.max(0, subtotal + taxTotal - discountTotal);
+    const newProforma: ProformaInvoice = { ...proforma, id: nextId('prof'), subtotal: Number(subtotal.toFixed(2)), taxTotal: Number(taxTotal.toFixed(2)), discountTotal: Number(discountTotal.toFixed(2)), grandTotal: Number(grandTotal.toFixed(2)) }; setProformas((previous) => [newProforma, ...previous]); createAuditLog('CREATE', 'ProformaInvoice', newProforma.id, `Proforma ${newProforma.invoiceNumber} created`); markLocalChange({ module: 'sales', action: 'create', entity: 'ProformaInvoice', entityId: newProforma.id });
   };
-  const updateProformaStage = (id: string, newStage: ProformaInvoice['stage']) => { setProformas((previous) => previous.map((row) => row.id === id ? { ...row, stage: newStage } : row)); createAuditLog('UPDATE', 'ProformaInvoice', id, `Stage changed to ${newStage}`); markLocalChange(); };
-  const createJournalEntry = (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>): { success: boolean; error?: string } => { const result = validateAndExecuteJournalEntry(entry, accounts, journals); if (!result.success || !result.newEntry || !result.updatedAccounts) return { success: false, error: result.error }; setAccounts(result.updatedAccounts); setJournals((previous) => [result.newEntry!, ...previous]); createAuditLog('CREATE', 'JournalEntry', result.newEntry.id, `Balanced journal ${result.newEntry.entryNumber} posted`); markLocalChange(); return { success: true }; };
+
+  const updateProformaStage = (id: string, newStage: ProformaInvoice['stage']) => {
+    if (!can('sales', 'edit')) return;
+    const existing = proformas.find((row) => row.id === id);
+    if (!existing) return;
+    const requiresFulfillment = newStage === 'Payment Received (تسویه)' || newStage === 'Dispatched / Delivery (تحویل)' || String(newStage) === 'Paid';
+    let updatedColdStorage = coldStorage;
+    let fulfillment: ReturnType<typeof fulfillProforma> | undefined;
+    if (requiresFulfillment && !existing.fulfilledAt) {
+      fulfillment = fulfillProforma(existing, coldStorage);
+      if (!fulfillment.success || !fulfillment.coldStorage || !fulfillment.fulfilledAt || !fulfillment.transactionId) return;
+      updatedColdStorage = fulfillment.coldStorage;
+      setColdStorage(updatedColdStorage);
+    }
+    const updatedProforma: ProformaInvoice = {
+      ...existing,
+      stage: newStage,
+      ...(fulfillment ? { fulfilledAt: fulfillment.fulfilledAt, fulfillmentTransactionId: fulfillment.transactionId } : {}),
+    };
+    setProformas((previous) => previous.map((row) => row.id === id ? updatedProforma : row));
+    createAuditLog('UPDATE', 'ProformaInvoice', id, `Stage changed to ${newStage}`, undefined, undefined, fulfillment?.transactionId);
+    markLocalChange({ module: 'sales', action: 'edit', entity: 'ProformaInvoice', entityId: id, transactionId: fulfillment?.transactionId });
+  };
+
+  const createJournalEntry = (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>): { success: boolean; error?: string } => {
+    if (!can('accounting', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const result = validateAndExecuteJournalEntry(entry, accounts, journals); if (!result.success || !result.newEntry || !result.updatedAccounts) return { success: false, error: result.error }; setAccounts(result.updatedAccounts); setJournals((previous) => [result.newEntry!, ...previous]); createAuditLog('CREATE', 'JournalEntry', result.newEntry.id, `Balanced journal ${result.newEntry.entryNumber} posted`); markLocalChange({ module: 'accounting', action: 'create', entity: 'JournalEntry', entityId: result.newEntry.id, referenceId: result.newEntry.referenceId }); return { success: true };
+  };
 
   const clockAttendance = (employeeId: string, type: 'in' | 'out', shift: AttendanceRecord['shift']) => {
+    if (!can('hr', 'create')) return;
     const employee = employees.find((row) => row.id === employeeId && row.status === 'Active'); if (!employee) return; const now = new Date(); const date = now.toISOString().slice(0, 10);
     if (type === 'in') { if (attendance.some((row) => row.employeeId === employeeId && row.date === date && !row.clockOutTime)) return; const record: AttendanceRecord = { id: nextId('att'), employeeId, employeeName: employee.fullName, date, clockInTime: now.toISOString(), shift, regularHours: 0, overtimeHours: 0, status: 'Present' }; setAttendance((previous) => [record, ...previous]); }
     else setAttendance((previous) => { const open = previous.find((row) => row.employeeId === employeeId && row.date === date && !row.clockOutTime); if (!open) return previous; const hours = Math.max(0, (now.getTime() - new Date(open.clockInTime).getTime()) / 3_600_000); return previous.map((row) => row.id === open.id ? { ...row, clockOutTime: now.toISOString(), regularHours: Number(Math.min(8, hours).toFixed(2)), overtimeHours: Number(Math.max(0, hours - 8).toFixed(2)) } : row); });
-    createAuditLog('CREATE', 'Attendance', employeeId, `Clock ${type}`); markLocalChange();
+    createAuditLog('CREATE', 'Attendance', employeeId, `Clock ${type}`); markLocalChange({ module: 'hr', action: 'create', entity: 'Attendance', entityId: employeeId });
   };
 
   const generateMonthlyPayroll = (monthString: string) => {
-    if (!/^\d{4}-\d{2}$/.test(monthString)) return; const generated: PayrollRecord[] = employees.filter((employee) => employee.status === 'Active').map((employee) => { const employeeAttendance = attendance.filter((row) => row.employeeId === employee.id && row.date.startsWith(monthString)); const overtimeHours = employeeAttendance.reduce((sum, row) => sum + row.overtimeHours, 0); const hourlyRate = employee.baseSalary / 240; const overtimePay = Number((overtimeHours * hourlyRate * 1.4).toFixed(0)); const grossSalary = employee.baseSalary + overtimePay; return { id: nextId('pay'), payrollMonth: monthString, employeeId: employee.id, employeeName: employee.fullName, department: employee.department, baseSalary: employee.baseSalary, overtimePay, shiftBonus: 0, hardshipAllowance: 0, grossSalary, socialSecurityInsurance: 0, incomeTax: 0, loanDeduction: 0, netPay: grossSalary, currency: employee.currency, paymentStatus: 'Calculated' }; }); setPayrolls((previous) => [...generated, ...previous.filter((row) => row.payrollMonth !== monthString)]); createAuditLog('CREATE', 'Payroll', monthString, 'Draft payroll generated from attendance; statutory deductions require configured policy'); markLocalChange();
+    if (!can('hr', 'create') || !/^\d{4}-\d{2}$/.test(monthString)) return;
+    const generated: PayrollRecord[] = employees.filter((employee) => employee.status === 'Active').map((employee) => { const employeeAttendance = attendance.filter((row) => row.employeeId === employee.id && row.date.startsWith(monthString)); const overtimeHours = employeeAttendance.reduce((sum, row) => sum + row.overtimeHours, 0); const hourlyRate = employee.baseSalary / 240; const overtimePay = Number((overtimeHours * hourlyRate * 1.4).toFixed(0)); const grossSalary = employee.baseSalary + overtimePay; return { id: nextId('pay'), payrollMonth: monthString, employeeId: employee.id, employeeName: employee.fullName, department: employee.department, baseSalary: employee.baseSalary, overtimePay, shiftBonus: 0, hardshipAllowance: 0, grossSalary, socialSecurityInsurance: 0, incomeTax: 0, loanDeduction: 0, netPay: grossSalary, currency: employee.currency, paymentStatus: 'Calculated' as const }; });
+    setPayrolls((previous) => [...generated, ...previous.filter((row) => row.payrollMonth !== monthString)]); createAuditLog('CREATE', 'Payroll', monthString, 'Draft payroll generated from recorded attendance'); markLocalChange({ module: 'hr', action: 'create', entity: 'Payroll', entityId: monthString });
   };
 
   const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
-  const createBackupSnapshot = (type: BackupSnapshot['type'] = 'Manual Export'): BackupSnapshot => { const data = buildBackupData(); const serialized = JSON.stringify(data); const timestamp = new Date().toISOString(); const snapshot: BackupSnapshot = { id: nextId('backup'), filename: `fathi-aqua-erp-${timestamp.slice(0, 10)}.json`, timestamp, version: '6.0.5', schemaVersion: BACKUP_SCHEMA_VERSION, dataSizeKb: Number((new Blob([serialized]).size / 1024).toFixed(2)), tablesCount: Object.keys(data).length, checksum: checksumBackupData(data), checksumAlgorithm: 'FNV1A32', creator: 'Authenticated Local Session', type, data }; setBackups((previous) => [stripBackupData(snapshot), ...previous].slice(0, 100)); return snapshot; };
-  const restoreFromSnapshotJson = (jsonString: string): { success: boolean; message: string } => {
-    try {
-      const validation = validateBackupDocument(JSON.parse(jsonString)); if (!validation.ok || !validation.data) return { success: false, message: validation.error || 'فایل پشتیبان معتبر نیست.' }; createBackupSnapshot('Pre-Restore Safety Snapshot'); const data = validation.data; const array = <T,>(key: string): T[] => Array.isArray(data[key]) ? data[key] as T[] : [];
-      setHalls(array<Hall>('halls')); setPonds(array<Pond>('ponds')); setSpecies(array<SturgeonSpecies>('species')); setFeedingRecords(array<FeedingRecord>('feedingRecords')); setBiometricSessions(array<BiometricSession>('biometricSessions')); setWaterLogs(array<WaterQualityLog>('waterLogs')); setMortalityRecords(array<MortalityRecord>('mortalityRecords')); setTreatments(array<TreatmentRecord>('treatments')); setTransfers(array<FishTransfer>('transfers')); setBroodstock(array<BroodstockFish>('broodstock')); setFertilizations(array<FertilizationBatch>('fertilizations')); setIncubators(array<IncubatorUnit>('incubators')); setLarvae(array<LarvalBatch>('larvae')); setNurseryTanks(array<NurseryTank>('nurseryTanks')); setInventory(array<InventoryItem>('inventory')); setInventoryTxs(array<InventoryTransaction>('inventoryTxs')); setLabSamples(array<LabSample>('labSamples')); setProcessingBatches(array<ProcessingBatch>('processingBatches')); setColdStorage(array<ColdStoragePallet>('coldStorage')); setCustomers(array<Customer>('customers')); setProformas(array<ProformaInvoice>('proformas')); setAccounts(array<Account>('accounts')); setJournals(array<JournalEntry>('journals')); setEmployees(array<Employee>('employees')); setAttendance(array<AttendanceRecord>('attendance')); setPayrolls(array<PayrollRecord>('payrolls')); setEquipment(array<Equipment>('equipment')); setSocialPosts(array<SocialMediaPost>('socialPosts')); setAuditLogs(array<FarmAuditLog>('auditLogs')); markLocalChange(); return { success: true, message: 'بازیابی با اعتبارسنجی ساختار و چک‌سام انجام شد.' };
-    } catch { return { success: false, message: 'JSON فایل پشتیبان قابل خواندن نیست.' }; }
+  const createBackupSnapshot = (type: BackupSnapshot['type'] = 'Manual Export'): BackupSnapshot => {
+    const isPreRestore = type === 'Pre-Restore Safety Snapshot';
+    if (!can('backup', 'export') && !(isPreRestore && can('backup', 'approve'))) throw new Error('ACTION_NOT_ALLOWED');
+    const data = buildBackupData(); const serialized = JSON.stringify(data); const timestamp = new Date().toISOString(); const snapshot: BackupSnapshot = { id: nextId('backup'), filename: `fathi-aqua-erp-${timestamp.slice(0, 10)}.json`, timestamp, version: '6.1.0', schemaVersion: BACKUP_SCHEMA_VERSION, dataSizeKb: Number((new Blob([serialized]).size / 1024).toFixed(2)), tablesCount: Object.keys(data).length, checksum: checksumBackupData(data), checksumAlgorithm: 'SHA-256', creator: currentUser?.fullName || '', type, data };
+    setBackups((previous) => [stripBackupData(snapshot), ...previous].slice(0, 100)); markLocalChange({ module: 'backup', action: 'export', entity: 'BackupSnapshot', entityId: snapshot.id, referenceId: snapshot.filename }); return snapshot;
   };
 
-  const addBroodstock = (fish: Omit<BroodstockFish, 'id'>) => { if (!fish.chipNumber.trim() || broodstock.some((row) => row.chipNumber === fish.chipNumber || row.plateNumber === fish.plateNumber) || !Number.isFinite(fish.weightKg) || fish.weightKg <= 0) return; const newFish: BroodstockFish = { ...fish, id: nextId('brood') }; setBroodstock((previous) => [newFish, ...previous]); createAuditLog('CREATE', 'Broodstock', newFish.id, `Broodstock ${fish.chipNumber} registered`); markLocalChange(); };
-  const recordFertilization = (fert: Omit<FertilizationBatch, 'id' | 'fertilizationTimestamp' | 'status'>) => { const parentsExist = fert.femaleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Female')) && fert.maleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Male')); if (!parentsExist || !Number.isFinite(fert.fertilizationRatePercent) || fert.fertilizationRatePercent < 0 || fert.fertilizationRatePercent > 100) return; const newBatch: FertilizationBatch = { ...fert, id: nextId('fert'), fertilizationTimestamp: new Date().toISOString(), status: 'Incubating' }; setFertilizations((previous) => [newBatch, ...previous]); createAuditLog('CREATE', 'FertilizationBatch', newBatch.id, `Fertilization ${fert.batchCode} registered`); markLocalChange(); };
-  const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!cust.name.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange(); };
-  const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange(); };
+  const createEncryptedBackup = async (passphrase: string): Promise<EncryptedBackupEnvelope> => {
+    if (typeof passphrase !== 'string' || passphrase.length < 12) throw new Error('BACKUP_PASSPHRASE_TOO_SHORT');
+    const snapshot = createBackupSnapshot('Manual Export');
+    return encryptBackupDocument(snapshot, passphrase);
+  };
 
-  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, recordMortality, recordBiometry, recordWaterTest, recordTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  const restoreFromSnapshotJson = async (jsonString: string, passphrase?: string): Promise<{ success: boolean; message: string }> => {
+    if (!can('backup', 'approve')) return { success: false, message: 'ACTION_NOT_ALLOWED' };
+    try {
+      const parsed = JSON.parse(jsonString); const decrypted: { ok: boolean; error?: string; data?: Record<string, any> } = parsed?.format === 'FATHI_ERP_ENCRYPTED_BACKUP' ? await decryptBackupDocument(parsed, passphrase || '') : { ok: true, data: parsed?.data };
+      if (!decrypted.ok || !decrypted.data) return { success: false, message: decrypted.error || 'BACKUP_INVALID' };
+      const candidate = parsed?.format === 'FATHI_ERP_ENCRYPTED_BACKUP' ? { schemaVersion: BACKUP_SCHEMA_VERSION, data: decrypted.data, checksum: checksumBackupData(decrypted.data) } : parsed;
+      const validation = validateBackupDocument(candidate); if (!validation.ok || !validation.data) return { success: false, message: validation.error || 'BACKUP_INVALID' };
+      const token = getStoredSessionToken();
+      if (!token) return { success: false, message: 'AUTH_REQUIRED' };
+      const candidateState = { ...validation.data, backups: Array.isArray(stateData.backups) ? stateData.backups : [] };
+      const response = await fetch('/api/state', { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: candidateState, version: serverVersion, operation: { module: 'backup', action: 'approve', entity: 'BackupRestore', entityId: nextId('restore') } }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success || !payload.state?.data) return { success: false, message: payload.error || 'BACKUP_RESTORE_FAILED' };
+      pendingOperation.current = null;
+      revision.current += 1;
+      applyState(payload.state.data, Array.isArray(payload.auditLogs) ? payload.auditLogs : []);
+      setServerVersion(Number(payload.state.version));
+      setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', pendingChangesCount: 0, lastSyncTimestamp: new Date().toISOString() }));
+      return { success: true, message: 'BACKUP_RESTORED' };
+    } catch { return { success: false, message: 'BACKUP_PARSE_FAILED' }; }
+  };
+
+  const addBroodstock = (fish: Omit<BroodstockFish, 'id'>) => { if (!can('hatchery', 'create') || !fish.chipNumber.trim() || broodstock.some((row) => row.chipNumber === fish.chipNumber || row.plateNumber === fish.plateNumber) || !Number.isFinite(fish.weightKg) || fish.weightKg <= 0) return; const newFish: BroodstockFish = { ...fish, id: nextId('brood') }; setBroodstock((previous) => [newFish, ...previous]); createAuditLog('CREATE', 'Broodstock', newFish.id, `Broodstock ${fish.chipNumber} registered`); markLocalChange({ module: 'hatchery', action: 'create', entity: 'Broodstock', entityId: newFish.id }); };
+  const recordFertilization = (fert: Omit<FertilizationBatch, 'id' | 'fertilizationTimestamp' | 'status'>) => { if (!can('hatchery', 'create')) return; const parentsExist = fert.femaleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Female')) && fert.maleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Male')); if (!parentsExist || !Number.isFinite(fert.fertilizationRatePercent) || fert.fertilizationRatePercent < 0 || fert.fertilizationRatePercent > 100) return; const newBatch: FertilizationBatch = { ...fert, id: nextId('fert'), fertilizationTimestamp: new Date().toISOString(), status: 'Incubating' }; setFertilizations((previous) => [newBatch, ...previous]); createAuditLog('CREATE', 'FertilizationBatch', newBatch.id, `Fertilization ${fert.batchCode} registered`); markLocalChange({ module: 'hatchery', action: 'create', entity: 'FertilizationBatch', entityId: newBatch.id }); };
+  const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id }); };
+  const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { if (!can('media', 'create')) return; const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange({ module: 'media', action: 'create', entity: 'SocialMediaPost', entityId: newPost.id }); };
+
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, recordMortality, recordBiometry, recordWaterTest, recordTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 

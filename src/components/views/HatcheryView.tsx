@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { nextId } from '../../utils/id';
 import { useI18n } from '../../i18n';
 import { useFarm } from '../../context/FarmContext';
 import { DynamicTranslatedText } from '../common/DynamicTranslatedText';
@@ -34,7 +35,7 @@ export const HatcheryView: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'broodstock' | 'fertilization' | 'incubators' | 'larvae' | 'traceability'>('broodstock');
   const [searchChip, setSearchChip] = useState<string>('');
-  const [traceLotCode, setTraceLotCode] = useState<string>('CAVIAR-LOT-2026-08-B1');
+  const [traceLotCode, setTraceLotCode] = useState<string>('');
   const [traceResult, setTraceResult] = useState<any>(null);
 
   // New Broodstock Form state
@@ -43,32 +44,34 @@ export const HatcheryView: React.FC = () => {
   const [newPlate, setNewPlate] = useState<string>('');
   const [newSex, setNewSex] = useState<'Female' | 'Male'>('Female');
   const [newSpeciesId, setNewSpeciesId] = useState<string>('sp_beluga');
-  const [newWeight, setNewWeight] = useState<number>(45);
-  const [newEggDia, setNewEggDia] = useState<number>(3.5);
-  const [newPI, setNewPI] = useState<number>(0.05);
-  const [newMotility, setNewMotility] = useState<number>(90);
+  const [newWeight, setNewWeight] = useState<number>(0);
+  const [newEggDia, setNewEggDia] = useState<number>(0);
+  const [newPI, setNewPI] = useState<number>(0);
+  const [newMotility, setNewMotility] = useState<number>(0);
 
   const handleAddBrood = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newChip.trim() || !newPlate.trim()) return;
     const sp = species.find((s) => s.id === newSpeciesId);
+    if (!sp || !Number.isFinite(newWeight) || newWeight <= 0) return;
     addBroodstock({
-      chipNumber: newChip || '982000' + Math.floor(100000000 + Math.random() * 900000000),
-      plateNumber: newPlate || 'FA-BRD-' + Math.floor(100 + Math.random() * 900),
+      chipNumber: newChip.trim(),
+      plateNumber: newPlate.trim(),
       sex: newSex,
       speciesId: newSpeciesId,
-      speciesName: sp ? sp.faName : 'فیل‌ماهی',
-      geneticLine: 'Fathi Royal Line',
-      origin: 'Hatchery Core',
-      estimatedAgeYears: 10,
+      speciesName: sp.faName,
+      geneticLine: '',
+      origin: '',
+      estimatedAgeYears: 0,
       weightKg: Number(newWeight),
-      lengthCm: 180,
-      maturityStage: 'Stage IV (Ready)',
-      lastUltrasoundDate: new Date().toISOString().split('T')[0],
-      ultrasoundEggDiameterMm: newSex === 'Female' ? Number(newEggDia) : undefined,
-      ultrasoundPolarizationIndex: newSex === 'Female' ? Number(newPI) : undefined,
-      spermMotilityPercent: newSex === 'Male' ? Number(newMotility) : undefined,
+      lengthCm: 0,
+      maturityStage: 'Not Assessed',
+      lastUltrasoundDate: undefined,
+      ultrasoundEggDiameterMm: newSex === 'Female' && newEggDia > 0 ? Number(newEggDia) : undefined,
+      ultrasoundPolarizationIndex: newSex === 'Female' && newPI > 0 ? Number(newPI) : undefined,
+      spermMotilityPercent: newSex === 'Male' && newMotility > 0 ? Number(newMotility) : undefined,
       status: 'Active Broodstock',
-      historyNotes: 'ثبت دستی مولد در سامانه تکثیر',
+      historyNotes: '',
     });
     setShowAddBrood(false);
     setNewChip('');
@@ -78,17 +81,19 @@ export const HatcheryView: React.FC = () => {
   const handleExecuteReverseTrace = (e: React.FormEvent) => {
     e.preventDefault();
     const batch = processingBatches.find((b) => b.batchCode.toLowerCase() === traceLotCode.trim().toLowerCase());
-    const pallet = coldStorage.find((c) => c.batchCode.toLowerCase() === traceLotCode.trim().toLowerCase());
-
     if (batch) {
+      const pallet = coldStorage.find((c) => c.batchCode.toLowerCase() === traceLotCode.trim().toLowerCase());
+      const fertilization = fertilizations.find((item) => item.batchCode.toLowerCase() === traceLotCode.trim().toLowerCase());
+      const larvalBatch = fertilization ? larvae.find((item) => item.fertilizationBatchId === fertilization.id) : undefined;
+      const incubationBatch = fertilization ? incubators.find((item) => item.currentBatchId === fertilization.id) : undefined;
       setTraceResult({
         found: true,
         batch,
         pallet,
-        femaleBroodstock: broodstock[0],
-        maleBroodstock: broodstock[1],
-        incubationBatch: incubators[0],
-        larvalBatch: larvae[0],
+        femaleBroodstock: fertilization ? broodstock.find((fish) => fertilization.femaleIds.includes(fish.id)) : undefined,
+        maleBroodstock: fertilization ? broodstock.find((fish) => fertilization.maleIds.includes(fish.id)) : undefined,
+        incubationBatch,
+        larvalBatch,
       });
     } else {
       setTraceResult({ found: false });
@@ -391,7 +396,7 @@ export const HatcheryView: React.FC = () => {
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold">
                   <CheckCircle2 className="w-5 h-5" />
-                  <span>شجره‌نامه ژنتیکی و زنجیره تأمین تأیید شد</span>
+                  <span>{traceResult.femaleBroodstock && traceResult.maleBroodstock && traceResult.incubationBatch && traceResult.larvalBatch && traceResult.pallet ? 'شجره‌نامه ژنتیکی و زنجیره تأمین تأیید شد' : 'بخشی از زنجیره یافت شد؛ داده‌های تکمیلی ثبت نشده است'}</span>
                 </div>
                 <span className="text-xs text-slate-400 font-mono">
                   مجوز سایتس: {traceResult.batch.citesPermitNumber}
@@ -403,17 +408,17 @@ export const HatcheryView: React.FC = () => {
                 {/* Step 1: Broodstock Parents */}
                 <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
                   <span className="text-[11px] font-bold text-amber-400 block">۱. مولدین والد (RFID)</span>
-                  <div>مادر: <strong className="text-white">{traceResult.femaleBroodstock.chipNumber}</strong></div>
-                  <div>پدر: <strong className="text-white">{traceResult.maleBroodstock.chipNumber}</strong></div>
-                  <div className="text-[10px] text-slate-400">{traceResult.femaleBroodstock.geneticLine}</div>
+                  <div>مادر: <strong className="text-white">{traceResult.femaleBroodstock?.chipNumber || 'ثبت نشده'}</strong></div>
+                  <div>پدر: <strong className="text-white">{traceResult.maleBroodstock?.chipNumber || 'ثبت نشده'}</strong></div>
+                  <div className="text-[10px] text-slate-400">{traceResult.femaleBroodstock?.geneticLine || 'خط ژنتیکی ثبت نشده'}</div>
                 </div>
 
                 {/* Step 2: Fertilization & Incubation */}
                 <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
                   <span className="text-[11px] font-bold text-blue-400 block">۲. انکوباسیون و تفریخ</span>
-                  <div>دستگاه: <strong className="text-white">{traceResult.incubationBatch.code}</strong></div>
-                  <div>درصد تفریخ: <strong className="text-emerald-400">{traceResult.incubationBatch.estimatedHatchPercent}%</strong></div>
-                  <div className="text-[10px] text-slate-400">تاریخ: {traceResult.larvalBatch.hatchDate}</div>
+                  <div>دستگاه: <strong className="text-white">{traceResult.incubationBatch?.code || 'ثبت نشده'}</strong></div>
+                  <div>درصد تفریخ: <strong className="text-emerald-400">{traceResult.incubationBatch ? `${traceResult.incubationBatch.estimatedHatchPercent}%` : 'ثبت نشده'}</strong></div>
+                  <div className="text-[10px] text-slate-400">تاریخ: {traceResult.larvalBatch?.hatchDate || 'ثبت نشده'}</div>
                 </div>
 
                 {/* Step 3: Rearing Pond */}
@@ -429,7 +434,7 @@ export const HatcheryView: React.FC = () => {
                   <span className="text-[11px] font-bold text-amber-400 block">۴. استحصال و قوطی‌گذاری</span>
                   <div>خاویار خالص: <strong className="text-amber-300">{traceResult.batch.caviarYieldKg} kg ({traceResult.batch.caviarYieldPercent}%)</strong></div>
                   <div>گرید: <strong className="text-white">{traceResult.batch.caviarGrade}</strong></div>
-                  <div className="text-[10px] text-cyan-300">سردخانه: {traceResult.pallet?.slotCode || 'Slot A-01'}</div>
+                  <div className="text-[10px] text-cyan-300">سردخانه: {traceResult.pallet?.slotCode || 'ثبت نشده'}</div>
                 </div>
               </div>
             </div>

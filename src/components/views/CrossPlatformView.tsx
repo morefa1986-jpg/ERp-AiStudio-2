@@ -20,6 +20,9 @@ export const CrossPlatformView: React.FC = () => {
 
   const handleDownloadInstaller = (platformName: string) => {
     setDownloadedPlatform(platformName);
+    if (platformName.startsWith('Windows') && typeof window !== 'undefined') {
+      window.open('https://github.com/morefa1986-jpg/ERp-AiStudio-2/actions/workflows/windows-desktop-installer.yml', '_blank', 'noopener,noreferrer');
+    }
     setTimeout(() => setDownloadedPlatform(null), 4000);
   };
 
@@ -39,7 +42,7 @@ export const CrossPlatformView: React.FC = () => {
 
         <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 font-bold">
           <WifiOff className="w-4 h-4 text-emerald-400" />
-          <span>Offline-First LAN Sync Architecture</span>
+          <span>SQLite محلی؛ LAN فقط با فعال‌سازی صریح</span>
         </div>
       </div>
 
@@ -48,10 +51,12 @@ export const CrossPlatformView: React.FC = () => {
           <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
           <div>
             <strong className="block font-bold text-white">
-              بسته نصبی {downloadedPlatform} با موفقیت آماده‌سازی شد!
+              {downloadedPlatform.startsWith('Windows')
+                ? `وضعیت ${downloadedPlatform} در مسیر رسمی ساخت باز شد.`
+                : `بسته ${downloadedPlatform} در این نسخه منتشر نشده است.`}
             </strong>
             <span className="text-[11px] text-emerald-200">
-              شامل لایسنس اختصاصی مزرعه خاویار فتحی، دیتابیس لوکال SQLite و موتور هوش مصنوعی است.
+              وجود فایل، امضا و وضعیت اتصال باید از خروجی رسمی همان مسیر تأیید شود؛ این رابط فایل جعلی تولید نمی‌کند.
             </span>
           </div>
         </div>
@@ -82,11 +87,11 @@ export const CrossPlatformView: React.FC = () => {
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>همگام‌سازی خودکار در شبکه محلی بدون نیاز به اینترنت</span>
+                <span>همگام‌سازی LAN فقط با FATHI_LAN_MODE و میزبان مجاز</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>نصب خودکار به عنوان Windows Service</span>
+                <span>سرور داخلی روی localhost با داده پایدار SQLite</span>
               </div>
             </div>
           </div>
@@ -96,7 +101,7 @@ export const CrossPlatformView: React.FC = () => {
             className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-blue-600/30 transition-all"
           >
             <Download className="w-4 h-4" />
-            دانلود فایل نصبی (FathiAqua-Setup-v2.6.exe)
+            مشاهده ساخت رسمی Windows در GitHub Actions
           </button>
         </div>
 
@@ -137,7 +142,7 @@ export const CrossPlatformView: React.FC = () => {
             className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-700 transition-all"
           >
             <Share2 className="w-4 h-4" />
-            راهنمای افزودن به صفحه اصلی iOS
+            راهنمای iOS (بسته محلی در این نسخه ارائه نشده است)
           </button>
         </div>
 
@@ -164,7 +169,7 @@ export const CrossPlatformView: React.FC = () => {
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>ذخیره آفلاین رکوردهای خوراک و همگام‌سازی لحظه‌ای</span>
+                <span>ثبت رکوردها در SQLite محلی؛ نسخه مستقل موبایلی در این انتشار ارائه نشده است</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -178,7 +183,7 @@ export const CrossPlatformView: React.FC = () => {
             className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/30 transition-all"
           >
             <Download className="w-4 h-4" />
-            دانلود فایل نصبی (FathiAqua-v2.6.apk)
+            راهنمای Android (بسته محلی در این نسخه ارائه نشده است)
           </button>
         </div>
       </div>

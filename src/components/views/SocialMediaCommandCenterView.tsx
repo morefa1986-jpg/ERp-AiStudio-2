@@ -55,7 +55,7 @@ const COPY = {
     upload: 'افزودن عکس یا ویدئو', noMedia: 'هنوز رسانه‌ای ذخیره نشده است.', editImage: 'ویرایش تصویر', videoDesktop: 'ویرایش کامل ویدئو در نسخه دسکتاپ محلی',
     titleLabel: 'عنوان داخلی', captionLabel: 'کپشن', hashtagsLabel: 'هشتگ‌ها', scheduleLabel: 'زمان پیشنهادی انتشار', channelsLabel: 'شبکه‌های هدف', selectMedia: 'انتخاب رسانه',
     saveDraft: 'ذخیره پیش‌نویس', requestApproval: 'ارسال برای تأیید مدیر', approvalRequired: 'هیچ انتشار واقعی بدون تأیید مدیر انجام نمی‌شود.',
-    approve: 'تأیید مدیر', reject: 'رد', edit: 'ویرایش', prepare: 'آماده‌سازی انتشار', markPublished: 'ثبت به‌عنوان منتشرشده', openPlatform: 'باز کردن شبکه', copyCaption: 'کپی کپشن', delete: 'حذف',
+    approve: 'تأیید مدیر', reject: 'رد', edit: 'ویرایش', prepare: 'آماده‌سازی انتشار دستی', markPublished: 'ثبت تأیید انتشار خارجی', openPlatform: 'باز کردن شبکه', copyCaption: 'کپی کپشن', delete: 'حذف',
     noDrafts: 'صف محتوا خالی است.', saved: 'ذخیره شد.', mediaSaved: 'رسانه در کتابخانه آفلاین ذخیره شد.', imageSaved: 'نسخه ویرایش‌شده تصویر ذخیره شد.',
   },
   en: {
@@ -67,7 +67,7 @@ const COPY = {
     upload: 'Add photos or videos', noMedia: 'No media saved yet.', editImage: 'Edit image', videoDesktop: 'Full video editing uses the local desktop encoder',
     titleLabel: 'Internal title', captionLabel: 'Caption', hashtagsLabel: 'Hashtags', scheduleLabel: 'Suggested publish time', channelsLabel: 'Target channels', selectMedia: 'Select media',
     saveDraft: 'Save draft', requestApproval: 'Request admin approval', approvalRequired: 'Nothing is actually published without admin approval.',
-    approve: 'Admin approve', reject: 'Reject', edit: 'Edit', prepare: 'Prepare publishing', markPublished: 'Mark as published', openPlatform: 'Open platform', copyCaption: 'Copy caption', delete: 'Delete',
+    approve: 'Admin approve', reject: 'Reject', edit: 'Edit', prepare: 'Prepare assisted publishing', markPublished: 'Record external publication confirmation', openPlatform: 'Open platform', copyCaption: 'Copy caption', delete: 'Delete',
     noDrafts: 'Content queue is empty.', saved: 'Saved.', mediaSaved: 'Media saved to the offline library.', imageSaved: 'Edited image version saved.',
   },
   de: {
@@ -116,12 +116,16 @@ const MediaPreview: React.FC<{ asset: LocalMediaAsset; className?: string }> = (
 
 export const SocialMediaCommandCenterView: React.FC = () => {
   const { language, dir } = useI18n();
-  const { currentUser } = useAuth();
+  const { currentUser, hasPermission } = useAuth();
   const c = COPY[language as keyof typeof COPY] || COPY.en;
+  const canCreate = hasPermission('media', 'create');
+  const canEdit = hasPermission('media', 'edit');
+  const canApprove = hasPermission('media', 'approve');
+  const canDelete = hasPermission('media', 'delete');
   const [activeTab, setActiveTab] = useState<TabId>('overview');
-  const [connections, setConnections] = useState<SocialConnectionState[]>(() => listSocialConnections());
+  const [connections, setConnections] = useState<SocialConnectionState[]>([]);
   const [assets, setAssets] = useState<LocalMediaAsset[]>([]);
-  const [drafts, setDrafts] = useState<SocialCampaignDraft[]>(() => listSocialDrafts());
+  const [drafts, setDrafts] = useState<SocialCampaignDraft[]>([]);
   const [message, setMessage] = useState('');
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
@@ -136,7 +140,10 @@ export const SocialMediaCommandCenterView: React.FC = () => {
   const [rotation, setRotation] = useState<0 | 90 | 180 | 270>(0);
 
   const refreshAssets = async () => setAssets(await listMediaAssets());
-  useEffect(() => { void refreshAssets(); }, []);
+  useEffect(() => {
+    void refreshAssets();
+    void Promise.all([listSocialConnections(), listSocialDrafts()]).then(([nextConnections, nextDrafts]) => { setConnections(nextConnections); setDrafts(nextDrafts); });
+  }, []);
 
   const connectedCount = connections.filter((item) => item.connected).length;
   const pendingCount = drafts.filter((item) => item.status === 'PENDING_APPROVAL').length;
@@ -174,16 +181,17 @@ export const SocialMediaCommandCenterView: React.FC = () => {
     setTitle(''); setCaption(''); setHashtags(''); setSchedule(''); setSelectedAssets([]); setEditingDraftId(null);
   };
 
-  const saveComposer = (status: 'DRAFT' | 'PENDING_APPROVAL') => {
+  const saveComposer = async (status: 'DRAFT' | 'PENDING_APPROVAL') => {
+    if (editingDraftId ? !canEdit : !canCreate) return;
     if (!title.trim() || !caption.trim() || selectedPlatforms.length === 0) return;
     const payload = {
       title: title.trim(), caption: caption.trim(), hashtags: parseHashtags(), platformIds: selectedPlatforms,
       mediaAssetIds: selectedAssets, scheduledAt: schedule || undefined,
     };
     if (editingDraftId) {
-      setDrafts(updateSocialDraft(editingDraftId, { ...payload, status }));
+      setDrafts(await updateSocialDraft(editingDraftId, { ...payload, status }));
     } else {
-      setDrafts(saveSocialDraft({ ...payload, status }));
+      setDrafts(await saveSocialDraft({ ...payload, status }));
     }
     resetComposer();
     setActiveTab('queue');
@@ -191,42 +199,49 @@ export const SocialMediaCommandCenterView: React.FC = () => {
   };
 
   const editDraft = (draft: SocialCampaignDraft) => {
+    if (!canEdit) return;
     setEditingDraftId(draft.id); setTitle(draft.title); setCaption(draft.caption); setHashtags(draft.hashtags.join(' '));
     setSchedule(draft.scheduledAt || ''); setSelectedPlatforms(draft.platformIds); setSelectedAssets(draft.mediaAssetIds); setActiveTab('composer');
   };
 
-  const approveDraft = (draft: SocialCampaignDraft) => {
+  const approveDraft = async (draft: SocialCampaignDraft) => {
+    if (!canApprove) return;
     if (!window.confirm(`${c.approve}: ${draft.title}?`)) return;
-    setDrafts(updateSocialDraft(draft.id, { status: 'APPROVED', approvedAt: new Date().toISOString(), approvedBy: currentUser?.fullName || 'Admin' }));
+    setDrafts(await updateSocialDraft(draft.id, { status: 'APPROVED', approvedAt: new Date().toISOString(), approvedBy: currentUser?.fullName || '' }));
   };
 
-  const rejectDraft = (draft: SocialCampaignDraft) => {
+  const rejectDraft = async (draft: SocialCampaignDraft) => {
+    if (!canApprove) return;
     if (!window.confirm(`${c.reject}: ${draft.title}?`)) return;
-    setDrafts(updateSocialDraft(draft.id, { status: 'REJECTED' }));
+    setDrafts(await updateSocialDraft(draft.id, { status: 'REJECTED' }));
   };
 
   const prepareDraft = async (draft: SocialCampaignDraft) => {
+    if (!canApprove) return;
     if (!['APPROVED', 'READY_TO_PUBLISH'].includes(draft.status)) return;
     const text = formatCaption(draft.caption, draft.hashtags);
     await copyCampaignCaption(text);
     const files = assets.filter((asset) => draft.mediaAssetIds.includes(asset.id)).map((asset) => new File([asset.blob], asset.name, { type: asset.mimeType }));
     const shared = await shareCampaignFiles(files, draft.title, text);
-    setDrafts(updateSocialDraft(draft.id, { status: 'READY_TO_PUBLISH' }));
+    setDrafts(await updateSocialDraft(draft.id, { status: 'READY_TO_PUBLISH' }));
     flash(shared === 'SHARED' ? c.saved : c.copyCaption);
   };
 
-  const markPublished = (draft: SocialCampaignDraft) => {
+  const markPublished = async (draft: SocialCampaignDraft) => {
+    if (!canApprove) return;
     if (draft.status !== 'READY_TO_PUBLISH' && draft.status !== 'APPROVED') return;
     if (!window.confirm(`${c.markPublished}: ${draft.title}?`)) return;
-    setDrafts(updateSocialDraft(draft.id, { status: 'PUBLISHED', publishedAt: new Date().toISOString() }));
+    setDrafts(await updateSocialDraft(draft.id, { status: 'PUBLISHED', publishedAt: new Date().toISOString() }));
   };
 
-  const connectPlatform = (platformId: SocialPlatformId) => {
+  const connectPlatform = async (platformId: SocialPlatformId) => {
+    if (!canEdit) return;
     const label = window.prompt('Account / page label (optional):') || undefined;
-    setConnections(setSocialConnection(platformId, true, label));
+    setConnections(await setSocialConnection(platformId, false, label));
   };
 
   const saveEditedImage = async () => {
+    if (!canEdit) return;
     if (!editingAsset) return;
     await createEditedImageVersion(editingAsset, { brightness, contrast, rotation, quality: 0.9 });
     setEditingAsset(null); setBrightness(100); setContrast(100); setRotation(0); await refreshAssets(); flash(c.imageSaved);
@@ -276,7 +291,7 @@ export const SocialMediaCommandCenterView: React.FC = () => {
             const connection = connections.find((item) => item.platformId === platform.id);
             return <div key={platform.id} className="bg-[#121214] border border-[#1F1F22] rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-[#18181B] border border-[#27272A] flex items-center justify-center text-xs font-bold text-[#D4AF37]">{platform.colorHint}</div><div><div className="text-sm font-bold text-white">{platform.name}</div><div className={`text-[10px] ${connection?.connected ? 'text-emerald-400' : 'text-[#71717A]'}`}>{connection?.connected ? c.connected : c.notConnected}{connection?.accountLabel ? ` · ${connection.accountLabel}` : ''}</div></div></div>{connection?.connected && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}</div>
-              <div className="grid grid-cols-2 gap-2"><button onClick={() => openPlatformLogin(platform.id)} className="py-2 rounded-lg bg-[#18181B] border border-[#27272A] text-xs text-white flex items-center justify-center gap-1"><LogIn className="w-3.5 h-3.5" />{c.login}</button>{connection?.connected ? <button onClick={() => setConnections(setSocialConnection(platform.id, false))} className="py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">{c.disconnect}</button> : <button onClick={() => connectPlatform(platform.id)} className="py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300">{c.confirmConnection}</button>}</div>
+              <div className="grid grid-cols-2 gap-2"><button onClick={() => openPlatformLogin(platform.id)} className="py-2 rounded-lg bg-[#18181B] border border-[#27272A] text-xs text-white flex items-center justify-center gap-1"><LogIn className="w-3.5 h-3.5" />{c.login}</button>{connection?.connected ? <button onClick={() => void setSocialConnection(platform.id, false).then(setConnections)} className="py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">{c.disconnect}</button> : <button onClick={() => void connectPlatform(platform.id)} className="py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300">{c.confirmConnection}</button>}</div>
             </div>;
           })}
         </div>
@@ -285,7 +300,7 @@ export const SocialMediaCommandCenterView: React.FC = () => {
       {activeTab === 'library' && (
         <div className="space-y-4">
           <label className="flex items-center justify-center gap-2 p-5 border border-dashed border-[#3F3F46] rounded-2xl bg-[#121214] text-sm text-[#D4AF37] cursor-pointer"><Upload className="w-5 h-5" />{c.upload}<input type="file" accept="image/*,video/*" multiple className="hidden" onChange={(event) => void handleFiles(event.target.files)} /></label>
-          {assets.length === 0 ? <div className="text-center text-xs text-[#71717A] py-12">{c.noMedia}</div> : <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">{assets.map((asset) => <div key={asset.id} className="bg-[#121214] border border-[#1F1F22] rounded-2xl overflow-hidden"><MediaPreview asset={asset} className="w-full h-40" /><div className="p-3"><div className="text-xs text-white truncate">{asset.name}</div><div className="text-[10px] text-[#71717A] mt-1">{(asset.size / 1024 / 1024).toFixed(2)} MB</div><div className="flex gap-2 mt-3">{asset.mimeType.startsWith('image/') ? <button onClick={() => setEditingAsset(asset)} className="flex-1 py-1.5 rounded-lg bg-[#18181B] border border-[#27272A] text-[10px] text-[#D4AF37]">{c.editImage}</button> : <button disabled className="flex-1 py-1.5 rounded-lg bg-[#18181B] border border-[#27272A] text-[10px] text-[#71717A]" title={c.videoDesktop}><Video className="w-3 h-3 inline mr-1" />Desktop</button>}<button onClick={async () => { if (window.confirm(`${c.delete}: ${asset.name}?`)) { await deleteMediaAsset(asset.id); await refreshAssets(); } }} className="px-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300"><Trash2 className="w-3.5 h-3.5" /></button></div></div></div>)}</div>}
+          {assets.length === 0 ? <div className="text-center text-xs text-[#71717A] py-12">{c.noMedia}</div> : <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">{assets.map((asset) => <div key={asset.id} className="bg-[#121214] border border-[#1F1F22] rounded-2xl overflow-hidden"><MediaPreview asset={asset} className="w-full h-40" /><div className="p-3"><div className="text-xs text-white truncate">{asset.name}</div><div className="text-[10px] text-[#71717A] mt-1">{(asset.size / 1024 / 1024).toFixed(2)} MB</div><div className="flex gap-2 mt-3">{asset.mimeType.startsWith('image/') ? <button disabled={!canEdit} onClick={() => setEditingAsset(asset)} className="flex-1 py-1.5 rounded-lg bg-[#18181B] border border-[#27272A] text-[10px] text-[#D4AF37] disabled:opacity-40">{c.editImage}</button> : <button disabled className="flex-1 py-1.5 rounded-lg bg-[#18181B] border border-[#27272A] text-[10px] text-[#71717A]" title={c.videoDesktop}><Video className="w-3 h-3 inline mr-1" />Desktop</button>}<button disabled={!canDelete} onClick={async () => { if (window.confirm(`${c.delete}: ${asset.name}?`)) { await deleteMediaAsset(asset.id); await refreshAssets(); } }} className="px-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 disabled:opacity-40"><Trash2 className="w-3.5 h-3.5" /></button></div></div></div>)}</div>}
         </div>
       )}
 
@@ -298,7 +313,7 @@ export const SocialMediaCommandCenterView: React.FC = () => {
             <div><label className="text-xs text-[#A1A1AA]">{c.scheduleLabel}</label><input type="datetime-local" value={schedule} onChange={(e) => setSchedule(e.target.value)} className="mt-1 w-full bg-[#18181B] border border-[#27272A] rounded-xl p-3 text-sm text-white" /></div>
             <div><div className="text-xs text-[#A1A1AA] mb-2">{c.channelsLabel}</div><div className="flex flex-wrap gap-2">{SOCIAL_PLATFORMS.map((platform) => <button type="button" key={platform.id} onClick={() => togglePlatform(platform.id)} className={`px-2.5 py-1.5 rounded-lg border text-[11px] ${selectedPlatforms.includes(platform.id) ? 'border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37]' : 'border-[#27272A] bg-[#18181B] text-[#71717A]'}`}>{platform.name}</button>)}</div></div>
             <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">{c.approvalRequired}</div>
-            <div className="grid grid-cols-2 gap-2"><button onClick={() => saveComposer('DRAFT')} className="py-2.5 rounded-xl bg-[#18181B] border border-[#27272A] text-white text-xs">{c.saveDraft}</button><button onClick={() => saveComposer('PENDING_APPROVAL')} className="py-2.5 rounded-xl bg-[#D4AF37] text-black font-bold text-xs">{c.requestApproval}</button></div>
+              <div className="grid grid-cols-2 gap-2"><button disabled={editingDraftId ? !canEdit : !canCreate} onClick={() => void saveComposer('DRAFT')} className="py-2.5 rounded-xl bg-[#18181B] border border-[#27272A] text-white text-xs disabled:opacity-40">{c.saveDraft}</button><button disabled={editingDraftId ? !canEdit : !canCreate} onClick={() => void saveComposer('PENDING_APPROVAL')} className="py-2.5 rounded-xl bg-[#D4AF37] text-black font-bold text-xs disabled:opacity-40">{c.requestApproval}</button></div>
           </div>
           <div className="bg-[#121214] border border-[#1F1F22] rounded-2xl p-5"><div className="text-xs text-[#A1A1AA] mb-3">{c.selectMedia}</div><div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[620px] overflow-y-auto">{assets.map((asset) => <button key={asset.id} onClick={() => toggleAsset(asset.id)} className={`relative rounded-xl overflow-hidden border ${selectedAssets.includes(asset.id) ? 'border-[#D4AF37] ring-1 ring-[#D4AF37]' : 'border-[#27272A]'}`}><MediaPreview asset={asset} className="w-full h-28" />{selectedAssets.includes(asset.id) && <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#D4AF37] text-black flex items-center justify-center"><CheckCircle2 className="w-4 h-4" /></div>}</button>)}</div></div>
         </div>
@@ -310,12 +325,12 @@ export const SocialMediaCommandCenterView: React.FC = () => {
             <div className="flex flex-col md:flex-row md:items-start justify-between gap-3"><div><div className="text-sm font-bold text-white">{draft.title}</div><div className="text-[10px] text-[#71717A] mt-1">{draft.platformIds.map((id) => platformMap.get(id)?.name || id).join(' · ')}{draft.scheduledAt ? ` · ${draft.scheduledAt}` : ''}</div></div><span className={`px-2.5 py-1 rounded-lg border text-[10px] font-mono ${STATUS_STYLE[draft.status]}`}>{draft.status}</span></div>
             <div className="text-xs text-[#A1A1AA] whitespace-pre-wrap line-clamp-4">{formatCaption(draft.caption, draft.hashtags)}</div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => editDraft(draft)} className="px-2.5 py-1.5 rounded-lg bg-[#18181B] border border-[#27272A] text-[10px] text-white"><Pencil className="w-3 h-3 inline mr-1" />{c.edit}</button>
+              <button disabled={!canEdit} onClick={() => editDraft(draft)} className="px-2.5 py-1.5 rounded-lg bg-[#18181B] border border-[#27272A] text-[10px] text-white disabled:opacity-40"><Pencil className="w-3 h-3 inline mr-1" />{c.edit}</button>
               <button onClick={() => void copyCampaignCaption(formatCaption(draft.caption, draft.hashtags))} className="px-2.5 py-1.5 rounded-lg bg-[#18181B] border border-[#27272A] text-[10px] text-white"><Copy className="w-3 h-3 inline mr-1" />{c.copyCaption}</button>
-              {draft.status === 'PENDING_APPROVAL' && <><button onClick={() => approveDraft(draft)} className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-[10px] text-emerald-300">{c.approve}</button><button onClick={() => rejectDraft(draft)} className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[10px] text-rose-300">{c.reject}</button></>}
-              {['APPROVED', 'READY_TO_PUBLISH'].includes(draft.status) && <button onClick={() => void prepareDraft(draft)} className="px-2.5 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-[10px] text-cyan-300"><Send className="w-3 h-3 inline mr-1" />{c.prepare}</button>}
-              {['APPROVED', 'READY_TO_PUBLISH'].includes(draft.status) && <button onClick={() => markPublished(draft)} className="px-2.5 py-1.5 rounded-lg bg-green-500/10 border border-green-500/30 text-[10px] text-green-300">{c.markPublished}</button>}
-              <button onClick={() => { if (window.confirm(`${c.delete}: ${draft.title}?`)) setDrafts(deleteSocialDraft(draft.id)); }} className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[10px] text-rose-300"><Trash2 className="w-3 h-3 inline mr-1" />{c.delete}</button>
+              {draft.status === 'PENDING_APPROVAL' && <><button disabled={!canApprove} onClick={() => void approveDraft(draft)} className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-[10px] text-emerald-300 disabled:opacity-40">{c.approve}</button><button disabled={!canApprove} onClick={() => void rejectDraft(draft)} className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[10px] text-rose-300 disabled:opacity-40">{c.reject}</button></>}
+              {['APPROVED', 'READY_TO_PUBLISH'].includes(draft.status) && <button disabled={!canApprove} onClick={() => void prepareDraft(draft)} className="px-2.5 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-[10px] text-cyan-300 disabled:opacity-40"><Send className="w-3 h-3 inline mr-1" />{c.prepare}</button>}
+              {['APPROVED', 'READY_TO_PUBLISH'].includes(draft.status) && <button disabled={!canApprove} onClick={() => void markPublished(draft)} className="px-2.5 py-1.5 rounded-lg bg-green-500/10 border border-green-500/30 text-[10px] text-green-300 disabled:opacity-40">{c.markPublished}</button>}
+              <button disabled={!canDelete} onClick={() => { if (window.confirm(`${c.delete}: ${draft.title}?`)) void deleteSocialDraft(draft.id).then(setDrafts); }} className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[10px] text-rose-300 disabled:opacity-40"><Trash2 className="w-3 h-3 inline mr-1" />{c.delete}</button>
             </div>
             {draft.status === 'READY_TO_PUBLISH' && <div className="flex flex-wrap gap-2 pt-2 border-t border-[#1F1F22]">{draft.platformIds.map((id) => <button key={id} onClick={() => openPlatformComposer(id)} className="px-2.5 py-1.5 rounded-lg bg-[#18181B] border border-[#27272A] text-[10px] text-[#D4AF37] flex items-center gap-1"><ExternalLink className="w-3 h-3" />{c.openPlatform}: {platformMap.get(id)?.name || id}</button>)}</div>}
           </div>)}
@@ -323,7 +338,7 @@ export const SocialMediaCommandCenterView: React.FC = () => {
       )}
 
       {editingAsset && (
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"><div className="w-full max-w-xl bg-[#121214] border border-[#27272A] rounded-2xl p-5 space-y-4"><div className="flex items-center justify-between"><h3 className="text-sm font-bold text-white">{c.editImage}</h3><button onClick={() => setEditingAsset(null)} className="text-[#71717A]">×</button></div><MediaPreview asset={editingAsset} className="w-full max-h-72 rounded-xl" /><div><label className="text-xs text-[#A1A1AA]">Brightness: {brightness}%</label><input type="range" min="40" max="160" value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="w-full" /></div><div><label className="text-xs text-[#A1A1AA]">Contrast: {contrast}%</label><input type="range" min="40" max="160" value={contrast} onChange={(e) => setContrast(Number(e.target.value))} className="w-full" /></div><div className="flex gap-2">{([0, 90, 180, 270] as const).map((deg) => <button key={deg} onClick={() => setRotation(deg)} className={`flex-1 py-2 rounded-lg border text-xs ${rotation === deg ? 'border-[#D4AF37] text-[#D4AF37]' : 'border-[#27272A] text-[#A1A1AA]'}`}>{deg}°</button>)}</div><button onClick={() => void saveEditedImage()} className="w-full py-2.5 rounded-xl bg-[#D4AF37] text-black font-bold text-xs">Save edited copy</button></div></div>
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"><div className="w-full max-w-xl bg-[#121214] border border-[#27272A] rounded-2xl p-5 space-y-4"><div className="flex items-center justify-between"><h3 className="text-sm font-bold text-white">{c.editImage}</h3><button type="button" aria-label="Close image editor" onClick={() => setEditingAsset(null)} className="text-[#71717A]">×</button></div><MediaPreview asset={editingAsset} className="w-full max-h-72 rounded-xl" /><div><label className="text-xs text-[#A1A1AA]">Brightness: {brightness}%</label><input type="range" min="40" max="160" value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="w-full" /></div><div><label className="text-xs text-[#A1A1AA]">Contrast: {contrast}%</label><input type="range" min="40" max="160" value={contrast} onChange={(e) => setContrast(Number(e.target.value))} className="w-full" /></div><div className="flex gap-2">{([0, 90, 180, 270] as const).map((deg) => <button type="button" key={deg} onClick={() => setRotation(deg)} className={`flex-1 py-2 rounded-lg border text-xs ${rotation === deg ? 'border-[#D4AF37] text-[#D4AF37]' : 'border-[#27272A] text-[#A1A1AA]'}`}>{deg}°</button>)}</div><button type="button" onClick={() => void saveEditedImage()} className="w-full py-2.5 rounded-xl bg-[#D4AF37] text-black font-bold text-xs">Save edited copy</button></div></div>
       )}
     </div>
   );

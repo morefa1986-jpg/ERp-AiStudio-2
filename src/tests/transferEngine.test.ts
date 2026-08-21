@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FishTransfer, Pond } from '../types';
+import { FishTransfer, LarvalBatch, NurseryTank, Pond } from '../types';
 import { executeAtomicFishTransfer } from '../utils/transferEngine';
 
 const initialPonds: Pond[] = [
@@ -29,7 +29,7 @@ function transfer(overrides: Partial<Omit<FishTransfer, 'id' | 'status'>> = {}):
   };
 }
 
-describe('Transfer Engine - conservation and external traceability', () => {
+describe('Transfer Engine - conservation and fail-closed destinations', () => {
   it('preserves total count and biomass for pond-to-pond transfers', () => {
     const result = executeAtomicFishTransfer(transfer(), initialPonds);
     expect(result.success).toBe(true);
@@ -48,7 +48,7 @@ describe('Transfer Engine - conservation and external traceability', () => {
     expect(executeAtomicFishTransfer(transfer({ destinationId: 'pond_src', destinationName: 'استخر مبدا' }), initialPonds).success).toBe(false);
   });
 
-  it('allows a traceable transfer from a pond to processing and removes live stock only from source', () => {
+  it('rejects external transfers until the destination ledger can be updated atomically', () => {
     const result = executeAtomicFishTransfer(transfer({
       destinationType: 'Processing',
       destinationId: 'processing_line_1',
@@ -58,12 +58,37 @@ describe('Transfer Engine - conservation and external traceability', () => {
       totalBiomassKg: 100,
       reason: 'Harvest',
     }), initialPonds);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('مقصد خارجی');
+    expect(initialPonds.find((pond) => pond.id === 'pond_src')).toMatchObject({ fishCount: 1000, biomassKg: 4000 });
+  });
+
+  it('moves pond biomass into an empty nursery tank with a destination ledger', () => {
+    const tanks: NurseryTank[] = [{ id: 'tank_empty', code: 'N-01', volumeLiters: 1000, fishCount: 0, avgWeightGrams: 0, totalBiomassGrams: 0, feedType: '', dailyFeedGrams: 0, mortalityToday: 0, tempC: 16, doMgL: 7, status: 'Empty' }];
+    const result = executeAtomicFishTransfer(transfer({ destinationType: 'Nursery', destinationId: 'tank_empty', destinationName: 'N-01', fishCount: 200, averageWeightKg: 4, totalBiomassKg: 800 }), initialPonds, tanks, []);
     expect(result.success).toBe(true);
-    const source = result.updatedPonds!.find((pond) => pond.id === 'pond_src')!;
-    const untouchedDestinationPond = result.updatedPonds!.find((pond) => pond.id === 'pond_dst')!;
-    expect(source.fishCount).toBe(975);
-    expect(source.biomassKg).toBe(3900);
-    expect(untouchedDestinationPond.fishCount).toBe(500);
-    expect(result.newTransfer?.destinationType).toBe('Processing');
+    expect(result.updatedPonds?.find((pond) => pond.id === 'pond_src')).toMatchObject({ fishCount: 800, biomassKg: 3200 });
+    expect(result.updatedNurseryTanks?.[0]).toMatchObject({ fishCount: 200, totalBiomassGrams: 800000, speciesId: 'sp_beluga' });
+  });
+
+  it('moves nursery biomass into a pond and rejects incomplete hatchery ledgers', () => {
+    const tanks: NurseryTank[] = [{ id: 'tank_src', code: 'N-01', volumeLiters: 1000, fishCount: 200, avgWeightGrams: 4000, totalBiomassGrams: 800000, speciesId: 'sp_beluga', feedType: '', dailyFeedGrams: 0, mortalityToday: 0, tempC: 16, doMgL: 7, status: 'Active' }];
+    const nursery = executeAtomicFishTransfer(transfer({ sourceType: 'Nursery', sourceId: 'tank_src', sourceName: 'N-01', destinationType: 'Pond', destinationId: 'pond_dst', destinationName: 'استخر مقصد', fishCount: 200, averageWeightKg: 4, totalBiomassKg: 800 }), initialPonds, tanks, []);
+    expect(nursery.success).toBe(true);
+    expect(nursery.updatedNurseryTanks?.[0]).toMatchObject({ fishCount: 0, totalBiomassGrams: 0, status: 'Empty' });
+    expect(nursery.updatedPonds?.find((pond) => pond.id === 'pond_dst')).toMatchObject({ fishCount: 700, biomassKg: 2800 });
+
+    const hatcheryBatch: LarvalBatch = {
+      id: 'larva_hatchery', batchCode: 'L-1', fertilizationBatchId: 'fert-1', motherBroodstockIds: [], fatherBroodstockIds: [],
+      speciesId: 'sp_beluga', speciesName: 'Beluga', hatchDate: '2026-08-20', larvalCount: 1000, totalBiomassKg: 8,
+      survivalRatePercent: 100, deformityPercent: 0, initialFeedType: 'Artemia Nauplii', destination: 'Nursery', status: 'Transferred',
+    };
+    const hatchery = executeAtomicFishTransfer(transfer({ sourceType: 'Hatchery', sourceId: hatcheryBatch.id, sourceName: 'L-1', destinationType: 'Nursery', destinationId: 'tank_src', destinationName: 'N-01', fishCount: 1000, averageWeightKg: 0.008, totalBiomassKg: 8 }), initialPonds, [{ ...tanks[0], fishCount: 0, avgWeightGrams: 0, totalBiomassGrams: 0, status: 'Empty' }], [hatcheryBatch]);
+    expect(hatchery.success).toBe(true);
+    expect(hatchery.updatedLarvae?.[0]).toMatchObject({ larvalCount: 1000, totalBiomassKg: 8, currentTankId: 'tank_src' });
+    expect(hatchery.updatedNurseryTanks?.[0]).toMatchObject({ currentBatchId: hatcheryBatch.id, fishCount: 1000, totalBiomassGrams: 8000 });
+
+    const incomplete = executeAtomicFishTransfer(transfer({ sourceType: 'Hatchery', sourceId: hatcheryBatch.id, destinationType: 'Nursery', destinationId: 'tank_src', fishCount: 1000, averageWeightKg: 0.008, totalBiomassKg: 8 }), initialPonds, tanks, [{ ...hatcheryBatch, totalBiomassKg: undefined }]);
+    expect(incomplete.success).toBe(false);
   });
 });

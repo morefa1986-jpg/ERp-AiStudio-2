@@ -1,56 +1,11 @@
-export type SocialPlatformId =
-  | 'instagram'
-  | 'linkedin'
-  | 'whatsapp'
-  | 'telegram'
-  | 'eitaa'
-  | 'rubika'
-  | 'bale'
-  | 'facebook'
-  | 'x'
-  | 'youtube';
+import { nextId } from '../utils/id';
 
-export type SocialWorkflowStatus =
-  | 'DRAFT'
-  | 'PENDING_APPROVAL'
-  | 'APPROVED'
-  | 'READY_TO_PUBLISH'
-  | 'PUBLISHED'
-  | 'REJECTED';
+export type SocialPlatformId = 'instagram' | 'linkedin' | 'whatsapp' | 'telegram' | 'eitaa' | 'rubika' | 'bale' | 'facebook' | 'x' | 'youtube';
+export type SocialWorkflowStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'READY_TO_PUBLISH' | 'PUBLISHED' | 'REJECTED';
 
-export interface SocialPlatformDefinition {
-  id: SocialPlatformId;
-  name: string;
-  loginUrl: string;
-  composeUrl: string;
-  colorHint: string;
-  supportsFileShare: boolean;
-}
-
-export interface SocialConnectionState {
-  platformId: SocialPlatformId;
-  connected: boolean;
-  accountLabel?: string;
-  connectedAt?: string;
-  lastOpenedAt?: string;
-}
-
-export interface SocialCampaignDraft {
-  id: string;
-  title: string;
-  caption: string;
-  hashtags: string[];
-  platformIds: SocialPlatformId[];
-  mediaAssetIds: string[];
-  scheduledAt?: string;
-  status: SocialWorkflowStatus;
-  createdAt: string;
-  updatedAt: string;
-  approvedAt?: string;
-  approvedBy?: string;
-  publishedAt?: string;
-  notes?: string;
-}
+export interface SocialPlatformDefinition { id: SocialPlatformId; name: string; loginUrl: string; composeUrl: string; colorHint: string; supportsFileShare: boolean; }
+export interface SocialConnectionState { platformId: SocialPlatformId; connected: boolean; assistedReady?: boolean; accountLabel?: string; connectedAt?: string; lastOpenedAt?: string; }
+export interface SocialCampaignDraft { id: string; title: string; caption: string; hashtags: string[]; platformIds: SocialPlatformId[]; mediaAssetIds: string[]; scheduledAt?: string; status: SocialWorkflowStatus; createdAt: string; updatedAt: string; approvedAt?: string; approvedBy?: string; publishedAt?: string; notes?: string; }
 
 export const SOCIAL_PLATFORMS: SocialPlatformDefinition[] = [
   { id: 'instagram', name: 'Instagram', loginUrl: 'https://www.instagram.com/', composeUrl: 'https://www.instagram.com/', colorHint: 'IG', supportsFileShare: true },
@@ -65,57 +20,61 @@ export const SOCIAL_PLATFORMS: SocialPlatformDefinition[] = [
   { id: 'youtube', name: 'YouTube Studio', loginUrl: 'https://accounts.google.com/', composeUrl: 'https://studio.youtube.com/', colorHint: 'YT', supportsFileShare: true },
 ];
 
-const CONNECTION_STORAGE_KEY = 'fathi_social_connections_v1';
-const DRAFT_STORAGE_KEY = 'fathi_social_campaigns_v1';
+const DB_NAME = 'fathi_erp_social_workflow';
+const DB_VERSION = 1;
+const STORE_NAME = 'records';
+const CONNECTIONS_KEY = 'connections';
+const DRAFTS_KEY = 'drafts';
 
-function readJson<T>(key: string, fallback: T): T {
-  try {
-    if (typeof window === 'undefined') return fallback;
-    const raw = window.localStorage.getItem(key);
-    return raw ? JSON.parse(raw) as T : fallback;
-  } catch {
-    return fallback;
-  }
-}
+interface StoredRecord<T> { key: string; value: T; }
 
-function writeJson<T>(key: string, value: T): void {
-  try {
-    if (typeof window !== 'undefined') window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Storage may be unavailable in private/restricted browser contexts.
-  }
-}
-
-export function listSocialConnections(): SocialConnectionState[] {
-  const saved = readJson<Record<string, SocialConnectionState>>(CONNECTION_STORAGE_KEY, {});
-  return SOCIAL_PLATFORMS.map((platform) => saved[platform.id] || {
-    platformId: platform.id,
-    connected: false,
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') return reject(new Error('SOCIAL_DB_UNAVAILABLE'));
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: 'key' }); };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('SOCIAL_DB_OPEN_FAILED'));
   });
 }
 
-export function setSocialConnection(
-  platformId: SocialPlatformId,
-  connected: boolean,
-  accountLabel?: string,
-): SocialConnectionState[] {
-  const current = readJson<Record<string, SocialConnectionState>>(CONNECTION_STORAGE_KEY, {});
-  current[platformId] = {
-    platformId,
-    connected,
-    accountLabel: accountLabel?.trim() || current[platformId]?.accountLabel,
-    connectedAt: connected ? (current[platformId]?.connectedAt || new Date().toISOString()) : undefined,
-    lastOpenedAt: current[platformId]?.lastOpenedAt,
-  };
-  writeJson(CONNECTION_STORAGE_KEY, current);
+async function readRecord<T>(key: string, fallback: T): Promise<T> {
+  try {
+    const db = await openDb();
+    try {
+      const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(key);
+      const record = await new Promise<StoredRecord<T> | undefined>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+      return record?.value ?? fallback;
+    } finally { db.close(); }
+  } catch { return fallback; }
+}
+
+async function writeRecord<T>(key: string, value: T): Promise<void> {
+  const db = await openDb();
+  try {
+    const request = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put({ key, value } satisfies StoredRecord<T>);
+    await new Promise<void>((resolve, reject) => { request.onsuccess = () => resolve(); request.onerror = () => reject(request.error); });
+  } finally { db.close(); }
+}
+
+export async function listSocialConnections(): Promise<SocialConnectionState[]> {
+  const saved = await readRecord<Record<string, SocialConnectionState>>(CONNECTIONS_KEY, {});
+  return SOCIAL_PLATFORMS.map((platform) => saved[platform.id] || { platformId: platform.id, connected: false });
+}
+
+export async function setSocialConnection(platformId: SocialPlatformId, _connected: boolean, accountLabel?: string): Promise<SocialConnectionState[]> {
+  const current = await readRecord<Record<string, SocialConnectionState>>(CONNECTIONS_KEY, {});
+  const existing = current[platformId];
+  current[platformId] = { platformId, connected: false, assistedReady: Boolean(accountLabel?.trim()), accountLabel: accountLabel?.trim() || existing?.accountLabel, connectedAt: undefined, lastOpenedAt: existing?.lastOpenedAt };
+  await writeRecord(CONNECTIONS_KEY, current);
   return listSocialConnections();
 }
 
-export function markPlatformOpened(platformId: SocialPlatformId): SocialConnectionState[] {
-  const current = readJson<Record<string, SocialConnectionState>>(CONNECTION_STORAGE_KEY, {});
+export async function markPlatformOpened(platformId: SocialPlatformId): Promise<SocialConnectionState[]> {
+  const current = await readRecord<Record<string, SocialConnectionState>>(CONNECTIONS_KEY, {});
   const existing = current[platformId] || { platformId, connected: false };
   current[platformId] = { ...existing, lastOpenedAt: new Date().toISOString() };
-  writeJson(CONNECTION_STORAGE_KEY, current);
+  await writeRecord(CONNECTIONS_KEY, current);
   return listSocialConnections();
 }
 
@@ -123,82 +82,42 @@ export function openPlatformLogin(platformId: SocialPlatformId): void {
   const platform = SOCIAL_PLATFORMS.find((item) => item.id === platformId);
   if (!platform || typeof window === 'undefined') return;
   window.open(platform.loginUrl, '_blank', 'noopener,noreferrer');
-  markPlatformOpened(platformId);
+  void markPlatformOpened(platformId);
 }
 
 export function openPlatformComposer(platformId: SocialPlatformId): void {
   const platform = SOCIAL_PLATFORMS.find((item) => item.id === platformId);
   if (!platform || typeof window === 'undefined') return;
   window.open(platform.composeUrl, '_blank', 'noopener,noreferrer');
-  markPlatformOpened(platformId);
+  void markPlatformOpened(platformId);
 }
 
-export function listSocialDrafts(): SocialCampaignDraft[] {
-  const drafts = readJson<SocialCampaignDraft[]>(DRAFT_STORAGE_KEY, []);
+export async function listSocialDrafts(): Promise<SocialCampaignDraft[]> {
+  const drafts = await readRecord<SocialCampaignDraft[]>(DRAFTS_KEY, []);
   return drafts.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-export function saveSocialDraft(input: Omit<SocialCampaignDraft, 'id' | 'createdAt' | 'updatedAt' | 'status'> & { status?: SocialWorkflowStatus }): SocialCampaignDraft[] {
-  const drafts = listSocialDrafts();
-  const now = new Date().toISOString();
-  const draft: SocialCampaignDraft = {
-    ...input,
-    id: `social_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    status: input.status || 'DRAFT',
-    createdAt: now,
-    updatedAt: now,
-  };
-  const next = [draft, ...drafts];
-  writeJson(DRAFT_STORAGE_KEY, next);
-  return next;
+export async function saveSocialDraft(input: Omit<SocialCampaignDraft, 'id' | 'createdAt' | 'updatedAt' | 'status'> & { status?: SocialWorkflowStatus }): Promise<SocialCampaignDraft[]> {
+  const drafts = await listSocialDrafts(); const now = new Date().toISOString();
+  const draft: SocialCampaignDraft = { ...input, id: nextId('social'), status: input.status || 'DRAFT', createdAt: now, updatedAt: now };
+  const next = [draft, ...drafts]; await writeRecord(DRAFTS_KEY, next); return next;
 }
 
-export function updateSocialDraft(id: string, patch: Partial<SocialCampaignDraft>): SocialCampaignDraft[] {
-  const now = new Date().toISOString();
-  const next = listSocialDrafts().map((draft) => draft.id === id ? { ...draft, ...patch, id: draft.id, updatedAt: now } : draft);
-  writeJson(DRAFT_STORAGE_KEY, next);
-  return next;
+export async function updateSocialDraft(id: string, patch: Partial<SocialCampaignDraft>): Promise<SocialCampaignDraft[]> {
+  const now = new Date().toISOString(); const next = (await listSocialDrafts()).map((draft) => draft.id === id ? { ...draft, ...patch, id: draft.id, updatedAt: now } : draft); await writeRecord(DRAFTS_KEY, next); return next;
 }
 
-export function deleteSocialDraft(id: string): SocialCampaignDraft[] {
-  const next = listSocialDrafts().filter((draft) => draft.id !== id);
-  writeJson(DRAFT_STORAGE_KEY, next);
-  return next;
+export async function deleteSocialDraft(id: string): Promise<SocialCampaignDraft[]> {
+  const next = (await listSocialDrafts()).filter((draft) => draft.id !== id); await writeRecord(DRAFTS_KEY, next); return next;
 }
 
 export function formatCaption(caption: string, hashtags: string[]): string {
-  const cleanTags = hashtags
-    .map((tag) => tag.trim().replace(/^#/, '').replace(/\s+/g, '_'))
-    .filter(Boolean)
-    .map((tag) => `#${tag}`);
+  const cleanTags = hashtags.map((tag) => tag.trim().replace(/^#/, '').replace(/\s+/g, '_')).filter(Boolean).map((tag) => `#${tag}`);
   return [caption.trim(), cleanTags.join(' ')].filter(Boolean).join('\n\n');
 }
 
-export async function copyCampaignCaption(caption: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(caption);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function shareCampaignFiles(
-  files: File[],
-  title: string,
-  text: string,
-): Promise<'SHARED' | 'UNSUPPORTED' | 'CANCELLED'> {
+export async function copyCampaignCaption(caption: string): Promise<boolean> { try { await navigator.clipboard.writeText(caption); return true; } catch { return false; } }
+export async function shareCampaignFiles(files: File[], title: string, text: string): Promise<'SHARED' | 'UNSUPPORTED' | 'CANCELLED'> {
   if (typeof navigator === 'undefined' || !('share' in navigator)) return 'UNSUPPORTED';
-  try {
-    const payload: ShareData = { title, text };
-    if (files.length > 0) {
-      const canShareFiles = !('canShare' in navigator) || navigator.canShare({ files });
-      if (canShareFiles) payload.files = files;
-    }
-    await navigator.share(payload);
-    return 'SHARED';
-  } catch (error: any) {
-    if (error?.name === 'AbortError') return 'CANCELLED';
-    return 'UNSUPPORTED';
-  }
+  try { const payload: ShareData = { title, text }; if (files.length > 0 && (!('canShare' in navigator) || navigator.canShare({ files }))) payload.files = files; await navigator.share(payload); return 'SHARED'; } catch (error: any) { return error?.name === 'AbortError' ? 'CANCELLED' : 'UNSUPPORTED'; }
 }

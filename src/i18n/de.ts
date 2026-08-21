@@ -5,6 +5,7 @@ export const de = {
   tagline: 'Integriertes Stör-Aquakultur-, Kaviarverarbeitungs- und KI-Betriebssystem',
   online: 'Online',
   offline: 'Offline (LAN-Modus)',
+  demoMode: 'DEMOMODUS — Betriebswerte sind ausschließlich Beispieldaten',
   lanMode: 'Lokaler Netzwerkmodus (Kein Internet erforderlich)',
   searchPlaceholder: 'Globale Suche (Becken, RFID-Chips, Proformas, Arten, Personal)...',
   save: 'Speichern',
@@ -81,7 +82,7 @@ export const de = {
     manageSecurity: 'Sicherheit & Benutzer verwalten',
     logout: 'Abmelden',
     notificationsTitle: 'Audit-Warnungen & Ereignisse',
-    lanLatency: 'Lokales Netzwerk (LAN 4ms)',
+    lanLatency: 'Status der lokalen Netzwerkverbindung',
   },
 
   // Dynamic Translation Component
@@ -679,7 +680,7 @@ export const de = {
   platform: {
     title: 'Multiplattform-Verteilungszentrum (Windows, iOS PWA & Android)',
     subtitle: 'Eigenständige Installationspakete für Farm-Steuerungs-PCs (Offline-Windows), Tablets und Smartphones des Personals',
-    syncBadge: 'Offline-First LAN Sync Architecture',
+    syncBadge: 'Lokale SQLite-Datenbank; Synchronisierung nur bei verifizierter Verbindung',
     windowsTab: 'Windows Desktop-Installer (.exe / .msi)',
     iosTab: 'Apple iOS Web-App (iOS PWA / Retina)',
     androidTab: 'Android-Paket (APK / AAB / Google Play)',
@@ -698,7 +699,7 @@ export const de = {
     loginTitle: 'Anmeldung bei Fathi Aqua ERP',
     subtitle: 'Enterprise-Authentifizierung & RBAC',
     username: 'Benutzername:',
-    usernamePlaceholder: 'admin, vet, hatchery, sales, accountant...',
+    usernamePlaceholder: 'Organisationsbenutzername',
     password: 'Sicheres Passwort:',
     selectLanguage: 'Systemsprache wählen',
     rememberMe: 'Benutzername merken',
@@ -710,10 +711,14 @@ export const de = {
     sessionActive: 'Sichere Sitzung aktiv',
     auditLog: 'Sicherheits-Audit-Protokoll (Unveränderlich)',
     noPlaintext: 'SHA-256 + Salted Hashing Sicherheit',
-    demoAccountsTitle: 'Enterprise-Testkonten:',
+    demoAccountsTitle: 'Registrierte Organisationskonten:',
     errRequired: 'Bitte Benutzername und Passwort eingeben.',
     errInvalidPass: 'Ungültiges Passwort eingegeben.',
+    errRateLimited: 'Zu viele fehlgeschlagene Versuche. Bitte später erneut versuchen.',
     errServer: 'Fehler bei der Verbindung zum Authentifizierungsserver.',
+    fullName: 'Vollständiger Name', email: 'E-Mail', confirmPassword: 'Passwort bestätigen',
+    bootstrapTitle: 'Erster Start: Administrator erstellen', bootstrapHint: 'Mindestens 12 Zeichen verwenden. Das Passwort wird nicht im Browser gespeichert.',
+    bootstrapInvalid: 'Administratorangaben oder Passwortbestätigung sind ungültig.', bootstrapAlreadyDone: 'Die Administratoreinrichtung wurde bereits abgeschlossen.', serverAuthOnly: 'Die Authentifizierung erfolgt ausschließlich über die lokale Datenbank.', createAdmin: 'Administrator erstellen und anmelden',
   },
 
   // AI Assistant & Marketing

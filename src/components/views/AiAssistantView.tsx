@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useI18n } from '../../i18n';
 import { useFarm } from '../../context/FarmContext';
+import { getStoredSessionToken } from '../../context/AuthContext';
 import {
   Bot,
   Send,
@@ -15,7 +16,7 @@ import {
 
 export const AiAssistantView: React.FC = () => {
   const { t, language } = useI18n();
-  const { ponds, broodstock, feedingRecords, coldStorage } = useFarm();
+  const { ponds, broodstock } = useFarm();
 
   const [prompt, setPrompt] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -39,7 +40,7 @@ export const AiAssistantView: React.FC = () => {
   // Quick prompt suggestions
   const suggestions = [
     'استخرهای با ریسک افت اکسیژن را بررسی و راهکار ارائه بده.',
-    'چگونه می‌توانیم FCR استخر ۱۰۱ را از ۱.۱۵ به کمتر از ۱.۰۵ برسانیم؟',
+    'چگونه می‌توانیم FCR استخر انتخاب‌شده را بهبود دهیم؟',
     'زمان مناسب سونوگرافی و استحصال خاویار برای ماهیان با قطر تخمک بالای ۳.۵mm چیست؟',
     'پروتکل ضدعفونی بستر استخرها در صورت مشاهده تلفات چیست؟',
   ];
@@ -60,22 +61,12 @@ export const AiAssistantView: React.FC = () => {
 
     try {
       // Build farm context payload
-      const farmContextData = {
-        totalPonds: ponds.length,
-        stoppedPonds: ponds.filter((p) => p.feedingStatus === 'STOPPED').map((p) => ({
-          name: p.name,
-          reason: p.stopFeedingReason,
-          do: p.dissolvedOxygen,
-        })),
-        avgDO: (ponds.reduce((s, p) => s + p.dissolvedOxygen, 0) / ponds.length).toFixed(2),
-        avgTemp: (ponds.reduce((s, p) => s + p.waterTemperature, 0) / ponds.length).toFixed(1),
-        caviarStockKg: coldStorage.filter((c) => c.productType.includes('Caviar')).reduce((s, c) => s + c.weightKg, 0),
-        broodstockCount: broodstock.length,
-      };
+      const farmContextData = { ponds: ponds.map((pond) => ({ id: pond.id, name: pond.name, feedingStatus: pond.feedingStatus, fishCount: pond.fishCount, biomassKg: pond.biomassKg, fcr: pond.fcr, dissolvedOxygen: pond.dissolvedOxygen, waterTemperature: pond.waterTemperature, ph: pond.ph })) };
+      const token = getStoredSessionToken();
 
       const response = await fetch('/api/ai/ask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           prompt: textToSend,
           language,
@@ -83,21 +74,25 @@ export const AiAssistantView: React.FC = () => {
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       const aiMsg = {
         role: 'assistant' as const,
-        text: data.answer || 'پاسخی دریافت نشد.',
+        text: data.answer || 'پاسخی از موتور تحلیل دریافت نشد؛ وضعیت داده‌ها را از گزارش‌های معتبر بررسی کنید.',
         time: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
       };
 
       setMessages((prev) => [...prev, aiMsg]);
     } catch (err) {
+      const stopped = ponds.filter((pond) => pond.feedingStatus === 'STOPPED').length;
+      const localAnswer = language === 'fa'
+        ? `تحلیل محلی در دسترس است: ${ponds.length} استخر، ${stopped} استخر متوقف و ${broodstock.length} ماهی مولد ثبت شده است. برای پاسخ عملیاتی، ابتدا تله‌متری معتبر و تازه ثبت کنید.`
+        : `Local deterministic analysis is available: ${ponds.length} ponds, ${stopped} stopped-feeding ponds and ${broodstock.length} broodstock records. Record fresh authoritative telemetry before taking an operational action.`;
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          text: 'خطا در ارتباط با سرور هوش مصنوعی. لطفاً از اتصال اینترنت یا کلید Gemini API اطمینان حاصل فرمایید.',
+          text: localAnswer,
           time: new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -119,16 +114,16 @@ export const AiAssistantView: React.FC = () => {
         <div>
           <h1 className="text-xl font-black text-white flex items-center gap-2.5">
             <Bot className="w-6 h-6 text-purple-400" />
-            مشاور هوشمند پرورش و سلامت ماهیان خاویاری (Gemini AI)
+            مشاور پرورش و سلامت ماهیان خاویاری (تحلیل محلی و AI اختیاری)
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            دستیار تصمیم‌یار اختصاصی مجهز به هوش مصنوعی با دسترسی زنده به تله‌متری استخرها و داده‌های شجره‌نامه مزرعه
+            پاسخ‌ها فقط بر پایه داده‌های معتبر و تازه ارسالی ERP تولید می‌شوند؛ بدون کلید AI، تحلیل قطعی محلی فعال است.
           </p>
         </div>
 
         <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 rounded-xl text-xs text-purple-300 font-bold">
           <Sparkles className="w-4 h-4 text-purple-400" />
-          <span>Gemini 2.5 Flash Server-Side Integration</span>
+          <span>Local deterministic engine · Optional Gemini</span>
         </div>
       </div>
 
@@ -192,7 +187,7 @@ export const AiAssistantView: React.FC = () => {
               </div>
               <div className="p-4 rounded-2xl bg-slate-800/80 text-xs text-slate-300 border border-slate-700 flex items-center gap-2">
                 <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
-                <span>هوش مصنوعی در حال تحلیل داده‌های مزرعه و استخراج پاسخ تخصصی...</span>
+                <span>در حال تحلیل داده‌های مجاز و معتبر مزرعه...</span>
               </div>
             </div>
           )}

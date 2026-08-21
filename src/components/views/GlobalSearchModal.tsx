@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search, X, Fish, Egg, DollarSign, Package, UserCheck, ArrowRight } from 'lucide-react';
 import { useFarm } from '../../context/FarmContext';
 import { useI18n } from '../../i18n';
@@ -17,6 +17,13 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
   const { t } = useI18n();
   const { ponds, broodstock, proformas, inventory, employees } = useFarm();
   const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -61,7 +68,9 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
             className="w-full bg-transparent text-white text-xs focus:outline-none placeholder:text-[#71717A]"
           />
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close search"
             className="p-1 text-[#71717A] hover:text-white rounded-lg hover:bg-[#1F1F22] cursor-pointer"
           >
             <X className="w-4 h-4" />

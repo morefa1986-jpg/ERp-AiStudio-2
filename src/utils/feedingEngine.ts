@@ -12,6 +12,16 @@ export interface FeedingRecommendationResult {
   };
 }
 
+export interface AuthoritativeFeedingTelemetry {
+  timestamp?: string;
+  sensorStatus?: 'VALID' | 'STALE' | 'INVALID' | 'OFFLINE' | 'MANUAL';
+  dissolvedOxygen?: number | null;
+  waterTemperature?: number | null;
+  ph?: number | null;
+  ammonia?: number | null;
+  nitrite?: number | null;
+}
+
 export function normalizeFeedAmountToKg(
   amount: number,
   unit: 'kg' | 'g' | 'gram' | 'cup' | 'cup250g' | 'ton' | 'bag_25kg' | string
@@ -24,11 +34,23 @@ export function normalizeFeedAmountToKg(
   return Number(amount.toFixed(4));
 }
 
-function validatePondSafety(pond: Pond): { safe: boolean; error?: string; assessment: ReturnType<typeof assessWaterSafetyForFeeding> } {
+/** Convert a normalized kilogram amount to the unit used by the inventory ledger. */
+export function inventoryQuantityForFeedKg(item: InventoryItem, amountKg: number): number {
+  if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
+  if (item.unit === 'gram') return Number((amountKg * 1000).toFixed(4));
+  if (item.unit === 'kg') return Number(amountKg.toFixed(4));
+  return 0;
+}
+
+function validatePondSafety(pond: Pond, telemetry?: AuthoritativeFeedingTelemetry): { safe: boolean; error?: string; assessment: ReturnType<typeof assessWaterSafetyForFeeding> } {
   const assessment = assessWaterSafetyForFeeding({
-    dissolvedOxygen: pond.dissolvedOxygen,
-    waterTemperature: pond.waterTemperature,
-    ph: pond.ph,
+    dissolvedOxygen: telemetry?.dissolvedOxygen ?? pond.dissolvedOxygen,
+    waterTemperature: telemetry?.waterTemperature ?? pond.waterTemperature,
+    ph: telemetry?.ph ?? pond.ph,
+    ammonia: telemetry?.ammonia ?? pond.ammonia,
+    nitrite: telemetry?.nitrite ?? pond.nitrite,
+    timestamp: telemetry?.timestamp ?? pond.lastTelemetryTimestamp,
+    sensorStatus: telemetry?.sensorStatus ?? pond.sensorQuality,
   });
 
   if (pond.feedingStatus === 'STOPPED') {
@@ -36,6 +58,9 @@ function validatePondSafety(pond: Pond): { safe: boolean; error?: string; assess
   }
   if (pond.activeTreatmentId) {
     return { safe: false, error: 'ثبت خوراک غیرمجاز است: استخر دارای درمان فعال است.', assessment };
+  }
+  if (pond.sensorQuality === 'INVALID' || pond.sensorQuality === 'STALE' || pond.sensorQuality === 'OFFLINE') {
+    return { safe: false, error: 'ثبت خوراک غیرمجاز است: کیفیت سنسور معتبر نیست.', assessment };
   }
   if (!assessment.isSafeForFeeding) {
     return {
@@ -50,7 +75,8 @@ function validatePondSafety(pond: Pond): { safe: boolean; error?: string; assess
 export function calculateFeedingRecommendation(
   pond: Pond | undefined,
   speciesList: SturgeonSpecies[],
-  activeTreatment?: TreatmentRecord
+  activeTreatment?: TreatmentRecord,
+  telemetry?: AuthoritativeFeedingTelemetry,
 ): FeedingRecommendationResult {
   if (!pond) return { recommendedKg: 0, isLocked: true, lockReason: 'استخر یافت نشد.' };
 
@@ -70,7 +96,7 @@ export function calculateFeedingRecommendation(
     };
   }
 
-  const safety = validatePondSafety(pond);
+  const safety = validatePondSafety(pond, telemetry);
   if (!safety.safe) {
     return {
       recommendedKg: 0,
@@ -115,6 +141,9 @@ export function validateFeedingSubmission(
 ): { success: boolean; error?: string; normalizedAmountKg: number; feedItem?: InventoryItem } {
   if (!pond) return { success: false, error: 'استخر یافت نشد.', normalizedAmountKg: 0 };
 
+  const acceptedUnits = new Set(['kg', 'g', 'gram', 'cup', 'cup250g', 'ton', 't', 'bag_25kg']);
+  if (!acceptedUnits.has(String(recordData.unit))) return { success: false, error: 'واحد خوراک پشتیبانی نمی‌شود.', normalizedAmountKg: 0 };
+
   // Never trust telemetry copied from a request/form. Revalidate authoritative pond state here.
   const safety = validatePondSafety(pond);
   if (!safety.safe) return { success: false, error: safety.error, normalizedAmountKg: 0 };
@@ -131,10 +160,14 @@ export function validateFeedingSubmission(
   if (!feedItem.category.includes('Feed')) {
     return { success: false, error: 'کالای انتخاب‌شده خوراک نیست.', normalizedAmountKg: normalizedKg, feedItem };
   }
-  if (!Number.isFinite(feedItem.quantity) || feedItem.quantity < normalizedKg) {
+  const requiredInventoryQuantity = inventoryQuantityForFeedKg(feedItem, normalizedKg);
+  if (requiredInventoryQuantity <= 0) {
+    return { success: false, error: 'واحد موجودی خوراک باید کیلوگرم یا گرم باشد.', normalizedAmountKg: normalizedKg, feedItem };
+  }
+  if (!Number.isFinite(feedItem.quantity) || feedItem.quantity < requiredInventoryQuantity) {
     return {
       success: false,
-      error: `موجودی ناکافی: موجودی ${feedItem.name} برابر ${feedItem.quantity} kg و مقدار درخواست ${normalizedKg} kg است.`,
+      error: `موجودی ناکافی: موجودی ${feedItem.name} برابر ${feedItem.quantity} ${feedItem.unit} و مقدار درخواست ${requiredInventoryQuantity} ${feedItem.unit} است.`,
       normalizedAmountKg: normalizedKg,
       feedItem,
     };

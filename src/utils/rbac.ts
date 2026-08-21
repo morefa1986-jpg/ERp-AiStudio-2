@@ -9,13 +9,14 @@ export function roleAllows(role: string, module: PermissionModule, action: Permi
 
   switch (role) {
     case 'Farm Manager':
-      return module !== 'users' && module !== 'settings' && action !== 'delete';
+      return module !== 'users' && module !== 'settings' && !(module === 'backup' && action === 'approve') && action !== 'delete';
     case 'Hall Manager':
       return ['dashboard', 'halls', 'ponds', 'feeding', 'biometrics', 'water_quality', 'mortality', 'treatments', 'transfers', 'reports'].includes(module) && canOperate;
     case 'Technician':
       return ['dashboard', 'ponds', 'feeding', 'biometrics', 'water_quality', 'mortality', 'treatments', 'transfers'].includes(module) && ['view', 'create', 'edit'].includes(action);
     case 'Veterinarian':
-      return (['dashboard', 'treatments', 'mortality', 'laboratory', 'biometrics', 'water_quality', 'reports'].includes(module) && canOperate) || (module === 'feeding' && viewLike);
+      return (['dashboard', 'treatments', 'mortality', 'laboratory', 'biometrics', 'water_quality', 'reports'].includes(module) && canOperate)
+        || (module === 'feeding' && ['view', 'create', 'approve', 'export', 'print'].includes(action));
     case 'Hatchery Manager':
       return ['dashboard', 'hatchery', 'nursery', 'biometrics', 'water_quality', 'laboratory', 'reports'].includes(module) && canOperate;
     case 'Laboratory':

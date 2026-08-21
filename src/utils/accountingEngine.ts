@@ -1,4 +1,5 @@
 import { Account, JournalEntry } from '../types';
+import { nextId, nextReference } from './id';
 
 export interface JournalInput extends Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'> {}
 
@@ -59,8 +60,8 @@ export function validateAndExecuteJournalEntry(
 
   const newEntry: JournalEntry = {
     ...entryData,
-    id: `jnl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    entryNumber: `SANAD-${Date.now().toString().slice(-8)}`,
+    id: nextId('jnl'),
+    entryNumber: nextReference('SANAD'),
     totalDebit,
     totalCredit,
     isBalanced: true,

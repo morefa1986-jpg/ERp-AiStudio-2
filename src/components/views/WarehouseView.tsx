@@ -27,8 +27,8 @@ export const WarehouseView: React.FC = () => {
   // Movement State
   const [moveItemId, setMoveItemId] = useState<string>(inventory[0]?.id || '');
   const [moveType, setMoveType] = useState<InventoryTxType>('Purchase (خرید)');
-  const [moveQty, setMoveQty] = useState<number>(10);
-  const [moveReason, setMoveReason] = useState<string>('شارژ موجودی انبار');
+  const [moveQty, setMoveQty] = useState<number>(0);
+  const [moveReason, setMoveReason] = useState<string>('');
 
   const filteredItems = inventory.filter((item) => {
     const matchSearch =
@@ -58,7 +58,7 @@ export const WarehouseView: React.FC = () => {
       unit: item.unit,
       unitPrice: item.purchasePricePerUnit,
       totalValue: Math.abs(change) * item.purchasePricePerUnit,
-      operator: 'مسئول انبار و زنجیره تأمین',
+      operator: '',
       notes: moveReason,
     });
 

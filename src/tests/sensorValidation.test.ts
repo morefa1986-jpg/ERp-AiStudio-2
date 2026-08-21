@@ -29,10 +29,14 @@ describe('Sensor Validation & Telemetry Engine', () => {
   });
 
   it('validates water temperature within physiological ranges', () => {
-    const valid = validateWaterTemperature(17.2);
+    const valid = validateWaterTemperature(17.2, new Date().toISOString());
     expect(valid.isValid).toBe(true);
     expect(valid.status).toBe('VALID');
     expect(valid.sanitizedValue).toBe(17.2);
+
+    const missingTimestamp = validateWaterTemperature(17.2);
+    expect(missingTimestamp.isValid).toBe(false);
+    expect(missingTimestamp.errors).toContain('TEMP_TIMESTAMP_MISSING');
 
     const outOfRange = validateWaterTemperature(45.0);
     expect(outOfRange.isValid).toBe(false);

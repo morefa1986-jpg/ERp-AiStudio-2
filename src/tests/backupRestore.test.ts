@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BACKUP_SCHEMA_VERSION, checksumBackupData, validateBackupDocument } from '../utils/backupEngine';
+import { BACKUP_SCHEMA_VERSION, checksumBackupData, decryptBackupDocument, encryptBackupDocument, validateBackupDocument } from '../utils/backupEngine';
 
 function makeData() {
   return {
@@ -41,5 +41,21 @@ describe('Backup integrity engine', () => {
     const brokenRef = makeData();
     brokenRef.ponds[0].hallId = 'missing_hall';
     expect(validateBackupDocument({ schemaVersion: BACKUP_SCHEMA_VERSION, checksum: checksumBackupData(brokenRef), data: brokenRef }).ok).toBe(false);
+  });
+
+  it('encrypts sensitive backup content and rejects the wrong passphrase', async () => {
+    const data = makeData();
+    const document = { schemaVersion: BACKUP_SCHEMA_VERSION, checksum: checksumBackupData(data), data } as any;
+    const envelope = await encryptBackupDocument(document, 'correct horse battery staple');
+    expect(envelope.format).toBe('FATHI_ERP_ENCRYPTED_BACKUP');
+    expect((await decryptBackupDocument(envelope, 'wrong passphrase')).ok).toBe(false);
+    expect((await decryptBackupDocument(envelope, 'correct horse battery staple')).ok).toBe(true);
+  });
+
+  it('rejects encrypted envelope metadata downgrade or iteration tampering', async () => {
+    const data = makeData();
+    const document = { schemaVersion: BACKUP_SCHEMA_VERSION, checksum: checksumBackupData(data), data } as any;
+    const envelope = await encryptBackupDocument(document, 'correct horse battery staple');
+    expect((await decryptBackupDocument({ ...envelope, iterations: 1 }, 'correct horse battery staple')).error).toBe('UNSUPPORTED_BACKUP_SCHEMA');
   });
 });

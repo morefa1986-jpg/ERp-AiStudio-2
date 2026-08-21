@@ -37,7 +37,7 @@ const I18nContext = createContext<I18nContextType | null>(null);
 
 function detectInitialLanguage(): LanguageCode {
   try {
-    const saved = localStorage.getItem('fathi_aqua_lang') as LanguageCode;
+    const saved = sessionStorage.getItem('fathi_aqua_lang') as LanguageCode;
     if (saved && DICTIONARIES[saved]) return saved;
     const browserCode = (navigator.language || '').toLowerCase().slice(0, 2) as LanguageCode;
     if (DICTIONARIES[browserCode]) return browserCode;
@@ -56,7 +56,7 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setLanguage = (lang: LanguageCode) => {
     if (!DICTIONARIES[lang]) return;
     setLanguageState(lang);
-    try { localStorage.setItem('fathi_aqua_lang', lang); } catch {}
+    try { sessionStorage.setItem('fathi_aqua_lang', lang); } catch {}
   };
 
   useEffect(() => {
@@ -67,7 +67,7 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const t = (keyPath: string, params?: Record<string, string | number>): string => {
     let value = resolveKey(DICTIONARIES[language] || DICTIONARIES.fa, keyPath);
     if (value === undefined) value = resolveKey(DICTIONARIES.en, keyPath);
-    if (typeof value !== 'string') return keyPath;
+    if (typeof value !== 'string') return '—';
     if (!params) return value;
     return Object.entries(params).reduce((text, [key, replacement]) => text.replace(new RegExp(`{${key}}`, 'g'), String(replacement)), value);
   };

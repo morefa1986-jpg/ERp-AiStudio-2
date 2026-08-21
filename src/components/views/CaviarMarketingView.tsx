@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useI18n } from '../../i18n';
+import { getStoredSessionToken, useAuth } from '../../context/AuthContext';
 import {
   Sparkles,
   Globe,
@@ -14,6 +15,7 @@ import {
 
 export const CaviarMarketingView: React.FC = () => {
   const { t, language } = useI18n();
+  const { hasPermission } = useAuth();
 
   const [targetLang, setTargetLang] = useState<string>('en');
   const [platform, setPlatform] = useState<string>('LinkedIn Luxury & B2B (صادراتی و هتل‌های ۵ ستاره)');
@@ -42,7 +44,7 @@ export const CaviarMarketingView: React.FC = () => {
     try {
       const response = await fetch('/api/ai/marketing-campaign', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(getStoredSessionToken() ? { Authorization: `Bearer ${getStoredSessionToken()}` } : {}) },
         body: JSON.stringify({
           language: targetLang,
           productType,
@@ -53,7 +55,7 @@ export const CaviarMarketingView: React.FC = () => {
       });
 
       const data = await response.json();
-      setGeneratedContent(data.campaignText || 'محتوایی تولید نشد.');
+      setGeneratedContent(data.campaignText || (data.error === 'AI_NOT_CONFIGURED' ? 'موتور هوش مصنوعی اختیاری پیکربندی نشده است؛ متن تبلیغاتی تولید نشد.' : 'محتوایی تولید نشد.'));
     } catch (err) {
       setGeneratedContent(
         'خطا در تولید محتوای تبلیغاتی. لطفاً از اتصال سرور و کلید هوش مصنوعی اطمینان حاصل فرمایید.'
@@ -196,7 +198,7 @@ export const CaviarMarketingView: React.FC = () => {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !hasPermission('media', 'create')}
               className="w-full py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/20 transition-all mt-2"
             >
               {loading ? (

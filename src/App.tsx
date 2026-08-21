@@ -76,7 +76,7 @@ const OPERATIONS_VIEWS = new Set<OperationsModuleId>([
 ]);
 
 const MainAppContent: React.FC = () => {
-  const { dir } = useI18n();
+  const { dir, t } = useI18n();
   const { isAuthenticated, currentUser, hasPermission } = useAuth();
   const [activeView, setActiveView] = useState('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -153,6 +153,12 @@ const MainAppContent: React.FC = () => {
         onToggleMobileMenu={() => setIsMobileMenuOpen((previous) => !previous)}
         onOpenAuth={() => setIsAuthOpen(true)}
       />
+
+      {import.meta.env.VITE_DEMO_MODE === 'true' && (
+        <div className="bg-amber-500/15 border-b border-amber-500/40 px-4 py-2 text-center text-[11px] font-bold text-amber-200">
+          {t('demoMode')}
+        </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         <Sidebar

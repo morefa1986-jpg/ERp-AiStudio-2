@@ -26,30 +26,33 @@ export const ProcessingView: React.FC = () => {
   const [showNewBatchModal, setShowNewBatchModal] = useState<boolean>(false);
 
   // Form state
-  const [sourcePondId, setSourcePondId] = useState<string>(ponds[0]?.id || '');
-  const [fishCount, setFishCount] = useState<number>(4);
-  const [liveBiomassKg, setLiveBiomassKg] = useState<number>(240);
-  const [caviarYieldKg, setCaviarYieldKg] = useState<number>(36);
-  const [filletYieldKg, setFilletYieldKg] = useState<number>(110);
-  const [smokedYieldKg, setSmokedYieldKg] = useState<number>(40);
+  const [sourcePondId, setSourcePondId] = useState<string>('');
+  const [fishCount, setFishCount] = useState<number>(0);
+  const [liveBiomassKg, setLiveBiomassKg] = useState<number>(0);
+  const [caviarYieldKg, setCaviarYieldKg] = useState<number>(0);
+  const [filletYieldKg, setFilletYieldKg] = useState<number>(0);
+  const [smokedYieldKg, setSmokedYieldKg] = useState<number>(0);
   const [caviarGrade, setCaviarGrade] = useState<string>('Imperial Beluga (50g/100g)');
-  const [operatorName, setOperatorName] = useState<string>('استاد فلاح (سرممیز فرآوری)');
-  const [citesNumber, setCitesNumber] = useState<string>('CITES/IR/2026/CAV-' + Math.floor(1000 + Math.random() * 9000));
+  const [operatorName, setOperatorName] = useState<string>('');
+  const [citesNumber, setCitesNumber] = useState<string>('');
 
   const totalCaviarStockKg = coldStorage.filter((c) => c.productType.includes('Caviar')).reduce((s, c) => s + c.weightKg, 0);
   const totalMeatStockKg = coldStorage.filter((c) => c.productType.includes('Fillet')).reduce((s, c) => s + c.weightKg, 0);
+  const batchesWithYield = processingBatches.filter((batch) => batch.liveBiomassKg > 0);
+  const averageCaviarYield = batchesWithYield.length ? batchesWithYield.reduce((sum, batch) => sum + (batch.caviarYieldKg / batch.liveBiomassKg) * 100, 0) / batchesWithYield.length : null;
+  const citesCount = processingBatches.filter((batch) => Boolean(batch.citesPermitNumber?.trim())).length;
 
   const handleCreateBatch = (e: React.FormEvent) => {
     e.preventDefault();
     const sourcePond = ponds.find((p) => p.id === sourcePondId);
     const waste = Math.max(0, liveBiomassKg - (caviarYieldKg + filletYieldKg + smokedYieldKg));
 
-    createProcessingBatch({
+    const result = createProcessingBatch({
       batchCode: `CAVIAR-LOT-${new Date().toISOString().slice(0, 7)}-B${processingBatches.length + 1}`,
       date: new Date().toISOString().split('T')[0],
-      sourcePondId: sourcePond?.id || 'pond_101',
-      sourcePondName: sourcePond?.name || 'استخر ۱۰۱',
-      speciesName: 'فیل‌ماهی (Huso huso)',
+      sourcePondId: sourcePond?.id || '',
+      sourcePondName: sourcePond?.name || '',
+      speciesName: '',
       fishCount: Number(fishCount),
       liveBiomassKg: Number(liveBiomassKg),
       caviarYieldKg: Number(caviarYieldKg),
@@ -58,12 +61,12 @@ export const ProcessingView: React.FC = () => {
       smokedMeatYieldKg: Number(smokedYieldKg),
       byProductAndWasteKg: Number(waste.toFixed(1)),
       operatorName,
-      qualityScore: 98,
+      qualityScore: 0,
       citesPermitNumber: citesNumber,
       status: 'Stored In Cold Room',
     });
 
-    setShowNewBatchModal(false);
+    if (result.success) setShowNewBatchModal(false);
   };
 
   return (
@@ -129,7 +132,7 @@ export const ProcessingView: React.FC = () => {
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400 block mb-1">میانگین راندمان خاویار</span>
-          <span className="text-xl font-black text-emerald-400">15.8%</span>
+          <span className="text-xl font-black text-emerald-400">{averageCaviarYield === null ? '—' : `${averageCaviarYield.toFixed(2)}%`}</span>
           <span className="text-[11px] text-slate-400 block mt-1">
             از وزن زنده فیل‌ماهی
           </span>
@@ -139,10 +142,10 @@ export const ProcessingView: React.FC = () => {
           <span className="text-xs text-slate-400 block mb-1">وضعیت گواهینامه‌های CITES</span>
           <span className="text-xl font-black text-white flex items-center gap-1.5">
             <ShieldCheck className="w-5 h-5 text-emerald-400" />
-            100% قانونی
+            {processingBatches.length ? `${citesCount}/${processingBatches.length}` : '—'}
           </span>
           <span className="text-[11px] text-emerald-400 block mt-1">
-            آماده صادرات به امارات و اروپا
+            وضعیت مجوز بر اساس پرونده‌های ثبت‌شده
           </span>
         </div>
       </div>
