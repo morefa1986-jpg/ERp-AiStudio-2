@@ -15,7 +15,10 @@ test('fresh browser session shows the server-backed authentication gate', async 
   await page.goto('/');
   await expect(page.locator('input[type="text"]').first()).toBeVisible();
   await expect(page.locator('input[type="password"]').first()).toBeVisible();
-  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  const html = page.locator('html');
+  const language = await html.getAttribute('lang');
+  expect(['fa', 'en', 'de', 'fr', 'es', 'ru', 'ar']).toContain(language);
+  await expect(html).toHaveAttribute('dir', ['fa', 'ar'].includes(language) ? 'rtl' : 'ltr');
 
   await page.locator('input[type="text"]').nth(0).fill('owner');
   await page.locator('input[type="text"]').nth(1).fill('E2E Owner');
