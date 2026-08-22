@@ -8,6 +8,7 @@ import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { DUMMY_PASSWORD_HASH, hashPasswordServer, verifyPasswordServer } from './server/auth';
 import { resolveServerListenConfig } from './server/lanConfig';
+import { constantTimeEqual, isSessionExpired, resolveSessionPolicy } from './server/sessionPolicy';
 import { defaultDatabasePath, SqliteERPStore, StateConflictError, StoredAuditLog, StoredSocialConnection, StoredSocialDraft, StoredUser } from './server/storage';
 import { MODULE_COLLECTIONS, STATE_COLLECTIONS, validateMutationScope, validateStateMutation, validateStateSnapshot } from './src/utils/stateIntegrity';
 
@@ -15,8 +16,8 @@ dotenv.config();
 
 const app = express();
 const listenConfig = resolveServerListenConfig(process.env);
+const sessionPolicy = resolveSessionPolicy(process.env);
 const PORT = listenConfig.port;
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AI_WINDOW_MS = 60_000;
 const AI_REQUESTS_PER_WINDOW = 30;
 const LOGIN_WINDOW_MS = 15 * 60_000;
@@ -32,6 +33,7 @@ app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
   if (_req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
   next();
@@ -46,6 +48,7 @@ interface ActiveSession {
   username: string;
   role: string;
   createdAt: number;
+  lastActivityAt: number;
   expiresAt: number;
 }
 
@@ -86,7 +89,8 @@ function resolveSession(token: string | null): { session: ActiveSession; user: S
   if (!token) return null;
   const session = SESSIONS.get(token);
   if (!session) return null;
-  if (Date.now() > session.expiresAt) {
+  const now = Date.now();
+  if (isSessionExpired(session, sessionPolicy, now)) {
     SESSIONS.delete(token);
     return null;
   }
@@ -95,8 +99,23 @@ function resolveSession(token: string | null): { session: ActiveSession; user: S
     SESSIONS.delete(token);
     return null;
   }
+  session.lastActivityAt = now;
   return { session, user };
 }
+
+function revokeUserSessions(userId: string, exceptToken?: string): void {
+  for (const [token, session] of SESSIONS.entries()) {
+    if (session.userId === userId && token !== exceptToken) SESSIONS.delete(token);
+  }
+}
+
+const sessionCleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [token, session] of SESSIONS.entries()) {
+    if (isSessionExpired(session, sessionPolicy, now)) SESSIONS.delete(token);
+  }
+}, 60_000);
+sessionCleanupTimer.unref?.();
 
 function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const resolved = resolveSession(bearerToken(req));
@@ -309,6 +328,10 @@ function loginUsernameKey(username: string): string {
   return `username:${username}`;
 }
 
+function bootstrapKey(req: Request): string {
+  return `bootstrap:${req.ip || 'unknown'}`;
+}
+
 app.get('/api/auth/status', (_req, res) => {
   res.json({ success: true, needsBootstrap: !store.hasUsers(), database: 'sqlite', host: BIND_HOST, lanMode: process.env.FATHI_LAN_MODE === 'true' });
 });
@@ -317,7 +340,15 @@ app.post('/api/auth/bootstrap', (req, res) => {
   if (store.hasUsers()) return res.status(409).json({ success: false, error: 'BOOTSTRAP_ALREADY_COMPLETED' });
   const lanMode = process.env.FATHI_LAN_MODE === 'true';
   const setupToken = process.env.FATHI_SETUP_TOKEN?.trim();
-  if (lanMode && (!setupToken || req.headers['x-fathi-setup-token'] !== setupToken)) return res.status(403).json({ success: false, error: 'BOOTSTRAP_REQUIRES_SETUP_TOKEN' });
+  const throttleKey = bootstrapKey(req);
+  if (lanMode && store.isLoginBlocked(throttleKey, Date.now(), sessionPolicy.bootstrapWindowMs, sessionPolicy.bootstrapMaxFailures)) {
+    return res.status(429).json({ success: false, error: 'BOOTSTRAP_RATE_LIMITED' });
+  }
+  const headerToken = typeof req.headers['x-fathi-setup-token'] === 'string' ? req.headers['x-fathi-setup-token'] : undefined;
+  if (lanMode && (!setupToken || !constantTimeEqual(headerToken, setupToken))) {
+    store.recordLoginFailure(throttleKey, Date.now(), sessionPolicy.bootstrapWindowMs);
+    return res.status(403).json({ success: false, error: 'BOOTSTRAP_REQUIRES_SETUP_TOKEN' });
+  }
   const remoteAddress = (req.ip || '').replace(/^::ffff:/, '');
   if (!lanMode && !['127.0.0.1', '::1', 'localhost'].includes(remoteAddress)) return res.status(403).json({ success: false, error: 'BOOTSTRAP_LOCAL_ONLY' });
   const username = typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
@@ -334,6 +365,7 @@ app.post('/api/auth/bootstrap', (req, res) => {
       createdAt: new Date().toISOString(),
     };
     if (!store.insertUserIfEmpty(user)) return res.status(409).json({ success: false, error: 'BOOTSTRAP_ALREADY_COMPLETED' });
+    if (lanMode) store.clearLoginFailures(throttleKey);
     store.appendAuditLog({
       id: `audit_${crypto.randomUUID()}`, timestamp: new Date().toISOString(), userId: user.id, userRole: user.role,
       action: 'create', entity: 'User', entityId: user.id, afterState: JSON.stringify(sanitizeUser(user)),
@@ -366,13 +398,26 @@ app.post('/api/auth/login', (req, res) => {
 
   const token = `fathi_sec_${crypto.randomBytes(32).toString('hex')}`;
   const now = Date.now();
-  const session: ActiveSession = { token, userId: user.id, username: user.username, role: user.role, createdAt: now, expiresAt: now + SESSION_TTL_MS };
+  const session: ActiveSession = {
+    token,
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+    createdAt: now,
+    lastActivityAt: now,
+    expiresAt: now + sessionPolicy.absoluteTtlMs,
+  };
   SESSIONS.set(token, session);
   user.lastLoginAt = new Date().toISOString();
   if (isSupportedLanguage(language)) user.preferredLanguage = language;
   store.updateUser(user);
 
-  return res.json({ success: true, token, user: sanitizeUser(user) });
+  return res.json({
+    success: true,
+    token,
+    user: sanitizeUser(user),
+    session: { expiresAt: session.expiresAt, inactivityTtlMs: sessionPolicy.inactivityTtlMs },
+  });
 });
 
 app.post('/api/auth/logout', requireAuth, (req: AuthenticatedRequest, res) => {
@@ -381,7 +426,11 @@ app.post('/api/auth/logout', requireAuth, (req: AuthenticatedRequest, res) => {
 });
 
 app.get('/api/auth/session', requireAuth, (req: AuthenticatedRequest, res) => {
-  return res.json({ success: true, user: sanitizeUser(req.user!) });
+  return res.json({
+    success: true,
+    user: sanitizeUser(req.user!),
+    session: req.session ? { expiresAt: req.session.expiresAt, inactivityTtlMs: sessionPolicy.inactivityTtlMs } : undefined,
+  });
 });
 
 app.get('/api/auth/users', requireAuth, requireAdmin, (_req, res) => {
@@ -419,14 +468,23 @@ app.patch('/api/auth/users/:id', requireAuth, requireAdmin, (req: AuthenticatedR
   if (typeof req.body?.isActive === 'boolean' && user.id === req.user?.id && !req.body.isActive) {
     return res.status(400).json({ success: false, error: 'CANNOT_DISABLE_CURRENT_USER' });
   }
-  if (typeof req.body?.isActive === 'boolean') user.isActive = req.body.isActive;
+  let revokeExistingSessions = false;
+  if (typeof req.body?.isActive === 'boolean') {
+    user.isActive = req.body.isActive;
+    if (!user.isActive) revokeExistingSessions = true;
+  }
   if (typeof req.body?.password === 'string') {
     if (req.body.password.length < 12) return res.status(400).json({ success: false, error: 'PASSWORD_TOO_SHORT' });
     user.passwordHash = hashPasswordServer(req.body.password);
+    revokeExistingSessions = true;
   }
   store.updateUser(user);
+  if (revokeExistingSessions) {
+    const keepCurrentToken = user.id === req.user?.id && user.isActive ? req.session?.token : undefined;
+    revokeUserSessions(user.id, keepCurrentToken);
+  }
   appendAuditFromOperation(req, { module: 'users', action: 'edit', entity: 'User', entityId: user.id }, beforeState, JSON.stringify(sanitizeUser(user)));
-  return res.json({ success: true, user: sanitizeUser(user) });
+  return res.json({ success: true, user: sanitizeUser(user), sessionsRevoked: revokeExistingSessions });
 });
 
 let aiClient: GoogleGenAI | null = null;
@@ -552,9 +610,6 @@ const handleAiAssistant = async (req: AuthenticatedRequest, res: Response) => {
   const language = isSupportedLanguage(req.body?.language) ? req.body.language : 'fa';
   if (!userQuery.trim()) return res.status(400).json({ success: false, error: 'QUERY_REQUIRED' });
 
-  // Never trust telemetry or inventory values supplied by the browser. The
-  // assistant receives only the authoritative SQLite state, filtered to the
-  // authenticated role's readable collections.
   const authoritativeState = store.getState()?.data;
   const farmContext = sanitizeFarmContext(authoritativeState ? filterStateForUser(authoritativeState, req.user?.role || '') : {});
   const ai = getAIClient();
