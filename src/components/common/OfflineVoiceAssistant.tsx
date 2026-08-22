@@ -5,6 +5,7 @@ import { isSmartEditableTarget } from '../../utils/smartInputFocus';
 import {
   getSpeechRecognitionConstructor,
   insertTranscriptIntoField,
+  isMobileVoiceDevice,
   normalizeVoiceTranscript,
   supportsLocalSpeechHint,
   voiceLocaleFor,
@@ -19,6 +20,7 @@ export const OfflineVoiceAssistant: React.FC = () => {
   const [status, setStatus] = useState<VoiceStatus>('ready');
   const [transcript, setTranscript] = useState('');
   const [localHint, setLocalHint] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const lastFieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
@@ -32,7 +34,9 @@ export const OfflineVoiceAssistant: React.FC = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setStatus(getSpeechRecognitionConstructor(window) ? 'ready' : 'unsupported');
+    const mobileVoiceDevice = isMobileVoiceDevice(window);
+    setIsVisible(mobileVoiceDevice);
+    if (mobileVoiceDevice) setStatus(getSpeechRecognitionConstructor(window) ? 'ready' : 'unsupported');
   }, []);
 
   const stopListening = () => {
@@ -80,6 +84,8 @@ export const OfflineVoiceAssistant: React.FC = () => {
   };
 
   const isListening = status === 'listening';
+  if (!isVisible) return null;
+
   const message = status === 'unsupported'
     ? t('voiceAssistant.unsupported')
     : status === 'listening'

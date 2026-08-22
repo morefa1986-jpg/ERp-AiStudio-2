@@ -42,6 +42,16 @@ type VoiceWindow = Window & {
   webkitSpeechRecognition?: SpeechRecognitionConstructor;
 };
 
+export function isMobileVoiceDevice(win: Pick<Window, 'navigator' | 'matchMedia'> = window): boolean {
+  const navigatorInfo = win.navigator;
+  const userAgent = navigatorInfo.userAgent.toLowerCase();
+  const isAndroid = userAgent.includes('android');
+  const isIos = /iphone|ipad|ipod/.test(userAgent)
+    || (navigatorInfo.platform === 'MacIntel' && navigatorInfo.maxTouchPoints > 1);
+  const coarsePointer = win.matchMedia?.('(pointer: coarse)').matches ?? navigatorInfo.maxTouchPoints > 0;
+  return Boolean(coarsePointer && (isAndroid || isIos));
+}
+
 export function getSpeechRecognitionConstructor(win: Partial<VoiceWindow> = window): SpeechRecognitionConstructor | null {
   return win.SpeechRecognition || win.webkitSpeechRecognition || null;
 }
