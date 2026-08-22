@@ -52,6 +52,32 @@ export interface StoredAuditLog {
   deviceId?: string;
 }
 
+export interface StoredSocialConnection {
+  platformId: string;
+  connected: boolean;
+  assistedReady?: boolean;
+  accountLabel?: string;
+  connectedAt?: string;
+  lastOpenedAt?: string;
+}
+
+export interface StoredSocialDraft {
+  id: string;
+  title: string;
+  caption: string;
+  hashtags: string[];
+  platformIds: string[];
+  mediaAssetIds: string[];
+  scheduledAt?: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  publishedAt?: string;
+  notes?: string;
+}
+
 export class StateConflictError extends Error {
   readonly current: StoredStateEnvelope;
 
@@ -138,6 +164,19 @@ export class SqliteERPStore {
         window_started_at INTEGER NOT NULL,
         failures INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS social_connections (
+        platform_id TEXT PRIMARY KEY,
+        data_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS social_drafts (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        data_json TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_social_drafts_updated_at ON social_drafts(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_social_drafts_status ON social_drafts(status);
     `);
     try { this.db.exec('ALTER TABLE audit_log ADD COLUMN transaction_id TEXT'); } catch { /* already migrated */ }
   }
@@ -330,6 +369,58 @@ export class SqliteERPStore {
 
   clearLoginFailures(key: string): void {
     this.db.prepare('DELETE FROM login_throttle WHERE throttle_key = ?').run(key);
+  }
+
+  listSocialConnections(): StoredSocialConnection[] {
+    return this.db.prepare('SELECT data_json FROM social_connections ORDER BY platform_id').all()
+      .map((row) => JSON.parse(String(row.data_json)) as StoredSocialConnection);
+  }
+
+  upsertSocialConnection(connection: StoredSocialConnection): StoredSocialConnection {
+    const normalized: StoredSocialConnection = {
+      platformId: connection.platformId,
+      connected: false,
+      assistedReady: Boolean(connection.accountLabel?.trim() || connection.assistedReady),
+      accountLabel: connection.accountLabel?.trim() || undefined,
+      connectedAt: undefined,
+      lastOpenedAt: connection.lastOpenedAt,
+    };
+    this.db.prepare(`
+      INSERT INTO social_connections (platform_id, data_json, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(platform_id) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at
+    `).run(normalized.platformId, JSON.stringify(normalized), nowIso());
+    return normalized;
+  }
+
+  markSocialConnectionOpened(platformId: string): StoredSocialConnection {
+    const current = this.db.prepare('SELECT data_json FROM social_connections WHERE platform_id = ?').get(platformId);
+    const previous = current ? JSON.parse(String(current.data_json)) as StoredSocialConnection : { platformId, connected: false };
+    return this.upsertSocialConnection({ ...previous, lastOpenedAt: nowIso() });
+  }
+
+  listSocialDrafts(limit = 500): StoredSocialDraft[] {
+    return this.db.prepare('SELECT data_json FROM social_drafts ORDER BY updated_at DESC LIMIT ?').all(Math.max(1, Math.min(limit, 5000)))
+      .map((row) => JSON.parse(String(row.data_json)) as StoredSocialDraft);
+  }
+
+  getSocialDraft(id: string): StoredSocialDraft | null {
+    const row = this.db.prepare('SELECT data_json FROM social_drafts WHERE id = ?').get(id);
+    return row ? JSON.parse(String(row.data_json)) as StoredSocialDraft : null;
+  }
+
+  upsertSocialDraft(draft: StoredSocialDraft): StoredSocialDraft {
+    this.db.prepare(`
+      INSERT INTO social_drafts (id, status, updated_at, data_json)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, data_json = excluded.data_json
+    `).run(draft.id, draft.status, draft.updatedAt, JSON.stringify(draft));
+    return draft;
+  }
+
+  deleteSocialDraft(id: string): boolean {
+    const result = this.db.prepare('DELETE FROM social_drafts WHERE id = ?').run(id);
+    return Number(result.changes || 0) > 0;
   }
 
   close(): void {

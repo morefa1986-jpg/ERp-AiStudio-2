@@ -1,26 +1,29 @@
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import express, { NextFunction, Request, Response } from 'express';
+import fs from 'fs';
+import https from 'https';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { DUMMY_PASSWORD_HASH, hashPasswordServer, verifyPasswordServer } from './server/auth';
-import { defaultDatabasePath, SqliteERPStore, StateConflictError, StoredAuditLog, StoredUser } from './server/storage';
+import { resolveServerListenConfig } from './server/lanConfig';
+import { defaultDatabasePath, SqliteERPStore, StateConflictError, StoredAuditLog, StoredSocialConnection, StoredSocialDraft, StoredUser } from './server/storage';
 import { MODULE_COLLECTIONS, STATE_COLLECTIONS, validateMutationScope, validateStateMutation, validateStateSnapshot } from './src/utils/stateIntegrity';
 
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+const listenConfig = resolveServerListenConfig(process.env);
+const PORT = listenConfig.port;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const AI_WINDOW_MS = 60_000;
 const AI_REQUESTS_PER_WINDOW = 30;
 const LOGIN_WINDOW_MS = 15 * 60_000;
 const LOGIN_MAX_FAILURES = 5;
-const LAN_MODE = process.env.FATHI_LAN_MODE === 'true';
-const configuredLanHost = process.env.FATHI_LAN_HOST?.trim() || process.env.FATHI_BIND_HOST?.trim();
-if (LAN_MODE && !configuredLanHost) throw new Error('FATHI_LAN_HOST_REQUIRED_WHEN_LAN_ENABLED');
-const BIND_HOST = LAN_MODE ? configuredLanHost! : '127.0.0.1';
+const LAN_MODE = listenConfig.lanMode;
+const LAN_TLS_ENABLED = listenConfig.tlsEnabled;
+const BIND_HOST = listenConfig.host;
 const store = new SqliteERPStore(defaultDatabasePath());
 
 app.disable('x-powered-by');
@@ -490,6 +493,8 @@ app.get('/api/health', (_req, res) => {
     database: 'sqlite',
     host: BIND_HOST,
     lanMode: LAN_MODE,
+    protocol: listenConfig.protocol,
+    lanTls: LAN_TLS_ENABLED ? 'enabled' : LAN_MODE ? 'explicitly_disabled' : 'not_applicable',
   });
 });
 
@@ -627,6 +632,108 @@ const handleDynamicTranslation = async (req: AuthenticatedRequest, res: Response
 
 app.post('/api/ai/translate-dynamic', requireAuth, requireModuleAction('ai_assistant', 'view'), aiRateLimit, handleDynamicTranslation);
 
+const SOCIAL_PLATFORM_IDS = new Set(['instagram', 'linkedin', 'whatsapp', 'telegram', 'eitaa', 'rubika', 'bale', 'facebook', 'x', 'youtube']);
+const SOCIAL_STATUSES = new Set(['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'READY_TO_PUBLISH', 'PUBLISHED', 'REJECTED']);
+
+function normalizeStringList(value: unknown, maxItems = 40): string[] {
+  return Array.isArray(value)
+    ? value.slice(0, maxItems).map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+}
+
+function normalizePlatformIds(value: unknown): string[] {
+  return normalizeStringList(value, 20).filter((item) => SOCIAL_PLATFORM_IDS.has(item));
+}
+
+function sanitizeSocialDraftInput(raw: any, existing?: StoredSocialDraft): { ok: true; draft: StoredSocialDraft } | { ok: false; error: string } {
+  const now = new Date().toISOString();
+  const status = typeof raw?.status === 'string' && SOCIAL_STATUSES.has(raw.status) ? raw.status : existing?.status || 'DRAFT';
+  const platformIds = normalizePlatformIds(raw?.platformIds ?? existing?.platformIds);
+  const title = String(raw?.title ?? existing?.title ?? '').trim().slice(0, 180);
+  const caption = String(raw?.caption ?? existing?.caption ?? '').trim().slice(0, 5000);
+  if (!title || !caption || platformIds.length === 0) return { ok: false, error: 'SOCIAL_DRAFT_INPUT_INVALID' };
+  const scheduledAt = typeof raw?.scheduledAt === 'string' && raw.scheduledAt ? raw.scheduledAt.slice(0, 80) : existing?.scheduledAt;
+  if (scheduledAt && Number.isNaN(new Date(scheduledAt).getTime())) return { ok: false, error: 'SOCIAL_SCHEDULE_INVALID' };
+  const draft: StoredSocialDraft = {
+    id: existing?.id || `social_${crypto.randomUUID()}`,
+    title,
+    caption,
+    hashtags: normalizeStringList(raw?.hashtags ?? existing?.hashtags, 60).map((tag) => tag.replace(/^#/, '').replace(/\s+/g, '_')),
+    platformIds,
+    mediaAssetIds: normalizeStringList(raw?.mediaAssetIds ?? existing?.mediaAssetIds, 80),
+    scheduledAt,
+    status,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    approvedAt: typeof raw?.approvedAt === 'string' ? raw.approvedAt : existing?.approvedAt,
+    approvedBy: typeof raw?.approvedBy === 'string' ? raw.approvedBy.slice(0, 180) : existing?.approvedBy,
+    publishedAt: typeof raw?.publishedAt === 'string' ? raw.publishedAt : existing?.publishedAt,
+    notes: typeof raw?.notes === 'string' ? raw.notes.slice(0, 2000) : existing?.notes,
+  };
+  return { ok: true, draft };
+}
+
+function listSocialConnectionsWithDefaults(): StoredSocialConnection[] {
+  const saved = new Map(store.listSocialConnections().map((connection) => [connection.platformId, connection]));
+  return Array.from(SOCIAL_PLATFORM_IDS).map((platformId) => saved.get(platformId) || { platformId, connected: false });
+}
+
+app.get('/api/social/connections', requireAuth, requireModuleAction('media', 'view'), (_req, res) => {
+  return res.json({ success: true, connections: listSocialConnectionsWithDefaults() });
+});
+
+app.post('/api/social/connections/:platformId', requireAuth, requireModuleAction('media', 'edit'), (req: AuthenticatedRequest, res) => {
+  const platformId = req.params.platformId;
+  if (!SOCIAL_PLATFORM_IDS.has(platformId)) return res.status(400).json({ success: false, error: 'SOCIAL_PLATFORM_INVALID' });
+  const before = store.listSocialConnections().find((connection) => connection.platformId === platformId);
+  const accountLabel = typeof req.body?.accountLabel === 'string' ? req.body.accountLabel.slice(0, 180) : undefined;
+  const connection = store.upsertSocialConnection({ platformId, connected: false, accountLabel });
+  appendAuditFromOperation(req, { module: 'media', action: 'edit', entity: 'SocialConnection', entityId: platformId }, before ? JSON.stringify(before) : undefined, JSON.stringify(connection));
+  return res.json({ success: true, connections: listSocialConnectionsWithDefaults() });
+});
+
+app.post('/api/social/connections/:platformId/opened', requireAuth, requireModuleAction('media', 'view'), (req: AuthenticatedRequest, res) => {
+  const platformId = req.params.platformId;
+  if (!SOCIAL_PLATFORM_IDS.has(platformId)) return res.status(400).json({ success: false, error: 'SOCIAL_PLATFORM_INVALID' });
+  const connection = store.markSocialConnectionOpened(platformId);
+  appendAuditFromOperation(req, { module: 'media', action: 'view', entity: 'SocialConnection', entityId: platformId }, undefined, JSON.stringify(connection));
+  return res.json({ success: true, connections: listSocialConnectionsWithDefaults() });
+});
+
+app.get('/api/social/drafts', requireAuth, requireModuleAction('media', 'view'), (_req, res) => {
+  return res.json({ success: true, drafts: store.listSocialDrafts() });
+});
+
+app.post('/api/social/drafts', requireAuth, requireModuleAction('media', 'create'), (req: AuthenticatedRequest, res) => {
+  const normalized = sanitizeSocialDraftInput(req.body);
+  if (normalized.ok === false) return res.status(400).json({ success: false, error: normalized.error });
+  const draft = store.upsertSocialDraft(normalized.draft);
+  appendAuditFromOperation(req, { module: 'media', action: 'create', entity: 'SocialCampaignDraft', entityId: draft.id }, undefined, JSON.stringify(draft));
+  return res.status(201).json({ success: true, draft, drafts: store.listSocialDrafts() });
+});
+
+app.patch('/api/social/drafts/:id', requireAuth, (req: AuthenticatedRequest, res, next) => {
+  const requestedStatus = typeof req.body?.status === 'string' ? req.body.status : undefined;
+  const action = ['APPROVED', 'REJECTED', 'READY_TO_PUBLISH', 'PUBLISHED'].includes(requestedStatus || '') ? 'approve' : 'edit';
+  return requireModuleAction('media', action)(req, res, next);
+}, (req: AuthenticatedRequest, res) => {
+  const existing = store.getSocialDraft(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, error: 'SOCIAL_DRAFT_NOT_FOUND' });
+  const normalized = sanitizeSocialDraftInput(req.body, existing);
+  if (normalized.ok === false) return res.status(400).json({ success: false, error: normalized.error });
+  const draft = store.upsertSocialDraft(normalized.draft);
+  appendAuditFromOperation(req, { module: 'media', action: normalized.draft.status === existing.status ? 'edit' : 'approve', entity: 'SocialCampaignDraft', entityId: draft.id }, JSON.stringify(existing), JSON.stringify(draft));
+  return res.json({ success: true, draft, drafts: store.listSocialDrafts() });
+});
+
+app.delete('/api/social/drafts/:id', requireAuth, requireModuleAction('media', 'delete'), (req: AuthenticatedRequest, res) => {
+  const existing = store.getSocialDraft(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, error: 'SOCIAL_DRAFT_NOT_FOUND' });
+  store.deleteSocialDraft(req.params.id);
+  appendAuditFromOperation(req, { module: 'media', action: 'delete', entity: 'SocialCampaignDraft', entityId: req.params.id }, JSON.stringify(existing), undefined);
+  return res.json({ success: true, drafts: store.listSocialDrafts() });
+});
+
 const handleAiMarketing = async (req: AuthenticatedRequest, res: Response) => {
   const productType = typeof req.body?.productType === 'string' ? req.body.productType.slice(0, 200) : 'Caviar';
   const language = isSupportedLanguage(req.body?.language) ? req.body.language : 'en';
@@ -675,9 +782,18 @@ async function start() {
     app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
-  app.listen(PORT, BIND_HOST, () => {
-    console.log(`Fathi Aqua Super ERP Server running on ${BIND_HOST}:${PORT} (SQLite)`);
-  });
+  const announce = () => {
+    const protocol = LAN_TLS_ENABLED ? 'https' : 'http';
+    console.log(`Fathi Aqua Super ERP Server running on ${protocol}://${BIND_HOST}:${PORT} (SQLite)`);
+  };
+
+  if (LAN_TLS_ENABLED) {
+    const key = fs.readFileSync(listenConfig.tlsKeyPath!, 'utf8');
+    const cert = fs.readFileSync(listenConfig.tlsCertPath!, 'utf8');
+    https.createServer({ key, cert }, app).listen(PORT, BIND_HOST, announce);
+  } else {
+    app.listen(PORT, BIND_HOST, announce);
+  }
 }
 
 start().catch((error) => {

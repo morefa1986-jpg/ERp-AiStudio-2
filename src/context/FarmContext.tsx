@@ -14,7 +14,7 @@ import {
   INITIAL_SPECIES, INITIAL_EMPLOYEES,
 } from '../data/initialData';
 import { BACKUP_SCHEMA_VERSION, checksumBackupData, decryptBackupDocument, encryptBackupDocument, EncryptedBackupEnvelope, validateBackupDocument } from '../utils/backupEngine';
-import { validateAndExecuteJournalEntry } from '../utils/accountingEngine';
+import { FxConversionInput, validateAndExecuteFxConversion, validateAndExecuteJournalEntry } from '../utils/accountingEngine';
 import { calculateFeedingRecommendation, inventoryQuantityForFeedKg, validateFeedingSubmission } from '../utils/feedingEngine';
 import { assessWaterSafetyForFeeding } from '../utils/sensorValidation';
 import { executeAtomicFishTransfer } from '../utils/transferEngine';
@@ -59,6 +59,7 @@ interface FarmContextType {
   createProformaInvoice: (proforma: Omit<ProformaInvoice, 'id' | 'subtotal' | 'grandTotal'>) => void;
   updateProformaStage: (id: string, newStage: ProformaInvoice['stage']) => void;
   createJournalEntry: (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>) => { success: boolean; error?: string };
+  createFxConversionJournalEntry: (entry: FxConversionInput) => { success: boolean; error?: string };
   clockAttendance: (employeeId: string, type: 'in' | 'out', shift: AttendanceRecord['shift']) => void;
   generateMonthlyPayroll: (monthString: string) => void;
   createAuditLog: (action: string, entity: string, entityId: string, details: string, beforeState?: string, afterState?: string, transactionId?: string) => void;
@@ -134,6 +135,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const persistenceInFlight = useRef(false);
   const failedRevision = useRef<number | null>(null);
   const revision = useRef(0);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   const stateData = useMemo<Record<string, unknown>>(() => ({
     halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers,
@@ -215,7 +217,11 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const operation = pendingOperation.current;
     pendingOperation.current = null;
     const token = getStoredSessionToken();
-    if (!token) return;
+    if (!token) {
+      pendingOperation.current = operation;
+      setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
+      return;
+    }
     const requestRevision = revision.current;
     if (failedRevision.current === requestRevision) return;
     persistenceInFlight.current = true;
@@ -224,8 +230,14 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .then(async (response) => ({ response, payload: await response.json().catch(() => ({})) }))
       .then(({ response, payload }) => {
         if (!response.ok || !payload.success) {
+          if (response.status === 409 || (response.status >= 400 && response.status < 500 && response.status !== 429)) {
+            failedRevision.current = requestRevision;
+            setSyncStatus((previous) => ({ ...previous, status: 'ERROR' }));
+            return;
+          }
+          pendingOperation.current = operation;
           failedRevision.current = requestRevision;
-          setSyncStatus((previous) => ({ ...previous, status: response.status === 409 ? 'ERROR' : 'OFFLINE' }));
+          setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
           return;
         }
         setServerVersion(Number(payload.state.version));
@@ -233,11 +245,28 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', pendingChangesCount: 0, lastSyncTimestamp: new Date().toISOString() }));
       })
       .catch(() => {
+        pendingOperation.current = operation;
         failedRevision.current = requestRevision;
-        setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE' }));
+        setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
       })
       .finally(() => { persistenceInFlight.current = false; });
-  }, [stateData, stateReady, currentUser?.id, serverVersion, syncStatus.pendingChangesCount]);
+  }, [stateData, stateReady, currentUser?.id, serverVersion, syncStatus.pendingChangesCount, retryNonce]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const retry = () => {
+      if (!pendingOperation.current) return;
+      failedRevision.current = null;
+      setRetryNonce((value) => value + 1);
+      setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
+    };
+    window.addEventListener('online', retry);
+    const interval = window.setInterval(retry, 15_000);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.clearInterval(interval);
+    };
+  }, [currentUser?.id]);
 
   useEffect(() => {
     setHalls((previous) => previous.map((hall) => {
@@ -248,7 +277,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [ponds]);
 
   const can = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean =>
-    stateReady && syncStatus.status !== 'OFFLINE' && syncStatus.status !== 'ERROR' && hasPermission(module, action, scopeId);
+    stateReady && hasPermission(module, action, scopeId);
   const markLocalChange = (operation: StateOperation) => {
     pendingOperation.current = operation;
     revision.current += 1;
@@ -426,6 +455,16 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!can('accounting', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const result = validateAndExecuteJournalEntry(entry, accounts, journals); if (!result.success || !result.newEntry || !result.updatedAccounts) return { success: false, error: result.error }; setAccounts(result.updatedAccounts); setJournals((previous) => [result.newEntry!, ...previous]); createAuditLog('CREATE', 'JournalEntry', result.newEntry.id, `Balanced journal ${result.newEntry.entryNumber} posted`); markLocalChange({ module: 'accounting', action: 'create', entity: 'JournalEntry', entityId: result.newEntry.id, referenceId: result.newEntry.referenceId }); return { success: true };
   };
+  const createFxConversionJournalEntry = (entry: FxConversionInput): { success: boolean; error?: string } => {
+    if (!can('accounting', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const result = validateAndExecuteFxConversion(entry, accounts, journals);
+    if (!result.success || !result.newEntry || !result.updatedAccounts) return { success: false, error: result.error };
+    setAccounts(result.updatedAccounts);
+    setJournals((previous) => [result.newEntry!, ...previous]);
+    createAuditLog('CREATE', 'JournalEntry', result.newEntry.id, `FX journal ${result.newEntry.entryNumber} posted`, undefined, undefined, result.newEntry.referenceId);
+    markLocalChange({ module: 'accounting', action: 'create', entity: 'JournalEntry', entityId: result.newEntry.id, referenceId: result.newEntry.referenceId });
+    return { success: true };
+  };
 
   const clockAttendance = (employeeId: string, type: 'in' | 'out', shift: AttendanceRecord['shift']) => {
     if (!can('hr', 'create')) return;
@@ -482,7 +521,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id }); };
   const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { if (!can('media', 'create')) return; const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange({ module: 'media', action: 'create', entity: 'SocialMediaPost', entityId: newPost.id }); };
 
-  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, recordMortality, recordBiometry, recordWaterTest, recordTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, recordMortality, recordBiometry, recordWaterTest, recordTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 

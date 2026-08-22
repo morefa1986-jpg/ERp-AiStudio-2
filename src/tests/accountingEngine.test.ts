@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { Account, JournalEntry } from '../types';
-import { validateAndExecuteJournalEntry } from '../utils/accountingEngine';
+import { validateAndExecuteFxConversion, validateAndExecuteJournalEntry } from '../utils/accountingEngine';
 
 const accounts: Account[] = [
   { id: 'acc_cash', code: '1010', name: 'Cash', faName: 'نقد و بانک', type: 'Asset (دارایی)', balance: 100_000_000, currency: 'IRR' },
   { id: 'acc_sales', code: '4010', name: 'Sales', faName: 'درآمد فروش', type: 'Revenue (درآمد)', balance: 500_000_000, currency: 'IRR' },
   { id: 'acc_feed', code: '5010', name: 'Feed Expense', faName: 'هزینه خوراک', type: 'Expense (هزینه)', balance: 200_000_000, currency: 'IRR' },
+  { id: 'acc_usd_bank', code: '1020', name: 'USD Bank', faName: 'بانک دلاری', type: 'Asset (دارایی)', balance: 1_000, currency: 'USD' },
 ];
 
 function entry(overrides: Partial<Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>> = {}): Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'> {
@@ -58,5 +59,44 @@ describe('Accounting Engine - double-entry ledger', () => {
       ...entry(), id: 'jnl_existing', entryNumber: 'SANAD-1', createdAt: '2026-08-20T10:00:00Z', isBalanced: true, totalDebit: 50_000_000, totalCredit: 50_000_000,
     }];
     expect(validateAndExecuteJournalEntry(entry(), accounts, existing).success).toBe(false);
+  });
+
+  it('posts explicit FX conversion journals without directly summing currencies', () => {
+    const result = validateAndExecuteFxConversion({
+      date: '2026-08-20',
+      description: 'تبدیل دلار به ریال برای تنخواه',
+      sourceAccountId: 'acc_usd_bank',
+      targetAccountId: 'acc_cash',
+      sourceAmount: 100,
+      sourceToTargetRate: 620_000,
+      referenceId: 'FX-001',
+      approvedBy: 'Accountant',
+    }, accounts, []);
+
+    expect(result.success).toBe(true);
+    expect(result.newEntry?.referenceType).toBe('FX');
+    expect(result.newEntry?.isFxConversion).toBe(true);
+    expect(result.newEntry?.fx).toMatchObject({ sourceCurrency: 'USD', targetCurrency: 'IRR', sourceAmount: 100, targetAmount: 62_000_000 });
+    expect(result.updatedAccounts?.find((account) => account.id === 'acc_usd_bank')?.balance).toBe(900);
+    expect(result.updatedAccounts?.find((account) => account.id === 'acc_cash')?.balance).toBe(162_000_000);
+  });
+
+  it('rejects FX conversion without an explicit valid rate or enough source balance', () => {
+    expect(validateAndExecuteFxConversion({
+      date: '2026-08-20',
+      description: 'Invalid rate',
+      sourceAccountId: 'acc_usd_bank',
+      targetAccountId: 'acc_cash',
+      sourceAmount: 100,
+      sourceToTargetRate: 0,
+    }, accounts).success).toBe(false);
+    expect(validateAndExecuteFxConversion({
+      date: '2026-08-20',
+      description: 'Too much source',
+      sourceAccountId: 'acc_usd_bank',
+      targetAccountId: 'acc_cash',
+      sourceAmount: 2_000,
+      sourceToTargetRate: 620_000,
+    }, accounts).error).toBe('FX_SOURCE_BALANCE_INSUFFICIENT');
   });
 });

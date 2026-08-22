@@ -8,6 +8,7 @@ import { fr } from './fr';
 import { ru } from './ru';
 import { LanguageCode, LanguageMeta, TextDirection } from '../types';
 import { formatCurrencyValue, getLocaleTag } from '../utils/currencyFormatter';
+import { translateErrorCode } from './errorMessages';
 
 export const LANGUAGES: LanguageMeta[] = [
   { code: 'fa', name: 'Persian', nativeName: 'فارسی', dir: 'rtl', flag: '🇮🇷', defaultCurrency: 'IRR', calendar: 'jalali' },
@@ -27,6 +28,7 @@ interface I18nContextType {
   dir: TextDirection;
   meta: LanguageMeta;
   t: (keyPath: string, params?: Record<string, string | number>) => string;
+  tError: (code: string) => string;
   formatNumber: (num: number, options?: Intl.NumberFormatOptions) => string;
   formatCurrency: (amount: number, currencyCode?: string) => string;
   formatDate: (dateInput: string | Date | number) => string;
@@ -105,7 +107,7 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <I18nContext.Provider value={{ language, setLanguage, dir: meta.dir, meta, t, formatNumber, formatCurrency, formatDate, formatTime }}>
+    <I18nContext.Provider value={{ language, setLanguage, dir: meta.dir, meta, t, tError: (code: string) => translateErrorCode(code, language), formatNumber, formatCurrency, formatDate, formatTime }}>
       {children}
     </I18nContext.Provider>
   );
