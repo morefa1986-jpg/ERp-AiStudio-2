@@ -191,11 +191,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }`}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          {isActive ? (
-                            <div className="w-2 h-2 rounded-full bg-[#D4AF37] shrink-0" />
-                          ) : (
-                            <Icon className="w-4 h-4 shrink-0 text-[#71717A]" />
-                          )}
+                          <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#D4AF37]' : 'text-[#71717A]'}`} />
                           <span className="truncate">{t(item.labelKey)}</span>
                         </div>
 
