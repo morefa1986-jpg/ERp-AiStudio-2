@@ -7,7 +7,7 @@ interface AuthContextType {
   currentUser: User | null;
   isAuthenticated: boolean;
   login: (username: string, passwordPlain: string, language?: LanguageCode) => Promise<{ success: boolean; error?: string }>;
-  bootstrapAdmin: (input: { username: string; password: string; fullName: string; email: string; language?: LanguageCode }) => Promise<{ success: boolean; error?: string }>;
+  bootstrapAdmin: (input: { username: string; password: string; fullName: string; email: string; language?: LanguageCode; setupToken?: string }) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   hasPermission: (module: PermissionModule, action: PermissionAction, scopeId?: string) => boolean;
   usersList: User[];
@@ -94,10 +94,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const bootstrapAdmin = async (input: { username: string; password: string; fullName: string; email: string; language?: LanguageCode }) => {
+  const bootstrapAdmin = async (input: { username: string; password: string; fullName: string; email: string; language?: LanguageCode; setupToken?: string }) => {
     try {
+      const { setupToken, ...body } = input;
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (setupToken?.trim()) headers['x-fathi-setup-token'] = setupToken.trim();
       const response = await fetch('/api/auth/bootstrap', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+        method: 'POST', headers, body: JSON.stringify(body),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) return { success: false, error: data.error || 'BOOTSTRAP_FAILED' };
