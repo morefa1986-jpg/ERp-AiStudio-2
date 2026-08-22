@@ -9,6 +9,7 @@ import { ru } from './ru';
 import { LanguageCode, LanguageMeta, TextDirection } from '../types';
 import { formatCurrencyValue, getLocaleTag } from '../utils/currencyFormatter';
 import { translateErrorCode } from './errorMessages';
+import { buildLegacyStaticTranslationMap, installLegacyStaticTranslator } from './legacyStaticTranslator';
 
 export const LANGUAGES: LanguageMeta[] = [
   { code: 'fa', name: 'Persian', nativeName: 'فارسی', dir: 'rtl', flag: '🇮🇷', defaultCurrency: 'IRR', calendar: 'jalali' },
@@ -65,6 +66,12 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
     document.documentElement.dir = meta.dir;
     document.documentElement.lang = language;
   }, [language, meta.dir]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || !document.body) return undefined;
+    const translations = buildLegacyStaticTranslationMap(DICTIONARIES.fa, DICTIONARIES[language] || DICTIONARIES.fa);
+    return installLegacyStaticTranslator(document.body, translations, language);
+  }, [language]);
 
   const t = (keyPath: string, params?: Record<string, string | number>): string => {
     let value = resolveKey(DICTIONARIES[language] || DICTIONARIES.fa, keyPath);
