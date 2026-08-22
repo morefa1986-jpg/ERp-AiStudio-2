@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 export interface SessionTimingState {
   createdAt: number;
   lastActivityAt: number;
@@ -44,14 +46,5 @@ export function constantTimeEqual(left: string | undefined, right: string | unde
   const leftBuffer = Buffer.from(left, 'utf8');
   const rightBuffer = Buffer.from(right, 'utf8');
   if (leftBuffer.length !== rightBuffer.length) return false;
-  return cryptoTimingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function cryptoTimingSafeEqual(left: Buffer, right: Buffer): boolean {
-  // Dynamic import is intentionally avoided so this helper remains synchronous
-  // for bootstrap middleware. Node exposes timingSafeEqual via require in CJS
-  // and the global Buffer comparison below performs fixed work for equal sizes.
-  let diff = 0;
-  for (let index = 0; index < left.length; index += 1) diff |= left[index] ^ right[index];
-  return diff === 0;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
