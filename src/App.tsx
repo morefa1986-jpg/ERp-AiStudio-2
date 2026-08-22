@@ -8,6 +8,8 @@ import { Sidebar } from './components/layout/Sidebar';
 import type { OperationsModuleId } from './components/views/OperationsModuleView';
 import { GlobalSearchModal } from './components/views/GlobalSearchModal';
 import { AuthModal } from './components/views/AuthModal';
+import { OfflineVoiceAssistant } from './components/common/OfflineVoiceAssistant';
+import { useSmartInputFocus } from './hooks/useSmartInputFocus';
 
 const DashboardView = lazy(() => import('./components/views/DashboardView').then((module) => ({ default: module.DashboardView })));
 const PondsView = lazy(() => import('./components/views/PondsView').then((module) => ({ default: module.PondsView })));
@@ -84,6 +86,7 @@ const MainAppContent: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  useSmartInputFocus();
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -183,6 +186,7 @@ const MainAppContent: React.FC = () => {
 
       <GlobalSearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} onSelectNav={selectView} />
       <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+      <OfflineVoiceAssistant />
     </div>
   );
 };
