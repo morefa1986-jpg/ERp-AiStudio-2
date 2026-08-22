@@ -589,7 +589,7 @@ export interface JournalEntry {
   entryNumber: string;
   date: string;
   description: string;
-  referenceType: 'Sales' | 'Purchase' | 'Payroll' | 'Processing' | 'Inventory' | 'Manual';
+  referenceType: 'Sales' | 'Purchase' | 'Payroll' | 'Processing' | 'Inventory' | 'Manual' | 'FX';
   referenceId?: string;
   debits: { accountId: string; accountName: string; amount: number }[];
   credits: { accountId: string; accountName: string; amount: number }[];
@@ -598,6 +598,16 @@ export interface JournalEntry {
   isBalanced: boolean;
   approvedBy?: string;
   createdAt: string;
+  isFxConversion?: boolean;
+  fx?: {
+    sourceAccountId: string;
+    targetAccountId: string;
+    sourceCurrency: string;
+    targetCurrency: string;
+    sourceAmount: number;
+    targetAmount: number;
+    sourceToTargetRate: number;
+  };
 }
 
 export interface Employee {

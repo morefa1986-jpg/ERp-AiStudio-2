@@ -1,29 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { I18nProvider, useI18n } from './i18n';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FarmProvider } from './context/FarmContext';
 import { PermissionModule } from './types';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
-import { DashboardView } from './components/views/DashboardView';
-import { PondsView } from './components/views/PondsView';
-import { FeedingView } from './components/views/FeedingView';
-import { HatcheryView } from './components/views/HatcheryView';
-import { ProcessingView } from './components/views/ProcessingView';
-import { SalesCrmView } from './components/views/SalesCrmView';
-import { AccountingView } from './components/views/AccountingView';
-import { HrPayrollView } from './components/views/HrPayrollView';
-import { WarehouseView } from './components/views/WarehouseView';
-import { BiometricsView } from './components/views/BiometricsView';
-import { WaterQualityView } from './components/views/WaterQualityView';
-import { AiAssistantView } from './components/views/AiAssistantView';
-import { SocialMediaCommandCenterView } from './components/views/SocialMediaCommandCenterView';
-import { CrossPlatformView } from './components/views/CrossPlatformView';
-import { SecurityAuditView } from './components/views/SecurityAuditView';
-import { BackupRestoreView } from './components/views/BackupRestoreView';
-import { OperationsModuleId, OperationsModuleView } from './components/views/OperationsModuleView';
+import type { OperationsModuleId } from './components/views/OperationsModuleView';
 import { GlobalSearchModal } from './components/views/GlobalSearchModal';
 import { AuthModal } from './components/views/AuthModal';
+
+const DashboardView = lazy(() => import('./components/views/DashboardView').then((module) => ({ default: module.DashboardView })));
+const PondsView = lazy(() => import('./components/views/PondsView').then((module) => ({ default: module.PondsView })));
+const FeedingView = lazy(() => import('./components/views/FeedingView').then((module) => ({ default: module.FeedingView })));
+const HatcheryView = lazy(() => import('./components/views/HatcheryView').then((module) => ({ default: module.HatcheryView })));
+const ProcessingView = lazy(() => import('./components/views/ProcessingView').then((module) => ({ default: module.ProcessingView })));
+const SalesCrmView = lazy(() => import('./components/views/SalesCrmView').then((module) => ({ default: module.SalesCrmView })));
+const AccountingView = lazy(() => import('./components/views/AccountingView').then((module) => ({ default: module.AccountingView })));
+const HrPayrollView = lazy(() => import('./components/views/HrPayrollView').then((module) => ({ default: module.HrPayrollView })));
+const WarehouseView = lazy(() => import('./components/views/WarehouseView').then((module) => ({ default: module.WarehouseView })));
+const BiometricsView = lazy(() => import('./components/views/BiometricsView').then((module) => ({ default: module.BiometricsView })));
+const WaterQualityView = lazy(() => import('./components/views/WaterQualityView').then((module) => ({ default: module.WaterQualityView })));
+const AiAssistantView = lazy(() => import('./components/views/AiAssistantView').then((module) => ({ default: module.AiAssistantView })));
+const SocialMediaCommandCenterView = lazy(() => import('./components/views/SocialMediaCommandCenterView').then((module) => ({ default: module.SocialMediaCommandCenterView })));
+const CrossPlatformView = lazy(() => import('./components/views/CrossPlatformView').then((module) => ({ default: module.CrossPlatformView })));
+const SecurityAuditView = lazy(() => import('./components/views/SecurityAuditView').then((module) => ({ default: module.SecurityAuditView })));
+const BackupRestoreView = lazy(() => import('./components/views/BackupRestoreView').then((module) => ({ default: module.BackupRestoreView })));
+const OperationsModuleView = lazy(() => import('./components/views/OperationsModuleView').then((module) => ({ default: module.OperationsModuleView })));
 
 const VIEW_PERMISSIONS: Record<string, PermissionModule> = {
   dashboard: 'dashboard',
@@ -171,7 +173,11 @@ const MainAppContent: React.FC = () => {
           onCloseMobile={() => setIsMobileMenuOpen(false)}
         />
         <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#09090B]">
-          <div className="max-w-7xl mx-auto view-transition">{renderActiveView()}</div>
+          <div className="max-w-7xl mx-auto view-transition">
+            <Suspense fallback={<div className="p-6 text-sm text-[#A1A1AA]">{t('loading')}</div>}>
+              {renderActiveView()}
+            </Suspense>
+          </div>
         </main>
       </div>
 

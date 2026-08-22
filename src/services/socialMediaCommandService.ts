@@ -1,5 +1,3 @@
-import { nextId } from '../utils/id';
-
 export type SocialPlatformId = 'instagram' | 'linkedin' | 'whatsapp' | 'telegram' | 'eitaa' | 'rubika' | 'bale' | 'facebook' | 'x' | 'youtube';
 export type SocialWorkflowStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'READY_TO_PUBLISH' | 'PUBLISHED' | 'REJECTED';
 
@@ -25,6 +23,7 @@ const DB_VERSION = 1;
 const STORE_NAME = 'records';
 const CONNECTIONS_KEY = 'connections';
 const DRAFTS_KEY = 'drafts';
+const SESSION_TOKEN_KEY = 'fathi_aqua_session_token';
 
 interface StoredRecord<T> { key: string; value: T; }
 
@@ -49,33 +48,53 @@ async function readRecord<T>(key: string, fallback: T): Promise<T> {
   } catch { return fallback; }
 }
 
-async function writeRecord<T>(key: string, value: T): Promise<void> {
-  const db = await openDb();
+function sessionToken(): string | null {
   try {
-    const request = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put({ key, value } satisfies StoredRecord<T>);
-    await new Promise<void>((resolve, reject) => { request.onsuccess = () => resolve(); request.onerror = () => reject(request.error); });
-  } finally { db.close(); }
+    return typeof window !== 'undefined' ? window.sessionStorage.getItem(SESSION_TOKEN_KEY) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function socialApi<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = sessionToken();
+  if (!token) throw new Error('AUTH_REQUIRED');
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.success) throw new Error(payload.error || 'SOCIAL_SERVER_REQUEST_FAILED');
+  return payload as T;
 }
 
 export async function listSocialConnections(): Promise<SocialConnectionState[]> {
+  try {
+    const payload = await socialApi<{ connections: SocialConnectionState[] }>('/api/social/connections');
+    return SOCIAL_PLATFORMS.map((platform) => payload.connections.find((item) => item.platformId === platform.id) || { platformId: platform.id, connected: false });
+  } catch {
+    // Read-only fallback for already installed old local drafts. Mutations use
+    // the server endpoints so RBAC and audit remain authoritative.
+  }
   const saved = await readRecord<Record<string, SocialConnectionState>>(CONNECTIONS_KEY, {});
   return SOCIAL_PLATFORMS.map((platform) => saved[platform.id] || { platformId: platform.id, connected: false });
 }
 
 export async function setSocialConnection(platformId: SocialPlatformId, _connected: boolean, accountLabel?: string): Promise<SocialConnectionState[]> {
-  const current = await readRecord<Record<string, SocialConnectionState>>(CONNECTIONS_KEY, {});
-  const existing = current[platformId];
-  current[platformId] = { platformId, connected: false, assistedReady: Boolean(accountLabel?.trim()), accountLabel: accountLabel?.trim() || existing?.accountLabel, connectedAt: undefined, lastOpenedAt: existing?.lastOpenedAt };
-  await writeRecord(CONNECTIONS_KEY, current);
-  return listSocialConnections();
+  const payload = await socialApi<{ connections: SocialConnectionState[] }>(`/api/social/connections/${encodeURIComponent(platformId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ connected: false, accountLabel }),
+  });
+  return SOCIAL_PLATFORMS.map((platform) => payload.connections.find((item) => item.platformId === platform.id) || { platformId: platform.id, connected: false });
 }
 
 export async function markPlatformOpened(platformId: SocialPlatformId): Promise<SocialConnectionState[]> {
-  const current = await readRecord<Record<string, SocialConnectionState>>(CONNECTIONS_KEY, {});
-  const existing = current[platformId] || { platformId, connected: false };
-  current[platformId] = { ...existing, lastOpenedAt: new Date().toISOString() };
-  await writeRecord(CONNECTIONS_KEY, current);
-  return listSocialConnections();
+  const payload = await socialApi<{ connections: SocialConnectionState[] }>(`/api/social/connections/${encodeURIComponent(platformId)}/opened`, { method: 'POST' });
+  return SOCIAL_PLATFORMS.map((platform) => payload.connections.find((item) => item.platformId === platform.id) || { platformId: platform.id, connected: false });
 }
 
 export function openPlatformLogin(platformId: SocialPlatformId): void {
@@ -93,22 +112,35 @@ export function openPlatformComposer(platformId: SocialPlatformId): void {
 }
 
 export async function listSocialDrafts(): Promise<SocialCampaignDraft[]> {
+  try {
+    const payload = await socialApi<{ drafts: SocialCampaignDraft[] }>('/api/social/drafts');
+    return payload.drafts;
+  } catch {
+    // Legacy read-only migration view.
+  }
   const drafts = await readRecord<SocialCampaignDraft[]>(DRAFTS_KEY, []);
   return drafts.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
 export async function saveSocialDraft(input: Omit<SocialCampaignDraft, 'id' | 'createdAt' | 'updatedAt' | 'status'> & { status?: SocialWorkflowStatus }): Promise<SocialCampaignDraft[]> {
-  const drafts = await listSocialDrafts(); const now = new Date().toISOString();
-  const draft: SocialCampaignDraft = { ...input, id: nextId('social'), status: input.status || 'DRAFT', createdAt: now, updatedAt: now };
-  const next = [draft, ...drafts]; await writeRecord(DRAFTS_KEY, next); return next;
+  const payload = await socialApi<{ drafts: SocialCampaignDraft[] }>('/api/social/drafts', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return payload.drafts;
 }
 
 export async function updateSocialDraft(id: string, patch: Partial<SocialCampaignDraft>): Promise<SocialCampaignDraft[]> {
-  const now = new Date().toISOString(); const next = (await listSocialDrafts()).map((draft) => draft.id === id ? { ...draft, ...patch, id: draft.id, updatedAt: now } : draft); await writeRecord(DRAFTS_KEY, next); return next;
+  const payload = await socialApi<{ drafts: SocialCampaignDraft[] }>(`/api/social/drafts/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return payload.drafts;
 }
 
 export async function deleteSocialDraft(id: string): Promise<SocialCampaignDraft[]> {
-  const next = (await listSocialDrafts()).filter((draft) => draft.id !== id); await writeRecord(DRAFTS_KEY, next); return next;
+  const payload = await socialApi<{ drafts: SocialCampaignDraft[] }>(`/api/social/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return payload.drafts;
 }
 
 export function formatCaption(caption: string, hashtags: string[]): string {
