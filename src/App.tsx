@@ -13,7 +13,7 @@ import { OfflineVoiceAssistant } from './components/common/OfflineVoiceAssistant
 import { useSmartInputFocus } from './hooks/useSmartInputFocus';
 
 const DashboardView = lazy(() => import('./components/views/SafeDashboardView').then((module) => ({ default: module.SafeDashboardView })));
-const PondsView = lazy(() => import('./components/views/PondsView').then((module) => ({ default: module.PondsView })));
+const PondsView = lazy(() => import('./components/views/PondDigitalTwinView').then((module) => ({ default: module.PondDigitalTwinView })));
 const FeedingView = lazy(() => import('./components/views/FeedingView').then((module) => ({ default: module.FeedingView })));
 const HatcheryView = lazy(() => import('./components/views/HatcheryView').then((module) => ({ default: module.HatcheryView })));
 const ProcessingView = lazy(() => import('./components/views/ProcessingView').then((module) => ({ default: module.ProcessingView })));
