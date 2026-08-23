@@ -16,6 +16,7 @@ const DashboardView = lazy(() => import('./components/views/SafeDashboardView').
 const PondsView = lazy(() => import('./components/views/PondDigitalTwinView').then((module) => ({ default: module.PondDigitalTwinView })));
 const FeedingView = lazy(() => import('./components/views/FeedingView').then((module) => ({ default: module.FeedingView })));
 const HatcheryView = lazy(() => import('./components/views/HatcheryView').then((module) => ({ default: module.HatcheryView })));
+const NurseryView = lazy(() => import('./components/views/NurseryView').then((module) => ({ default: module.NurseryView })));
 const ProcessingView = lazy(() => import('./components/views/ProcessingView').then((module) => ({ default: module.ProcessingView })));
 const SalesCrmView = lazy(() => import('./components/views/SalesCrmView').then((module) => ({ default: module.SalesCrmView })));
 const AccountingView = lazy(() => import('./components/views/AccountingView').then((module) => ({ default: module.AccountingView })));
@@ -48,7 +49,7 @@ const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
   backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'platformHub', adminSettings: 'adminSettings',
 };
 
-const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'nursery', 'feedFactory', 'laboratory', 'coldStorage', 'crm', 'maintenance', 'reports']);
+const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'feedFactory', 'laboratory', 'coldStorage', 'crm', 'maintenance', 'reports']);
 
 const MainAppContent: React.FC = () => {
   const { dir, t } = useI18n();
@@ -61,11 +62,8 @@ const MainAppContent: React.FC = () => {
   useSmartInputFocus();
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setIsSearchOpen((previous) => !previous); }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    const handleKeyDown = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setIsSearchOpen((previous) => !previous); } };
+    window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   useEffect(() => {
@@ -101,6 +99,7 @@ const MainAppContent: React.FC = () => {
       case 'treatments': return <LivestockOperationsView mode="treatments" />;
       case 'transfers': return <LivestockOperationsView mode="transfers" />;
       case 'hatchery': return <HatcheryView />;
+      case 'nursery': return <NurseryView />;
       case 'processing': return <ProcessingView />;
       case 'warehouse': return <WarehouseView />;
       case 'sales': return <SalesCrmView />;
@@ -118,16 +117,7 @@ const MainAppContent: React.FC = () => {
 
   if (!isAuthenticated || !currentUser) return <div dir={dir} className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans flex items-center justify-center p-4"><AuthModal isOpen isBlocking onClose={() => {}} /></div>;
 
-  return <div dir={dir} className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans flex flex-col selection:bg-[#D4AF37] selection:text-black">
-    <Header onSelectNav={selectView} onOpenSearch={() => setIsSearchOpen(true)} onToggleMobileMenu={() => setIsMobileMenuOpen((previous) => !previous)} onOpenAuth={() => setIsAuthOpen(true)} />
-    {import.meta.env.VITE_DEMO_MODE === 'true' && <div className="bg-amber-500/15 border-b border-amber-500/40 px-4 py-2 text-center text-[11px] font-bold text-amber-200">{t('demoMode')}</div>}
-    <div className="flex-1 flex overflow-hidden"><Sidebar currentView={activeView} onSelectNav={(viewId) => { selectView(viewId); setIsMobileMenuOpen(false); }} isOpenMobile={isMobileMenuOpen} onCloseMobile={() => setIsMobileMenuOpen(false)} /><main className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#09090B]"><div className="max-w-7xl mx-auto view-transition"><Suspense fallback={<div className="p-6 text-sm text-[#A1A1AA]">{t('loading')}</div>}>{renderActiveView()}</Suspense></div></main></div>
-    <GlobalSearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} onSelectNav={selectView} />
-    <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
-    <OfflineVoiceAssistant />
-  </div>;
+  return <div dir={dir} className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans flex flex-col selection:bg-[#D4AF37] selection:text-black"><Header onSelectNav={selectView} onOpenSearch={() => setIsSearchOpen(true)} onToggleMobileMenu={() => setIsMobileMenuOpen((previous) => !previous)} onOpenAuth={() => setIsAuthOpen(true)} />{import.meta.env.VITE_DEMO_MODE === 'true' && <div className="bg-amber-500/15 border-b border-amber-500/40 px-4 py-2 text-center text-[11px] font-bold text-amber-200">{t('demoMode')}</div>}<div className="flex-1 flex overflow-hidden"><Sidebar currentView={activeView} onSelectNav={(viewId) => { selectView(viewId); setIsMobileMenuOpen(false); }} isOpenMobile={isMobileMenuOpen} onCloseMobile={() => setIsMobileMenuOpen(false)} /><main className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#09090B]"><div className="max-w-7xl mx-auto view-transition"><Suspense fallback={<div className="p-6 text-sm text-[#A1A1AA]">{t('loading')}</div>}>{renderActiveView()}</Suspense></div></main></div><GlobalSearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} onSelectNav={selectView} /><AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} /><OfflineVoiceAssistant /></div>;
 };
 
-export default function App() {
-  return <I18nProvider><AuthProvider><ModuleVisibilityProvider><FarmProvider><MainAppContent /></FarmProvider></ModuleVisibilityProvider></AuthProvider></I18nProvider>;
-}
+export default function App() { return <I18nProvider><AuthProvider><ModuleVisibilityProvider><FarmProvider><MainAppContent /></FarmProvider></ModuleVisibilityProvider></AuthProvider></I18nProvider>; }
