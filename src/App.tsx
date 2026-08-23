@@ -33,6 +33,7 @@ const SecurityAuditView = lazy(() => import('./components/views/SecurityAuditVie
 const BackupRestoreView = lazy(() => import('./components/views/BackupRestoreView').then((module) => ({ default: module.BackupRestoreView })));
 const OperationsModuleView = lazy(() => import('./components/views/OperationsModuleView').then((module) => ({ default: module.OperationsModuleView })));
 const AdminSettingsView = lazy(() => import('./components/views/AdminSettingsView').then((module) => ({ default: module.AdminSettingsView })));
+const ReportsView = lazy(() => import('./components/views/ReportsView').then((module) => ({ default: module.ReportsView })));
 
 const VIEW_PERMISSIONS: Record<string, PermissionModule> = {
   dashboard: 'dashboard', farmHalls: 'halls', ponds: 'ponds', feeding: 'feeding', biometrics: 'biometrics', waterQuality: 'water_quality', mortality: 'mortality',
@@ -50,7 +51,7 @@ const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
   backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'platformHub', adminSettings: 'adminSettings',
 };
 
-const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'feedFactory', 'laboratory', 'coldStorage', 'crm', 'maintenance', 'reports']);
+const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'feedFactory', 'laboratory', 'coldStorage', 'maintenance']);
 
 const MainAppContent: React.FC = () => {
   const { dir, t } = useI18n();
@@ -103,11 +104,12 @@ const MainAppContent: React.FC = () => {
       case 'nursery': return <NurseryView />;
       case 'processing': return <ProcessingView />;
       case 'warehouse': return <WarehouseView />;
-      case 'sales': return <SalesCrmView />;
+      case 'crm': case 'sales': return <SalesCrmView />;
       case 'accounting': return <AccountingView />;
       case 'hr': case 'hrPayroll': return <HrPayrollView />;
       case 'aiAssistant': return <AiAssistantView />;
       case 'mediaStudio': case 'media': case 'caviarMarketing': return <SocialMediaCommandCenterView />;
+      case 'reports': return <ReportsView />;
       case 'platformHub': case 'crossPlatform': return <CrossPlatformView />;
       case 'securityAudit': case 'users': return <SecurityAuditView />;
       case 'backup': case 'backupRestore': return <BackupRestoreView />;
