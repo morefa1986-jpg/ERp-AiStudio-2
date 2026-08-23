@@ -35,6 +35,7 @@ export const WaterQualityView: React.FC = () => {
   const latestLogs = useMemo(() => {
     const byPond = new Map<string, WaterQualityLog>();
     for (const log of waterLogs) {
+      if (log.sensorStatus !== 'VALID') continue;
       const previous = byPond.get(log.pondId);
       if (!previous || new Date(log.timestamp).getTime() > new Date(previous.timestamp).getTime()) byPond.set(log.pondId, log);
     }
@@ -84,7 +85,7 @@ export const WaterQualityView: React.FC = () => {
       nitrate: Number(draft.nitrate),
       salinity: Number(draft.salinity),
       operator: draft.tester.trim(),
-      sensorStatus: 'VALID',
+      sensorStatus: 'MANUAL',
       severity: critical ? 'CRITICAL' : warning ? 'WARNING' : 'INFO',
     });
     setDraft(EMPTY);
@@ -102,22 +103,22 @@ export const WaterQualityView: React.FC = () => {
 
   return <div className="space-y-6 pb-12 animate-fadeIn">
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <div><h1 className="text-xl font-black text-white flex items-center gap-2"><Droplets className="w-6 h-6 text-cyan-400" />کیفیت آب و تله‌متری معتبر</h1><p className="text-xs text-slate-400 mt-1">فقط داده حداکثر {SENSOR_MAX_AGE_MINUTES} دقیقه‌ای در KPIهای زنده پذیرفته می‌شود. ورود دستی با سالن واقعی همان استخر ثبت می‌شود.</p></div>
-      <button onClick={() => setShowForm(true)} className="px-4 py-2 bg-cyan-600 text-white rounded-xl text-xs font-bold flex items-center gap-2"><Plus className="w-4 h-4" />ثبت تست آب</button>
+      <div><h1 className="text-xl font-black text-white flex items-center gap-2"><Droplets className="w-6 h-6 text-cyan-400" />کیفیت آب و تله‌متری معتبر</h1><p className="text-xs text-slate-400 mt-1">فقط داده Sensor-authoritative با سن حداکثر {SENSOR_MAX_AGE_MINUTES} دقیقه در KPI زنده و تصمیم خودکار تغذیه پذیرفته می‌شود. اندازه‌گیری دستی جداگانه ثبت می‌شود و مجوز خودکار تغذیه ایجاد نمی‌کند.</p></div>
+      <button onClick={() => setShowForm(true)} className="px-4 py-2 bg-cyan-600 text-white rounded-xl text-xs font-bold flex items-center gap-2"><Plus className="w-4 h-4" />ثبت تست دستی آب</button>
     </div>
 
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{cards.map(({ label, value, unit, icon: Icon, tone }) => <div key={label} className="bg-slate-900 border border-slate-800 rounded-2xl p-4"><Icon className={`w-5 h-5 mb-2 ${tone}`} /><span className="text-[11px] text-slate-500 block">{label}</span><strong className={`text-xl ${tone}`}>{value === null ? '—' : `${formatNumber(value)} ${unit}`}</strong></div>)}</div>
 
-    {freshCount < ponds.length && <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 flex gap-2"><AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" /><span>فقط {freshCount} از {ponds.length} استخر دارای آخرین داده معتبر در بازه {SENSOR_MAX_AGE_MINUTES} دقیقه هستند. سایر استخرها برای تصمیم تغذیه Fail-Closed محسوب می‌شوند.</span></div>}
+    {freshCount < ponds.length && <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 flex gap-2"><AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" /><span>فقط {freshCount} از {ponds.length} استخر دارای آخرین داده Sensor-authoritative معتبر در بازه {SENSOR_MAX_AGE_MINUTES} دقیقه هستند. تست دستی در این شمارنده محاسبه نمی‌شود.</span></div>}
 
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-xs text-right"><thead className="bg-slate-950 text-slate-500"><tr><th className="p-3">استخر / سالن</th><th className="p-3">زمان</th><th className="p-3">DO</th><th className="p-3">دما</th><th className="p-3">pH</th><th className="p-3">NH3</th><th className="p-3">NO2</th><th className="p-3">وضعیت</th><th className="p-3">ثبت‌کننده</th></tr></thead><tbody className="divide-y divide-slate-800">{waterLogs.map((log) => <tr key={log.id} className="text-slate-300"><td className="p-3"><strong className="text-white block">{log.pondName}</strong><span className="text-[10px] text-slate-500">{log.hallName}</span></td><td className="p-3">{formatDate(log.timestamp)} {formatTime(log.timestamp)}</td><td className="p-3 text-cyan-400 font-bold">{log.dissolvedOxygen}</td><td className="p-3">{log.temperature}</td><td className="p-3">{log.ph}</td><td className="p-3">{log.ammonia ?? '—'}</td><td className="p-3">{log.nitrite ?? '—'}</td><td className={`p-3 font-bold ${isFresh(log) ? 'text-emerald-400' : 'text-amber-400'}`}>{isFresh(log) ? 'معتبر' : log.sensorStatus === 'VALID' ? 'قدیمی' : log.sensorStatus}</td><td className="p-3">{log.operator}</td></tr>)}</tbody></table></div></div>
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-xs text-right"><thead className="bg-slate-950 text-slate-500"><tr><th className="p-3">استخر / سالن</th><th className="p-3">زمان</th><th className="p-3">DO</th><th className="p-3">دما</th><th className="p-3">pH</th><th className="p-3">NH3</th><th className="p-3">NO2</th><th className="p-3">وضعیت</th><th className="p-3">ثبت‌کننده</th></tr></thead><tbody className="divide-y divide-slate-800">{waterLogs.map((log) => <tr key={log.id} className="text-slate-300"><td className="p-3"><strong className="text-white block">{log.pondName}</strong><span className="text-[10px] text-slate-500">{log.hallName}</span></td><td className="p-3">{formatDate(log.timestamp)} {formatTime(log.timestamp)}</td><td className="p-3 text-cyan-400 font-bold">{log.dissolvedOxygen}</td><td className="p-3">{log.temperature}</td><td className="p-3">{log.ph}</td><td className="p-3">{log.ammonia ?? '—'}</td><td className="p-3">{log.nitrite ?? '—'}</td><td className={`p-3 font-bold ${isFresh(log) ? 'text-emerald-400' : log.sensorStatus === 'MANUAL' ? 'text-blue-300' : 'text-amber-400'}`}>{isFresh(log) ? 'Sensor معتبر' : log.sensorStatus === 'MANUAL' ? 'دستی / غیرخودکار' : log.sensorStatus === 'VALID' ? 'قدیمی' : log.sensorStatus}</td><td className="p-3">{log.operator}</td></tr>)}</tbody></table></div></div>
 
-    {showForm && <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-slate-900 border border-cyan-500/30 rounded-2xl p-6 w-full max-w-xl"><h2 className="font-bold text-white mb-4">ثبت اندازه‌گیری آب</h2><form onSubmit={submit} className="space-y-3 text-xs">
+    {showForm && <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-slate-900 border border-cyan-500/30 rounded-2xl p-6 w-full max-w-xl"><h2 className="font-bold text-white mb-2">ثبت اندازه‌گیری دستی آب</h2><p className="text-[11px] text-amber-300 mb-4">این رکورد برای پایش و تاریخچه است و جایگزین سنسور آنلاین برای فعال‌سازی خودکار خوراک نمی‌شود.</p><form onSubmit={submit} className="space-y-3 text-xs">
       <select value={selectedPondId} onChange={(event) => setSelectedPondId(event.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white">{ponds.map((pond) => <option key={pond.id} value={pond.id}>{pond.number} — {pond.name} / {halls.find((hall) => hall.id === pond.hallId)?.name || pond.hallId}</option>)}</select>
       <div className="grid grid-cols-2 gap-2">{([['dissolvedOxygen','DO mg/L','0.1'],['temperature','دما °C','0.1'],['ph','pH','0.01'],['ammonia','NH3 mg/L','0.001'],['nitrite','NO2 mg/L','0.001'],['nitrate','NO3 mg/L','0.1'],['salinity','شوری','0.01']] as const).map(([key,label,step]) => <label key={key} className="text-slate-400">{label}<input type="number" step={step} value={draft[key]} onChange={(event) => setDraft((previous) => ({ ...previous, [key]: event.target.value }))} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white" required /></label>)}</div>
       <label className="text-slate-400 block">ثبت‌کننده<input value={draft.tester} onChange={(event) => setDraft((previous) => ({ ...previous, tester: event.target.value }))} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white" required /></label>
       {error && <div className="text-rose-300 bg-rose-500/10 border border-rose-500/30 p-2 rounded-lg">{error}</div>}
-      <div className="flex justify-end gap-2"><button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">انصراف</button><button type="submit" className="px-4 py-2 bg-cyan-600 text-white font-bold rounded-xl">ثبت و اعتبارسنجی</button></div>
+      <div className="flex justify-end gap-2"><button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">انصراف</button><button type="submit" className="px-4 py-2 bg-cyan-600 text-white font-bold rounded-xl">ثبت تست دستی</button></div>
     </form></div></div>}
   </div>;
 };
