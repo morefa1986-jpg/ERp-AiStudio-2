@@ -53,6 +53,7 @@ interface FarmContextType {
   recordBiometry: (session: Omit<BiometricSession, 'id' | 'averageWeightKg' | 'minWeightKg' | 'maxWeightKg' | 'estimatedBiomassKg' | 'estimatedCount' | 'growthRateKgPerDay' | 'sgr'>) => void;
   recordWaterTest: (test: Omit<WaterQualityLog, 'id' | 'timestamp'>) => void;
   recordTreatment: (treatment: Omit<TreatmentRecord, 'id'>) => void;
+  completeTreatment: (treatmentId: string) => { success: boolean; error?: string };
   executeAtomicTransfer: (transferData: Omit<FishTransfer, 'id' | 'status'>) => { success: boolean; error?: string };
   addInventoryTransaction: (tx: Omit<InventoryTransaction, 'id' | 'timestamp' | 'resultingQuantity'>) => void;
   createProcessingBatch: (batch: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>) => { success: boolean; error?: string };
@@ -131,10 +132,9 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [syncStatus, setSyncStatus] = useState<OfflineSyncStatus>({ status: 'OFFLINE', pendingChangesCount: 0, lastSyncTimestamp: '' });
   const [stateReady, setStateReady] = useState(false);
   const [serverVersion, setServerVersion] = useState<number | null>(null);
-  const pendingOperation = useRef<StateOperation | null>(null);
+  const pendingOperations = useRef<StateOperation[]>([]);
   const persistenceInFlight = useRef(false);
-  const failedRevision = useRef<number | null>(null);
-  const revision = useRef(0);
+  const conflictRetryCount = useRef(0);
   const [retryNonce, setRetryNonce] = useState(0);
 
   const stateData = useMemo<Record<string, unknown>>(() => ({
@@ -176,8 +176,8 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setStateReady(false);
     if (!currentUser) {
       setServerVersion(null);
-      pendingOperation.current = null;
-      revision.current += 1;
+      pendingOperations.current = [];
+      conflictRetryCount.current = 0;
       setSyncStatus({ status: 'OFFLINE', pendingChangesCount: 0, lastSyncTimestamp: '' });
       return () => { cancelled = true; };
     }
@@ -193,14 +193,13 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (payload.state?.data) {
           applyState(payload.state.data, Array.isArray(payload.auditLogs) ? payload.auditLogs : []);
           setServerVersion(Number(payload.state.version));
+          setSyncStatus({ status: 'ONLINE', pendingChangesCount: pendingOperations.current.length, lastSyncTimestamp: new Date().toISOString() });
         } else {
           setServerVersion(null);
-          pendingOperation.current = { module: 'settings', action: 'manage', entity: 'StateInitialization', entityId: 'state' };
-          revision.current += 1;
-          setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: previous.pendingChangesCount + 1 }));
+          pendingOperations.current.push({ module: 'settings', action: 'manage', entity: 'StateInitialization', entityId: 'state' });
+          setSyncStatus({ status: 'PENDING_CHANGES', pendingChangesCount: pendingOperations.current.length, lastSyncTimestamp: '' });
         }
         setStateReady(true);
-        setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', lastSyncTimestamp: new Date().toISOString() }));
       } catch {
         if (!cancelled) {
           setStateReady(true);
@@ -213,52 +212,74 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [currentUser?.id]);
 
   useEffect(() => {
-    if (!stateReady || !currentUser || !pendingOperation.current || persistenceInFlight.current) return;
-    const operation = pendingOperation.current;
-    pendingOperation.current = null;
+    if (!stateReady || !currentUser || pendingOperations.current.length === 0 || persistenceInFlight.current) return;
+    const operation = pendingOperations.current[0];
     const token = getStoredSessionToken();
     if (!token) {
-      pendingOperation.current = operation;
-      setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
+      setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: pendingOperations.current.length }));
       return;
     }
-    const requestRevision = revision.current;
-    if (failedRevision.current === requestRevision) return;
     persistenceInFlight.current = true;
-    setSyncStatus((previous) => ({ ...previous, status: 'SYNCING' }));
-    fetch('/api/state', { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: stateData, version: serverVersion, operation }) })
-      .then(async (response) => ({ response, payload: await response.json().catch(() => ({})) }))
-      .then(({ response, payload }) => {
-        if (!response.ok || !payload.success) {
-          if (response.status === 409 || (response.status >= 400 && response.status < 500 && response.status !== 429)) {
-            failedRevision.current = requestRevision;
-            setSyncStatus((previous) => ({ ...previous, status: 'ERROR' }));
+    setSyncStatus((previous) => ({ ...previous, status: 'SYNCING', pendingChangesCount: pendingOperations.current.length }));
+
+    const persist = async () => {
+      try {
+        const response = await fetch('/api/state', {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: stateData, version: serverVersion, operation }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (response.status === 409) {
+          conflictRetryCount.current += 1;
+          if (conflictRetryCount.current > 3) {
+            setSyncStatus((previous) => ({ ...previous, status: 'ERROR', pendingChangesCount: pendingOperations.current.length }));
             return;
           }
-          pendingOperation.current = operation;
-          failedRevision.current = requestRevision;
-          setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
+          const latestResponse = await fetch('/api/state', { headers: { Authorization: `Bearer ${token}` } });
+          const latestPayload = await latestResponse.json().catch(() => ({}));
+          if (!latestResponse.ok || !latestPayload.success || !latestPayload.state) {
+            setSyncStatus((previous) => ({ ...previous, status: 'ERROR', pendingChangesCount: pendingOperations.current.length }));
+            return;
+          }
+          setServerVersion(Number(latestPayload.state.version));
+          setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: pendingOperations.current.length }));
+          setRetryNonce((value) => value + 1);
           return;
         }
+        if (!response.ok || !payload.success) {
+          if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+            setSyncStatus((previous) => ({ ...previous, status: 'ERROR', pendingChangesCount: pendingOperations.current.length }));
+            return;
+          }
+          setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: pendingOperations.current.length }));
+          return;
+        }
+        pendingOperations.current.shift();
+        conflictRetryCount.current = 0;
         setServerVersion(Number(payload.state.version));
-        failedRevision.current = null;
-        setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', pendingChangesCount: 0, lastSyncTimestamp: new Date().toISOString() }));
-      })
-      .catch(() => {
-        pendingOperation.current = operation;
-        failedRevision.current = requestRevision;
-        setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
-      })
-      .finally(() => { persistenceInFlight.current = false; });
-  }, [stateData, stateReady, currentUser?.id, serverVersion, syncStatus.pendingChangesCount, retryNonce]);
+        const remaining = pendingOperations.current.length;
+        setSyncStatus({
+          status: remaining ? 'PENDING_CHANGES' : 'ONLINE',
+          pendingChangesCount: remaining,
+          lastSyncTimestamp: new Date().toISOString(),
+        });
+        if (remaining) setRetryNonce((value) => value + 1);
+      } catch {
+        setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: pendingOperations.current.length }));
+      } finally {
+        persistenceInFlight.current = false;
+      }
+    };
+    void persist();
+  }, [stateData, stateReady, currentUser?.id, serverVersion, retryNonce]);
 
   useEffect(() => {
     if (!currentUser) return;
     const retry = () => {
-      if (!pendingOperation.current) return;
-      failedRevision.current = null;
+      if (!pendingOperations.current.length || persistenceInFlight.current) return;
       setRetryNonce((value) => value + 1);
-      setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
+      setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: pendingOperations.current.length }));
     };
     window.addEventListener('online', retry);
     const interval = window.setInterval(retry, 15_000);
@@ -276,13 +297,13 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }));
   }, [ponds]);
 
-  const can = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean =>
-    stateReady && hasPermission(module, action, scopeId);
+  const can = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean => stateReady && hasPermission(module, action, scopeId);
   const markLocalChange = (operation: StateOperation) => {
-    pendingOperation.current = operation;
-    revision.current += 1;
-    failedRevision.current = null;
-    setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: previous.pendingChangesCount + 1 }));
+    pendingOperations.current.push(operation);
+    if (pendingOperations.current.length > 1000) pendingOperations.current.splice(0, pendingOperations.current.length - 1000);
+    conflictRetryCount.current = 0;
+    setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: pendingOperations.current.length }));
+    setRetryNonce((value) => value + 1);
   };
   const createAuditLog = (action: string, entity: string, entityId: string, details: string, beforeState?: string, afterState?: string, transactionId?: string) => {
     if (!currentUser) return;
@@ -341,9 +362,6 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!can('feeding', 'approve', pondId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const pond = ponds.find((item) => item.id === pondId); if (!pond) return { success: false, error: 'POND_NOT_FOUND' };
     if (pond.activeTreatmentId && treatments.some((treatment) => treatment.id === pond.activeTreatmentId && treatment.status === 'ACTIVE')) return { success: false, error: 'ACTIVE_TREATMENT' };
-    // The recommendation engine correctly refuses a STOPPED pond. For a resume
-    // decision, evaluate only the water/treatment gates with a temporary active
-    // status, then apply the explicit approval below.
     const safety = calculateFeedingRecommendation({ ...authoritativePond(pond), feedingStatus: 'ACTIVE' }, species, undefined);
     if (safety.isLocked) return { success: false, error: safety.lockReason || 'WATER_UNSAFE' };
     setPonds((previous) => previous.map((item) => item.id === pondId ? { ...item, feedingStatus: 'ACTIVE', stopFeedingReason: undefined, stopFeedingDetails: undefined, stopFeedingTimestamp: undefined, stopFeedingUser: currentUser?.fullName || operator } : item));
@@ -374,12 +392,32 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const recordWaterTest = (test: Omit<WaterQualityLog, 'id' | 'timestamp'>) => {
     if (!can('water_quality', 'create', test.pondId)) return;
-    const pond = ponds.find((item) => item.id === test.pondId); if (!pond) return; const timestamp = new Date().toISOString();
-    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, ammonia: test.ammonia, nitrite: test.nitrite, timestamp });
-    const invalid = [safety.doStatus, safety.tempStatus, safety.phStatus, safety.ammoniaStatus, safety.nitriteStatus].some((status) => !status?.isValid); const severity: WaterQualityLog['severity'] = safety.isCriticalAlert ? 'CRITICAL' : safety.isSafeForFeeding ? 'INFO' : 'HIGH'; const sensorStatus: WaterQualityLog['sensorStatus'] = invalid ? 'INVALID' : safety.staleTelemetry ? 'STALE' : 'VALID';
-    const newLog: WaterQualityLog = { ...test, id: nextId('water'), timestamp, severity, sensorStatus, alertMessage: safety.feedingProhibitionReason }; setWaterLogs((previous) => [newLog, ...previous]);
-    setPonds((previous) => previous.map((item) => item.id !== pond.id ? item : { ...item, dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, ammonia: test.ammonia, nitrite: test.nitrite, lastTelemetryTimestamp: timestamp, sensorQuality: sensorStatus, feedingStatus: safety.isSafeForFeeding ? item.feedingStatus : 'STOPPED', stopFeedingReason: safety.isSafeForFeeding ? item.stopFeedingReason : (test.temperature < 4 ? 'Low Temperature' : test.dissolvedOxygen < 4 ? 'Low Oxygen' : 'Other'), stopFeedingDetails: safety.isSafeForFeeding ? item.stopFeedingDetails : safety.feedingProhibitionReason, stopFeedingTimestamp: safety.isSafeForFeeding ? item.stopFeedingTimestamp : timestamp }));
-    createAuditLog('CREATE', 'WaterQualityLog', newLog.id, safety.isSafeForFeeding ? 'Water quality recorded' : `Water safety alert: ${safety.feedingProhibitionReason}`); markLocalChange({ module: 'water_quality', action: 'create', entity: 'WaterQualityLog', entityId: newLog.id });
+    const pond = ponds.find((item) => item.id === test.pondId); if (!pond) return;
+    const timestamp = new Date().toISOString();
+    const manual = test.sensorStatus === 'MANUAL';
+    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, ammonia: test.ammonia, nitrite: test.nitrite, timestamp, sensorStatus: manual ? 'MANUAL' : test.sensorStatus });
+    const invalid = [safety.doStatus, safety.tempStatus, safety.phStatus, safety.ammoniaStatus, safety.nitriteStatus].some((status) => !status?.isValid);
+    const severity: WaterQualityLog['severity'] = safety.isCriticalAlert ? 'CRITICAL' : safety.isSafeForFeeding ? 'INFO' : 'HIGH';
+    const sensorStatus: WaterQualityLog['sensorStatus'] = manual ? 'MANUAL' : invalid ? 'INVALID' : safety.staleTelemetry ? 'STALE' : 'VALID';
+    const authoritativeForAutomation = sensorStatus === 'VALID' && safety.isSafeForFeeding;
+    const newLog: WaterQualityLog = { ...test, id: nextId('water'), timestamp, severity, sensorStatus, alertMessage: manual ? 'اندازه‌گیری دستی ثبت شد؛ برای تصمیم خودکار تغذیه منبع authoritative محسوب نمی‌شود.' : safety.feedingProhibitionReason };
+    setWaterLogs((previous) => [newLog, ...previous]);
+    setPonds((previous) => previous.map((item) => item.id !== pond.id ? item : {
+      ...item,
+      dissolvedOxygen: test.dissolvedOxygen,
+      waterTemperature: test.temperature,
+      ph: test.ph,
+      ammonia: test.ammonia,
+      nitrite: test.nitrite,
+      lastTelemetryTimestamp: timestamp,
+      sensorQuality: sensorStatus,
+      feedingStatus: authoritativeForAutomation ? item.feedingStatus : 'STOPPED',
+      stopFeedingReason: authoritativeForAutomation ? item.stopFeedingReason : (test.temperature < 4 ? 'Low Temperature' : test.dissolvedOxygen < 4 ? 'Low Oxygen' : 'Manual Decision'),
+      stopFeedingDetails: authoritativeForAutomation ? item.stopFeedingDetails : (manual ? 'اندازه‌گیری دستی جایگزین تله‌متری معتبر برای تغذیه خودکار نیست.' : safety.feedingProhibitionReason),
+      stopFeedingTimestamp: authoritativeForAutomation ? item.stopFeedingTimestamp : timestamp,
+    }));
+    createAuditLog('CREATE', 'WaterQualityLog', newLog.id, manual ? 'Manual water quality recorded; automated feeding remains fail-closed' : safety.isSafeForFeeding ? 'Water quality recorded' : `Water safety alert: ${safety.feedingProhibitionReason}`);
+    markLocalChange({ module: 'water_quality', action: 'create', entity: 'WaterQualityLog', entityId: newLog.id });
   };
 
   const recordTreatment = (treatment: Omit<TreatmentRecord, 'id'>) => {
@@ -390,13 +428,31 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     createAuditLog('CREATE', 'TreatmentRecord', id, `${treatment.drugName} treatment recorded for ${treatment.pondName}`); markLocalChange({ module: 'treatments', action: 'create', entity: 'TreatmentRecord', entityId: id });
   };
 
+  const completeTreatment = (treatmentId: string): { success: boolean; error?: string } => {
+    if (!can('treatments', 'edit')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const treatment = treatments.find((item) => item.id === treatmentId);
+    if (!treatment) return { success: false, error: 'TREATMENT_NOT_FOUND' };
+    if (treatment.status !== 'ACTIVE') return { success: false, error: 'TREATMENT_NOT_ACTIVE' };
+    setTreatments((previous) => previous.map((item) => item.id === treatmentId ? { ...item, status: 'COMPLETED' } : item));
+    setPonds((previous) => previous.map((pond) => pond.id === treatment.pondId && pond.activeTreatmentId === treatmentId ? {
+      ...pond,
+      activeTreatmentId: undefined,
+      feedingStatus: 'STOPPED',
+      stopFeedingReason: 'Treatment',
+      stopFeedingDetails: `درمان ${treatment.drugName} تکمیل شد؛ فعال‌سازی مجدد خوراک نیازمند تأیید جداگانه و تله‌متری معتبر است.`,
+      stopFeedingTimestamp: new Date().toISOString(),
+      stopFeedingUser: currentUser?.fullName || treatment.veterinarian,
+    } : pond));
+    createAuditLog('UPDATE', 'TreatmentRecord', treatmentId, `Treatment ${treatment.drugName} completed; withdrawal remains until ${treatment.withdrawalEndDate}`);
+    markLocalChange({ module: 'treatments', action: 'edit', entity: 'TreatmentRecord', entityId: treatmentId });
+    return { success: true };
+  };
+
   const executeAtomicTransfer = (transferData: Omit<FishTransfer, 'id' | 'status'>): { success: boolean; error?: string } => {
     if (!can('transfers', 'create', transferData.sourceId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const result = executeAtomicFishTransfer(transferData, ponds, nurseryTanks, larvae);
     if (!result.success || !result.updatedPonds || !result.updatedNurseryTanks || !result.updatedLarvae || !result.newTransfer) return { success: false, error: result.error };
-    setPonds(result.updatedPonds);
-    setNurseryTanks(result.updatedNurseryTanks);
-    setLarvae(result.updatedLarvae);
+    setPonds(result.updatedPonds); setNurseryTanks(result.updatedNurseryTanks); setLarvae(result.updatedLarvae);
     setTransfers((previous) => [result.newTransfer!, ...previous]);
     createAuditLog('CREATE', 'FishTransfer', result.newTransfer.id, `${transferData.sourceName} → ${transferData.destinationName}: ${transferData.fishCount} fish`, undefined, undefined, `txn_${result.newTransfer.id}`);
     markLocalChange({ module: 'transfers', action: 'create', entity: 'FishTransfer', entityId: result.newTransfer.id, transactionId: `txn_${result.newTransfer.id}` });
@@ -414,6 +470,15 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const createProcessingBatch = (batch: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>): { success: boolean; error?: string } => {
     if (!can('processing', 'create', batch.sourcePondId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const sourcePond = ponds.find((pond) => pond.id === batch.sourcePondId); if (!sourcePond) return { success: false, error: 'POND_NOT_FOUND' };
+    const processTime = new Date(batch.date).getTime();
+    if (!Number.isFinite(processTime)) return { success: false, error: 'PROCESSING_DATE_INVALID' };
+    const blockingTreatment = treatments.find((treatment) => {
+      if (treatment.pondId !== batch.sourcePondId) return false;
+      if (treatment.status === 'ACTIVE') return true;
+      const withdrawalEnd = new Date(treatment.withdrawalEndDate).getTime();
+      return Number.isFinite(withdrawalEnd) && withdrawalEnd >= processTime;
+    });
+    if (blockingTreatment) return { success: false, error: `PROCESSING_TREATMENT_WITHDRAWAL_HOLD:${blockingTreatment.drugName}` };
     const result = executeAtomicProcessing(batch, ponds, coldStorage);
     if (!result.success || !result.batch || !result.ponds || !result.coldStorage) return { success: false, error: result.error };
     setPonds(result.ponds); setProcessingBatches((previous) => [result.batch!, ...previous]); setColdStorage(result.coldStorage);
@@ -432,14 +497,12 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!can('sales', 'edit')) return;
     const existing = proformas.find((row) => row.id === id);
     if (!existing) return;
-    const requiresFulfillment = newStage === 'Payment Received (تسویه)' || newStage === 'Dispatched / Delivery (تحویل)' || String(newStage) === 'Paid';
-    let updatedColdStorage = coldStorage;
+    const requiresFulfillment = newStage === 'Dispatched / Delivery (تحویل)';
     let fulfillment: ReturnType<typeof fulfillProforma> | undefined;
     if (requiresFulfillment && !existing.fulfilledAt) {
       fulfillment = fulfillProforma(existing, coldStorage);
       if (!fulfillment.success || !fulfillment.coldStorage || !fulfillment.fulfilledAt || !fulfillment.transactionId) return;
-      updatedColdStorage = fulfillment.coldStorage;
-      setColdStorage(updatedColdStorage);
+      setColdStorage(fulfillment.coldStorage);
     }
     const updatedProforma: ProformaInvoice = {
       ...existing,
@@ -459,8 +522,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!can('accounting', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const result = validateAndExecuteFxConversion(entry, accounts, journals);
     if (!result.success || !result.newEntry || !result.updatedAccounts) return { success: false, error: result.error };
-    setAccounts(result.updatedAccounts);
-    setJournals((previous) => [result.newEntry!, ...previous]);
+    setAccounts(result.updatedAccounts); setJournals((previous) => [result.newEntry!, ...previous]);
     createAuditLog('CREATE', 'JournalEntry', result.newEntry.id, `FX journal ${result.newEntry.entryNumber} posted`, undefined, undefined, result.newEntry.referenceId);
     markLocalChange({ module: 'accounting', action: 'create', entity: 'JournalEntry', entityId: result.newEntry.id, referenceId: result.newEntry.referenceId });
     return { success: true };
@@ -507,8 +569,8 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await fetch('/api/state', { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: candidateState, version: serverVersion, operation: { module: 'backup', action: 'approve', entity: 'BackupRestore', entityId: nextId('restore') } }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success || !payload.state?.data) return { success: false, message: payload.error || 'BACKUP_RESTORE_FAILED' };
-      pendingOperation.current = null;
-      revision.current += 1;
+      pendingOperations.current = [];
+      conflictRetryCount.current = 0;
       applyState(payload.state.data, Array.isArray(payload.auditLogs) ? payload.auditLogs : []);
       setServerVersion(Number(payload.state.version));
       setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', pendingChangesCount: 0, lastSyncTimestamp: new Date().toISOString() }));
@@ -521,7 +583,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id }); };
   const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { if (!can('media', 'create')) return; const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange({ module: 'media', action: 'create', entity: 'SocialMediaPost', entityId: newPost.id }); };
 
-  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, recordMortality, recordBiometry, recordWaterTest, recordTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 
