@@ -23,6 +23,7 @@ const HrPayrollView = lazy(() => import('./components/views/HrPayrollView').then
 const WarehouseView = lazy(() => import('./components/views/WarehouseView').then((module) => ({ default: module.WarehouseView })));
 const BiometricsView = lazy(() => import('./components/views/BiometricsView').then((module) => ({ default: module.BiometricsView })));
 const WaterQualityView = lazy(() => import('./components/views/WaterQualityView').then((module) => ({ default: module.WaterQualityView })));
+const LivestockOperationsView = lazy(() => import('./components/views/LivestockOperationsView').then((module) => ({ default: module.LivestockOperationsView })));
 const AiAssistantView = lazy(() => import('./components/views/AiAssistantView').then((module) => ({ default: module.AiAssistantView })));
 const SocialMediaCommandCenterView = lazy(() => import('./components/views/SocialMediaCommandCenterView').then((module) => ({ default: module.SocialMediaCommandCenterView })));
 const CrossPlatformView = lazy(() => import('./components/views/CrossPlatformView').then((module) => ({ default: module.CrossPlatformView })));
@@ -47,7 +48,7 @@ const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
   backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'platformHub', adminSettings: 'adminSettings',
 };
 
-const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'mortality', 'treatments', 'transfers', 'nursery', 'feedFactory', 'laboratory', 'coldStorage', 'crm', 'maintenance', 'reports']);
+const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'nursery', 'feedFactory', 'laboratory', 'coldStorage', 'crm', 'maintenance', 'reports']);
 
 const MainAppContent: React.FC = () => {
   const { dir, t } = useI18n();
@@ -96,6 +97,9 @@ const MainAppContent: React.FC = () => {
       case 'feeding': return <FeedingView />;
       case 'biometrics': return <BiometricsView />;
       case 'waterQuality': return <WaterQualityView />;
+      case 'mortality': return <LivestockOperationsView mode="mortality" />;
+      case 'treatments': return <LivestockOperationsView mode="treatments" />;
+      case 'transfers': return <LivestockOperationsView mode="transfers" />;
       case 'hatchery': return <HatcheryView />;
       case 'processing': return <ProcessingView />;
       case 'warehouse': return <WarehouseView />;
@@ -112,25 +116,16 @@ const MainAppContent: React.FC = () => {
     }
   };
 
-  if (!isAuthenticated || !currentUser) {
-    return <div dir={dir} className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans flex items-center justify-center p-4"><AuthModal isOpen isBlocking onClose={() => {}} /></div>;
-  }
+  if (!isAuthenticated || !currentUser) return <div dir={dir} className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans flex items-center justify-center p-4"><AuthModal isOpen isBlocking onClose={() => {}} /></div>;
 
-  return (
-    <div dir={dir} className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans flex flex-col selection:bg-[#D4AF37] selection:text-black">
-      <Header onSelectNav={selectView} onOpenSearch={() => setIsSearchOpen(true)} onToggleMobileMenu={() => setIsMobileMenuOpen((previous) => !previous)} onOpenAuth={() => setIsAuthOpen(true)} />
-      {import.meta.env.VITE_DEMO_MODE === 'true' && <div className="bg-amber-500/15 border-b border-amber-500/40 px-4 py-2 text-center text-[11px] font-bold text-amber-200">{t('demoMode')}</div>}
-      <div className="flex-1 flex overflow-hidden">
-        <Sidebar currentView={activeView} onSelectNav={(viewId) => { selectView(viewId); setIsMobileMenuOpen(false); }} isOpenMobile={isMobileMenuOpen} onCloseMobile={() => setIsMobileMenuOpen(false)} />
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#09090B]">
-          <div className="max-w-7xl mx-auto view-transition"><Suspense fallback={<div className="p-6 text-sm text-[#A1A1AA]">{t('loading')}</div>}>{renderActiveView()}</Suspense></div>
-        </main>
-      </div>
-      <GlobalSearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} onSelectNav={selectView} />
-      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
-      <OfflineVoiceAssistant />
-    </div>
-  );
+  return <div dir={dir} className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans flex flex-col selection:bg-[#D4AF37] selection:text-black">
+    <Header onSelectNav={selectView} onOpenSearch={() => setIsSearchOpen(true)} onToggleMobileMenu={() => setIsMobileMenuOpen((previous) => !previous)} onOpenAuth={() => setIsAuthOpen(true)} />
+    {import.meta.env.VITE_DEMO_MODE === 'true' && <div className="bg-amber-500/15 border-b border-amber-500/40 px-4 py-2 text-center text-[11px] font-bold text-amber-200">{t('demoMode')}</div>}
+    <div className="flex-1 flex overflow-hidden"><Sidebar currentView={activeView} onSelectNav={(viewId) => { selectView(viewId); setIsMobileMenuOpen(false); }} isOpenMobile={isMobileMenuOpen} onCloseMobile={() => setIsMobileMenuOpen(false)} /><main className="flex-1 overflow-y-auto p-4 md:p-8 bg-[#09090B]"><div className="max-w-7xl mx-auto view-transition"><Suspense fallback={<div className="p-6 text-sm text-[#A1A1AA]">{t('loading')}</div>}>{renderActiveView()}</Suspense></div></main></div>
+    <GlobalSearchModal isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} onSelectNav={selectView} />
+    <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+    <OfflineVoiceAssistant />
+  </div>;
 };
 
 export default function App() {
