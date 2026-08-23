@@ -10,6 +10,7 @@ import type { OperationsModuleId } from './components/views/OperationsModuleView
 import { GlobalSearchModal } from './components/views/GlobalSearchModal';
 import { AuthModal } from './components/views/AuthModal';
 import { OfflineVoiceAssistant } from './components/common/OfflineVoiceAssistant';
+import { DahirTelemetryPanel } from './components/common/DahirTelemetryPanel';
 import { useSmartInputFocus } from './hooks/useSmartInputFocus';
 
 const DashboardView = lazy(() => import('./components/views/SafeDashboardView').then((module) => ({ default: module.SafeDashboardView })));
@@ -91,10 +92,10 @@ const MainAppContent: React.FC = () => {
 
     switch (activeView) {
       case 'dashboard': return <DashboardView onSelectNav={selectView} />;
-      case 'ponds': return <PondsView onSelectNav={selectView} />;
+      case 'ponds': return <><DahirTelemetryPanel mode="pondLevels" /><PondsView onSelectNav={selectView} /></>;
       case 'feeding': return <FeedingView />;
       case 'biometrics': return <BiometricsView />;
-      case 'waterQuality': return <WaterQualityView />;
+      case 'waterQuality': return <><DahirTelemetryPanel mode="treatmentPlant" /><WaterQualityView /></>;
       case 'mortality': return <LivestockOperationsView mode="mortality" />;
       case 'treatments': return <LivestockOperationsView mode="treatments" />;
       case 'transfers': return <LivestockOperationsView mode="transfers" />;
