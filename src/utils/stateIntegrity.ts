@@ -355,6 +355,9 @@ function validateColdStorageMutation(previous: State, next: State, operation: { 
       const before = collection(previous, 'proformas').find((row) => row.id === proforma.id);
       return Boolean(proforma.fulfilledAt && proforma.fulfillmentTransactionId && !before?.fulfilledAt && !before?.fulfillmentTransactionId);
     });
+    if (newlyFulfilled.some((proforma) => proforma.stage !== 'Dispatched / Delivery (تحویل)')) {
+      return { ok: false, error: 'SALE_FULFILLMENT_REQUIRES_DISPATCH_STAGE' };
+    }
     const changedLots = changedRows(previous, next, 'coldStorage');
     if (!changedLots.length) return { ok: true };
     if (!newlyFulfilled.length) return { ok: false, error: 'SALE_FULFILLMENT_LEDGER_MISSING' };
@@ -402,6 +405,17 @@ function validateAccountingConservation(previous: State, next: State): { ok: boo
   return { ok: true };
 }
 
+function activeProcessingHold(state: State, batch: any): any | undefined {
+  const processTime = new Date(String(batch?.date || '')).getTime();
+  if (!Number.isFinite(processTime)) return { invalidDate: true };
+  return collection(state, 'treatments').find((treatment) => {
+    if (treatment?.pondId !== batch?.sourcePondId) return false;
+    if (treatment.status === 'ACTIVE') return true;
+    const withdrawalEnd = new Date(String(treatment.withdrawalEndDate || '')).getTime();
+    return Number.isFinite(withdrawalEnd) && withdrawalEnd >= processTime;
+  });
+}
+
 export function validateStateMutation(previousRaw: unknown, nextRaw: unknown, operation: { module?: string; action?: string }): { ok: boolean; error?: string } {
   const nextCheck = validateStateSnapshot(nextRaw);
   if (!nextCheck.ok) return nextCheck;
@@ -411,14 +425,8 @@ export function validateStateMutation(previousRaw: unknown, nextRaw: unknown, op
   const previous = previousRaw as State;
   const next = nextRaw as State;
 
-  // A restore is an explicit, administrator-only replacement of the whole
-  // snapshot. It is still schema/checksum validated above, but must not be
-  // rejected as an ordinary append-only mutation.
   if (operation.module === 'backup' && operation.action === 'approve') return { ok: true };
 
-  // Historical telemetry, stock movements and biological events are
-  // append-only. Authorized clients may add a new event, but cannot rewrite
-  // evidence already accepted by the server.
   for (const key of IMMUTABLE_LEDGER_COLLECTIONS) {
     if (modifiedExistingRows(previous, next, key)) return { ok: false, error: `STATE_IMMUTABLE_RECORD_MODIFIED:${key}` };
     if (deletedExistingRows(previous, next, key)) return { ok: false, error: `STATE_IMMUTABLE_RECORD_DELETED:${key}` };
@@ -442,6 +450,8 @@ export function validateStateMutation(previousRaw: unknown, nextRaw: unknown, op
   if (!transferValidation.ok) return transferValidation;
 
   for (const batch of newRows(previous, next, 'processingBatches')) {
+    const hold = activeProcessingHold(next, batch);
+    if (hold) return { ok: false, error: hold.invalidDate ? 'PROCESSING_DATE_INVALID' : 'PROCESSING_TREATMENT_WITHDRAWAL_HOLD' };
     const before = pondById(previous, batch.sourcePondId);
     const after = pondById(next, batch.sourcePondId);
     const outputs = [batch.caviarYieldKg, batch.filletMeatYieldKg, batch.smokedMeatYieldKg, batch.byProductAndWasteKg];
@@ -458,6 +468,7 @@ export function validateStateMutation(previousRaw: unknown, nextRaw: unknown, op
     if (!proforma?.fulfilledAt || !proforma?.fulfillmentTransactionId) continue;
     const before = previousProformas.get(proforma.id);
     if (before?.fulfilledAt || before?.fulfillmentTransactionId) continue;
+    if (proforma.stage !== 'Dispatched / Delivery (تحویل)') return { ok: false, error: 'SALE_FULFILLMENT_REQUIRES_DISPATCH_STAGE' };
     const saleValidation = validateSaleFulfillmentConservation(collection(previous, 'coldStorage'), collection(next, 'coldStorage'), proforma);
     if (!saleValidation.ok) return { ok: false, error: saleValidation.error || 'SALE_CONSERVATION_FAILED' };
   }
