@@ -15,7 +15,7 @@ import { useSmartInputFocus } from './hooks/useSmartInputFocus';
 const DashboardView = lazy(() => import('./components/views/SafeDashboardView').then((module) => ({ default: module.SafeDashboardView })));
 const PondsView = lazy(() => import('./components/views/PondDigitalTwinView').then((module) => ({ default: module.PondDigitalTwinView })));
 const FeedingView = lazy(() => import('./components/views/FeedingView').then((module) => ({ default: module.FeedingView })));
-const HatcheryView = lazy(() => import('./components/views/HatcheryView').then((module) => ({ default: module.HatcheryView })));
+const HatcheryView = lazy(() => import('./components/views/HatcheryOperationsView').then((module) => ({ default: module.HatcheryOperationsView })));
 const NurseryView = lazy(() => import('./components/views/NurseryView').then((module) => ({ default: module.NurseryView })));
 const ProcessingView = lazy(() => import('./components/views/ProcessingView').then((module) => ({ default: module.ProcessingView })));
 const SalesCrmView = lazy(() => import('./components/views/SalesCrmView').then((module) => ({ default: module.SalesCrmView })));
