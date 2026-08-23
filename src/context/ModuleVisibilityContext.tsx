@@ -1,0 +1,171 @@
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useAuth } from './AuthContext';
+
+export type ModuleVisibilityId =
+  | 'dashboard'
+  | 'farmHalls'
+  | 'ponds'
+  | 'feeding'
+  | 'biometrics'
+  | 'waterQuality'
+  | 'mortality'
+  | 'treatments'
+  | 'transfers'
+  | 'hatchery'
+  | 'nursery'
+  | 'feedFactory'
+  | 'warehouse'
+  | 'laboratory'
+  | 'processing'
+  | 'coldStorage'
+  | 'crm'
+  | 'sales'
+  | 'accounting'
+  | 'hr'
+  | 'aiAssistant'
+  | 'mediaStudio'
+  | 'maintenance'
+  | 'reports'
+  | 'securityAudit'
+  | 'backup'
+  | 'platformHub'
+  | 'adminSettings';
+
+export type ModuleSection = 'breeding' | 'hatchery' | 'commercial' | 'system';
+
+export interface ModuleCatalogItem {
+  id: ModuleVisibilityId;
+  titleFa: string;
+  titleEn: string;
+  descriptionFa: string;
+  section: ModuleSection;
+  locked?: boolean;
+}
+
+export const MODULE_CATALOG: ModuleCatalogItem[] = [
+  { id: 'dashboard', titleFa: 'داشبورد مدیریتی', titleEn: 'Dashboard', descriptionFa: 'نمای کلی KPI، هشدارها و وضعیت مجموعه', section: 'breeding', locked: true },
+  { id: 'farmHalls', titleFa: 'سالن‌های پرورش', titleEn: 'Farm Halls', descriptionFa: 'ساختار سالن‌ها، ظرفیت و تجمیع استخرها', section: 'breeding' },
+  { id: 'ponds', titleFa: 'استخرها و Digital Twin', titleEn: 'Ponds', descriptionFa: 'موجودی، بیومس، تله‌متری و عملیات سریع استخر', section: 'breeding' },
+  { id: 'feeding', titleFa: 'مدیریت تغذیه', titleEn: 'Feeding', descriptionFa: 'جیره، ثبت خوراک و قفل‌های ایمنی', section: 'breeding' },
+  { id: 'biometrics', titleFa: 'بیومتری و رشد', titleEn: 'Biometrics', descriptionFa: 'نمونه‌گیری وزن، SGR و یکنواختی گله', section: 'breeding' },
+  { id: 'waterQuality', titleFa: 'کیفیت آب و سنسورها', titleEn: 'Water Quality', descriptionFa: 'DO، دما، pH، آمونیاک، نیتریت و سلامت داده', section: 'breeding' },
+  { id: 'mortality', titleFa: 'تلفات', titleEn: 'Mortality', descriptionFa: 'ثبت، علت‌یابی و تاریخچه تلفات', section: 'breeding' },
+  { id: 'treatments', titleFa: 'درمان و دارو', titleEn: 'Treatments', descriptionFa: 'درمان، دوز، Withdrawal و وضعیت درمان فعال', section: 'breeding' },
+  { id: 'transfers', titleFa: 'انتقال ماهی', titleEn: 'Transfers', descriptionFa: 'جابجایی اتمیک ماهی و بیومس', section: 'breeding' },
+  { id: 'hatchery', titleFa: 'تکثیر و مولدین', titleEn: 'Hatchery', descriptionFa: 'مولد، لقاح، انکوباتور، لارو و ردیابی', section: 'hatchery' },
+  { id: 'nursery', titleFa: 'نرسری', titleEn: 'Nursery', descriptionFa: 'مخازن نرسری و بچ‌های لاروی', section: 'hatchery' },
+  { id: 'feedFactory', titleFa: 'کارخانه خوراک', titleEn: 'Feed Factory', descriptionFa: 'مواد خوراکی و گردش تولید خوراک', section: 'hatchery' },
+  { id: 'warehouse', titleFa: 'انبار', titleEn: 'Warehouse', descriptionFa: 'موجودی، ورود/خروج و نقطه سفارش', section: 'hatchery' },
+  { id: 'laboratory', titleFa: 'آزمایشگاه', titleEn: 'Laboratory', descriptionFa: 'نمونه‌ها، نتایج و کنترل کیفی', section: 'hatchery' },
+  { id: 'processing', titleFa: 'فرآوری', titleEn: 'Processing', descriptionFa: 'استحصال خاویار، گوشت و راندمان تولید', section: 'hatchery' },
+  { id: 'coldStorage', titleFa: 'سردخانه', titleEn: 'Cold Storage', descriptionFa: 'لات‌ها، پالت‌ها، دما و موجودی محصول', section: 'hatchery' },
+  { id: 'crm', titleFa: 'CRM مشتریان', titleEn: 'CRM', descriptionFa: 'پرونده مشتری و گردش ارتباطات تجاری', section: 'commercial' },
+  { id: 'sales', titleFa: 'فروش و پیش‌فاکتور', titleEn: 'Sales', descriptionFa: 'پروفرما، سفارش، تحویل و فروش صادراتی', section: 'commercial' },
+  { id: 'accounting', titleFa: 'حسابداری', titleEn: 'Accounting', descriptionFa: 'دفتر کل، اسناد دوبل و کدینگ حساب‌ها', section: 'commercial' },
+  { id: 'hr', titleFa: 'منابع انسانی و حقوق', titleEn: 'HR & Payroll', descriptionFa: 'پرسنل، تردد و حقوق و دستمزد', section: 'commercial' },
+  { id: 'aiAssistant', titleFa: 'دستیار هوشمند', titleEn: 'AI Assistant', descriptionFa: 'تحلیل داده و مشاور مزرعه', section: 'system' },
+  { id: 'mediaStudio', titleFa: 'مرکز شبکه‌های اجتماعی', titleEn: 'Media Studio', descriptionFa: 'رسانه، کپشن، تأیید و انتشار کمکی', section: 'system' },
+  { id: 'maintenance', titleFa: 'نگهداری و تعمیرات', titleEn: 'Maintenance', descriptionFa: 'تجهیزات، سرویس و نگهداری پیشگیرانه', section: 'system' },
+  { id: 'reports', titleFa: 'گزارش‌ها', titleEn: 'Reports', descriptionFa: 'گزارش عملیاتی و خروجی داده', section: 'system' },
+  { id: 'securityAudit', titleFa: 'امنیت و ممیزی', titleEn: 'Security & Audit', descriptionFa: 'کاربران، RBAC و ردپای عملیات', section: 'system' },
+  { id: 'backup', titleFa: 'پشتیبان‌گیری', titleEn: 'Backup & Restore', descriptionFa: 'پشتیبان رمزنگاری‌شده و بازیابی', section: 'system' },
+  { id: 'platformHub', titleFa: 'نسخه‌های اجرایی', titleEn: 'Platform Hub', descriptionFa: 'Windows، PWA و وضعیت بسته‌های اجرایی', section: 'system' },
+  { id: 'adminSettings', titleFa: 'تنظیمات ادمین و کنترل ماژول‌ها', titleEn: 'Admin Settings', descriptionFa: 'مرکز کنترل کل ERP و روشن/خاموش کردن هر بخش', section: 'system', locked: true },
+];
+
+export const MODULE_VISIBILITY_STORAGE_KEY = 'fathi_erp_module_visibility_v1';
+
+type VisibilityMap = Record<ModuleVisibilityId, boolean>;
+
+function defaults(): VisibilityMap {
+  return Object.fromEntries(MODULE_CATALOG.map((item) => [item.id, true])) as VisibilityMap;
+}
+
+function loadStored(): VisibilityMap {
+  const base = defaults();
+  try {
+    if (typeof window === 'undefined') return base;
+    const raw = window.localStorage.getItem(MODULE_VISIBILITY_STORAGE_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    for (const item of MODULE_CATALOG) {
+      if (item.locked) base[item.id] = true;
+      else if (typeof parsed[item.id] === 'boolean') base[item.id] = parsed[item.id] as boolean;
+    }
+  } catch {
+    return base;
+  }
+  return base;
+}
+
+interface ModuleVisibilityContextValue {
+  visibility: VisibilityMap;
+  canManageModules: boolean;
+  isModuleEnabled: (id: string) => boolean;
+  setModuleEnabled: (id: ModuleVisibilityId, enabled: boolean) => void;
+  enableAllModules: () => void;
+  disableOptionalModules: () => void;
+  resetModuleVisibility: () => void;
+  enabledCount: number;
+}
+
+const ModuleVisibilityContext = createContext<ModuleVisibilityContextValue | null>(null);
+
+export const ModuleVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { currentUser } = useAuth();
+  const [visibility, setVisibility] = useState<VisibilityMap>(loadStored);
+  const canManageModules = currentUser?.role === 'Super Admin' || currentUser?.role === 'Farm Owner';
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MODULE_VISIBILITY_STORAGE_KEY, JSON.stringify(visibility));
+    } catch {
+      // The ERP remains usable if the host browser blocks local persistence.
+    }
+  }, [visibility]);
+
+  const setModuleEnabled = (id: ModuleVisibilityId, enabled: boolean) => {
+    if (!canManageModules) return;
+    const item = MODULE_CATALOG.find((candidate) => candidate.id === id);
+    if (!item || item.locked) return;
+    setVisibility((previous) => ({ ...previous, [id]: enabled }));
+  };
+
+  const enableAllModules = () => {
+    if (!canManageModules) return;
+    setVisibility(defaults());
+  };
+
+  const disableOptionalModules = () => {
+    if (!canManageModules) return;
+    setVisibility(Object.fromEntries(MODULE_CATALOG.map((item) => [item.id, Boolean(item.locked)])) as VisibilityMap);
+  };
+
+  const resetModuleVisibility = () => {
+    if (!canManageModules) return;
+    setVisibility(defaults());
+  };
+
+  const value = useMemo<ModuleVisibilityContextValue>(() => ({
+    visibility,
+    canManageModules,
+    isModuleEnabled: (id: string) => {
+      const item = MODULE_CATALOG.find((candidate) => candidate.id === id);
+      if (!item) return true;
+      return item.locked ? true : visibility[item.id] !== false;
+    },
+    setModuleEnabled,
+    enableAllModules,
+    disableOptionalModules,
+    resetModuleVisibility,
+    enabledCount: MODULE_CATALOG.filter((item) => item.locked || visibility[item.id] !== false).length,
+  }), [visibility, canManageModules]);
+
+  return <ModuleVisibilityContext.Provider value={value}>{children}</ModuleVisibilityContext.Provider>;
+};
+
+export function useModuleVisibility(): ModuleVisibilityContextValue {
+  const context = useContext(ModuleVisibilityContext);
+  if (!context) throw new Error('useModuleVisibility must be used within ModuleVisibilityProvider');
+  return context;
+}
