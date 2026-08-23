@@ -4,6 +4,8 @@ import {
   SENSOR_MAX_AGE_MINUTES,
   validateDissolvedOxygen,
 } from '../utils/sensorValidation';
+import { calculateFeedingRecommendation } from '../utils/feedingEngine';
+import { Pond, SturgeonSpecies } from '../types';
 
 describe('Feeding Safety Engine & Water Quality Rules', () => {
   const fresh = new Date().toISOString();
@@ -62,5 +64,25 @@ describe('Feeding Safety Engine & Water Quality Rules', () => {
     const zeroDO = validateDissolvedOxygen(0);
     expect(zeroDO.isValid).toBe(false);
     expect(zeroDO.status).toBe('SENSOR_FAULT');
+  });
+
+  it('never treats a manual water test as authoritative feeding telemetry', () => {
+    const pond: Pond = {
+      id: 'pond-manual', number: 'P-1', name: 'Manual pond', hallId: 'hall-1', capacityCubicMeters: 100,
+      fishCount: 100, speciesId: 'sp-1', biomassKg: 100, averageWeightKg: 1,
+      lastFeedingKg: 0, lastFeedingTime: '', feedingStatus: 'ACTIVE', fcr: 1.1, dailyMortalityCount: 0,
+      waterTemperature: safeWater.waterTemperature, dissolvedOxygen: safeWater.dissolvedOxygen, ph: safeWater.ph,
+      ammonia: safeWater.ammonia, nitrite: safeWater.nitrite, lastTelemetryTimestamp: fresh, sensorQuality: 'MANUAL',
+      lastBiometryDate: '2026-08-01', criticalAlerts: [],
+    };
+    const species: SturgeonSpecies = {
+      id: 'sp-1', faName: 'گونه آزمون', enName: 'Test', scientificName: 'Test species', origin: '', geneticLine: '', description: '',
+      optimumTempMin: 14, optimumTempMax: 19, optimumDOMin: 6, optimumpHMin: 6.8, optimumpHMax: 8.2,
+      standardFCR: 1.1, feedingProfileCoeff: 1, caviarMaturityYears: 8,
+    };
+    const recommendation = calculateFeedingRecommendation(pond, [species]);
+    expect(recommendation.isLocked).toBe(true);
+    expect(recommendation.recommendedKg).toBe(0);
+    expect(recommendation.lockReason).toContain('authoritative');
   });
 });
