@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { I18nProvider, useI18n } from './i18n';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FarmProvider } from './context/FarmContext';
+import { ModuleVisibilityId, ModuleVisibilityProvider, useModuleVisibility } from './context/ModuleVisibilityContext';
 import { PermissionModule } from './types';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
@@ -28,6 +29,7 @@ const CrossPlatformView = lazy(() => import('./components/views/CrossPlatformVie
 const SecurityAuditView = lazy(() => import('./components/views/SecurityAuditView').then((module) => ({ default: module.SecurityAuditView })));
 const BackupRestoreView = lazy(() => import('./components/views/BackupRestoreView').then((module) => ({ default: module.BackupRestoreView })));
 const OperationsModuleView = lazy(() => import('./components/views/OperationsModuleView').then((module) => ({ default: module.OperationsModuleView })));
+const AdminSettingsView = lazy(() => import('./components/views/AdminSettingsView').then((module) => ({ default: module.AdminSettingsView })));
 
 const VIEW_PERMISSIONS: Record<string, PermissionModule> = {
   dashboard: 'dashboard',
@@ -63,6 +65,16 @@ const VIEW_PERMISSIONS: Record<string, PermissionModule> = {
   backupRestore: 'backup',
   platformHub: 'settings',
   crossPlatform: 'settings',
+  adminSettings: 'settings',
+};
+
+const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
+  dashboard: 'dashboard', farmHalls: 'farmHalls', ponds: 'ponds', feeding: 'feeding', biometrics: 'biometrics', waterQuality: 'waterQuality',
+  mortality: 'mortality', treatments: 'treatments', transfers: 'transfers', hatchery: 'hatchery', nursery: 'nursery', feedFactory: 'feedFactory',
+  warehouse: 'warehouse', laboratory: 'laboratory', processing: 'processing', coldStorage: 'coldStorage', crm: 'crm', sales: 'sales', accounting: 'accounting',
+  hr: 'hr', hrPayroll: 'hr', aiAssistant: 'aiAssistant', mediaStudio: 'mediaStudio', media: 'mediaStudio', caviarMarketing: 'mediaStudio', maintenance: 'maintenance',
+  reports: 'reports', securityAudit: 'securityAudit', users: 'securityAudit', backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'platformHub',
+  adminSettings: 'adminSettings',
 };
 
 const OPERATIONS_VIEWS = new Set<OperationsModuleId>([
@@ -82,6 +94,7 @@ const OPERATIONS_VIEWS = new Set<OperationsModuleId>([
 const MainAppContent: React.FC = () => {
   const { dir, t } = useI18n();
   const { isAuthenticated, currentUser, hasPermission } = useAuth();
+  const { isModuleEnabled, canManageModules } = useModuleVisibility();
   const [activeView, setActiveView] = useState('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -99,13 +112,26 @@ const MainAppContent: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  useEffect(() => {
+    const visibilityId = VISIBILITY_ROUTE_MAP[activeView];
+    if (visibilityId && !isModuleEnabled(visibilityId)) setActiveView('dashboard');
+    if (activeView === 'adminSettings' && !canManageModules) setActiveView('dashboard');
+  }, [activeView, isModuleEnabled, canManageModules]);
+
   const selectView = (viewId: string) => {
+    const visibilityId = VISIBILITY_ROUTE_MAP[viewId];
+    if (visibilityId && !isModuleEnabled(visibilityId)) return;
+    if (viewId === 'adminSettings' && !canManageModules) return;
     const module = VIEW_PERMISSIONS[viewId];
     if (module && !hasPermission(module, 'view')) return;
     setActiveView(viewId);
   };
 
   const renderActiveView = () => {
+    const visibilityId = VISIBILITY_ROUTE_MAP[activeView];
+    if (visibilityId && !isModuleEnabled(visibilityId)) return <DashboardView onSelectNav={selectView} />;
+    if (activeView === 'adminSettings' && !canManageModules) return <DashboardView onSelectNav={selectView} />;
+
     const requiredModule = VIEW_PERMISSIONS[activeView];
     if (requiredModule && !hasPermission(requiredModule, 'view')) {
       return <DashboardView onSelectNav={selectView} />;
@@ -138,6 +164,7 @@ const MainAppContent: React.FC = () => {
       case 'users': return <SecurityAuditView />;
       case 'backup':
       case 'backupRestore': return <BackupRestoreView />;
+      case 'adminSettings': return <AdminSettingsView />;
       default: return <DashboardView onSelectNav={selectView} />;
     }
   };
@@ -195,9 +222,11 @@ export default function App() {
   return (
     <I18nProvider>
       <AuthProvider>
-        <FarmProvider>
-          <MainAppContent />
-        </FarmProvider>
+        <ModuleVisibilityProvider>
+          <FarmProvider>
+            <MainAppContent />
+          </FarmProvider>
+        </ModuleVisibilityProvider>
       </AuthProvider>
     </I18nProvider>
   );
