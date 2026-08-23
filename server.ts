@@ -7,6 +7,7 @@ import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { DUMMY_PASSWORD_HASH, hashPasswordServer, verifyPasswordServer } from './server/auth';
+import { dahirGatewayStatus, fetchDahirTelemetryServerSide } from './server/dahirGateway';
 import { resolveServerListenConfig } from './server/lanConfig';
 import { constantTimeEqual, isSessionExpired, resolveSessionPolicy } from './server/sessionPolicy';
 import { defaultDatabasePath, SqliteERPStore, StateConflictError, StoredAuditLog, StoredSocialConnection, StoredSocialDraft, StoredUser } from './server/storage';
@@ -238,8 +239,6 @@ function filterStateForUser(data: Record<string, unknown>, role: string): Record
 function mergeStateForOperation(previous: Record<string, unknown> | undefined, submitted: Record<string, unknown>, operation: { module?: string; action?: string }, role: string): Record<string, unknown> {
   if (!previous) return submitted;
   if (operation.module === 'backup' && operation.action === 'approve') {
-    // The SQL audit table is authoritative. Never let a restored document
-    // replace it with client-provided or stale audit rows.
     return { ...submitted, auditLogs: previous.auditLogs };
   }
   const allowed = new Set(MODULE_COLLECTIONS[operation.module || ''] || []);
@@ -554,6 +553,22 @@ app.get('/api/health', (_req, res) => {
     protocol: listenConfig.protocol,
     lanTls: LAN_TLS_ENABLED ? 'enabled' : LAN_MODE ? 'explicitly_disabled' : 'not_applicable',
   });
+});
+
+app.get('/api/dahir/status', requireAuth, requireModuleAction('water_quality', 'view'), (_req, res) => {
+  return res.json({ success: true, gateway: dahirGatewayStatus() });
+});
+
+app.get('/api/dahir/telemetry/:deviceId', requireAuth, requireModuleAction('water_quality', 'view'), async (req: AuthenticatedRequest, res) => {
+  const keys = typeof req.query.keys === 'string' ? req.query.keys.split(',').map((key) => key.trim()).filter(Boolean) : [];
+  try {
+    const points = await fetchDahirTelemetryServerSide(req.params.deviceId, keys);
+    return res.json({ success: true, points, gateway: dahirGatewayStatus() });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'DAHIR_GATEWAY_FAILED';
+    const status = code === 'DAHIR_TIMEOUT' ? 504 : code === 'DAHIR_NOT_CONFIGURED' || code === 'DAHIR_SERVER_CREDENTIAL_REQUIRED' ? 503 : code === 'DAHIR_DEVICE_INVALID' || code === 'DAHIR_KEYS_INVALID' ? 400 : 502;
+    return res.status(status).json({ success: false, error: code });
+  }
 });
 
 app.get('/api/state', requireAuth, (req: AuthenticatedRequest, res) => {
