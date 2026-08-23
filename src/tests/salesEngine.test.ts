@@ -15,9 +15,11 @@ const proforma: ProformaInvoice = {
   subtotal: 4000, taxTotal: 0, discountTotal: 0, grandTotal: 4000, currency: 'EUR', paymentTerms: 'prepaid', deliveryTerms: 'pickup', citesPermitRequired: true, status: 'Sent',
 };
 
+const fulfillmentTime = '2026-08-23T10:00:00.000Z';
+
 describe('sale fulfillment conservation', () => {
   it('atomically consumes packaged cold-storage units and weight', () => {
-    const result = fulfillProforma(proforma, [lot], '2026-08-21T10:00:00.000Z');
+    const result = fulfillProforma(proforma, [lot], fulfillmentTime);
     expect(result.success).toBe(true);
     expect(result.transactionId).toBeTruthy();
     expect(result.coldStorage?.[0]).toMatchObject({ unitsCount: 160, weightKg: 8 });
@@ -25,16 +27,23 @@ describe('sale fulfillment conservation', () => {
   });
 
   it('rejects a sale that exceeds available packaged stock', () => {
-    const result = fulfillProforma({ ...proforma, items: [{ ...proforma.items[0], quantity: 201 }] }, [lot]);
-    expect(result).toMatchObject({ success: false, error: 'موجودی بسته‌بندی CAV-BEL-50G کافی نیست.' });
+    const result = fulfillProforma({ ...proforma, items: [{ ...proforma.items[0], quantity: 201 }] }, [lot], fulfillmentTime);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('موجودی بسته‌بندی معتبر');
   });
 
   it('aggregates duplicate SKU lines before consuming stock', () => {
     const result = fulfillProforma({ ...proforma, items: [
       { ...proforma.items[0], quantity: 20 },
       { ...proforma.items[0], id: 'item-2', quantity: 30 },
-    ] }, [lot]);
+    ] }, [lot], fulfillmentTime);
     expect(result.success).toBe(true);
     expect(result.coldStorage?.[0]).toMatchObject({ unitsCount: 150, weightKg: 7.5 });
+  });
+
+  it('fails closed for expired, future-entry and already-dispatched lots', () => {
+    expect(fulfillProforma(proforma, [{ ...lot, expiryDate: '2026-08-22' }], fulfillmentTime).success).toBe(false);
+    expect(fulfillProforma(proforma, [{ ...lot, entryDate: '2026-08-24' }], fulfillmentTime).success).toBe(false);
+    expect(fulfillProforma(proforma, [{ ...lot, status: 'Pending Dispatch' }], fulfillmentTime).success).toBe(false);
   });
 });
