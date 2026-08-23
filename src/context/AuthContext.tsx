@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { GranularPermission, LanguageCode, PermissionAction, PermissionModule, User } from '../types';
 import { roleAllows } from '../utils/rbac';
-import { nextId } from '../utils/id';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -22,11 +21,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const SESSION_STORAGE_KEY = 'fathi_aqua_session_token';
 
 export function getStoredSessionToken(): string | null {
-  try {
-    return typeof window !== 'undefined' ? window.sessionStorage.getItem(SESSION_STORAGE_KEY) : null;
-  } catch {
-    return null;
-  }
+  try { return typeof window !== 'undefined' ? window.sessionStorage.getItem(SESSION_STORAGE_KEY) : null; } catch { return null; }
 }
 
 function setStoredSessionToken(token: string | null): void {
@@ -34,9 +29,7 @@ function setStoredSessionToken(token: string | null): void {
     if (typeof window === 'undefined') return;
     if (token) window.sessionStorage.setItem(SESSION_STORAGE_KEY, token);
     else window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // A storage failure must not create a second client-side user database.
-  }
+  } catch { /* Never create a client-side credential fallback. */ }
 }
 
 function sessionHeaders(token: string): HeadersInit {
@@ -47,7 +40,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [usersList, setUsersList] = useState<User[]>([]);
-  const [customRoles, setCustomRoles] = useState<{ id: string; name: string; permissions: GranularPermission[] }[]>([]);
 
   const refreshUsers = async (token: string) => {
     const response = await fetch('/api/auth/users', { headers: sessionHeaders(token) });
@@ -69,6 +61,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (data.user.role === 'Super Admin' || data.user.role === 'Farm Owner') await refreshUsers(token);
       } catch {
         setStoredSessionToken(null);
+        setCurrentUser(null);
+        setSessionToken(null);
       }
     };
     void initSession();
@@ -78,20 +72,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const normalizedUsername = username.trim().toLowerCase();
     if (!normalizedUsername || !passwordPlain) return { success: false, error: 'USERNAME_PASSWORD_REQUIRED' };
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: normalizedUsername, password: passwordPlain, language }),
-      });
+      const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: normalizedUsername, password: passwordPlain, language }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success || !data.user?.id || !data.token) return { success: false, error: data.error || 'INVALID_CREDENTIALS' };
-      setStoredSessionToken(data.token);
-      setCurrentUser(data.user);
-      setSessionToken(data.token);
+      if (data.user.customRoleId) return { success: false, error: 'SERVER_CUSTOM_ROLE_NOT_SUPPORTED' };
+      setStoredSessionToken(data.token); setCurrentUser(data.user); setSessionToken(data.token);
       if (data.user.role === 'Super Admin' || data.user.role === 'Farm Owner') await refreshUsers(data.token);
       return { success: true };
-    } catch {
-      return { success: false, error: 'AUTH_SERVER_UNAVAILABLE' };
-    }
+    } catch { return { success: false, error: 'AUTH_SERVER_UNAVAILABLE' }; }
   };
 
   const bootstrapAdmin = async (input: { username: string; password: string; fullName: string; email: string; language?: LanguageCode; setupToken?: string }) => {
@@ -99,34 +87,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { setupToken, ...body } = input;
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (setupToken?.trim()) headers['x-fathi-setup-token'] = setupToken.trim();
-      const response = await fetch('/api/auth/bootstrap', {
-        method: 'POST', headers, body: JSON.stringify(body),
-      });
+      const response = await fetch('/api/auth/bootstrap', { method: 'POST', headers, body: JSON.stringify(body) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) return { success: false, error: data.error || 'BOOTSTRAP_FAILED' };
       return login(input.username, input.password, input.language);
-    } catch {
-      return { success: false, error: 'AUTH_SERVER_UNAVAILABLE' };
-    }
+    } catch { return { success: false, error: 'AUTH_SERVER_UNAVAILABLE' }; }
   };
 
   const logout = () => {
     const token = sessionToken;
     if (token) fetch('/api/auth/logout', { method: 'POST', headers: sessionHeaders(token) }).catch(() => {});
-    setCurrentUser(null);
-    setSessionToken(null);
-    setUsersList([]);
-    setStoredSessionToken(null);
+    setCurrentUser(null); setSessionToken(null); setUsersList([]); setStoredSessionToken(null);
   };
 
   const hasPermission = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean => {
-    if (!currentUser || !currentUser.isActive) return false;
-    if (currentUser.customRoleId) {
-      const customRole = customRoles.find((role) => role.id === currentUser.customRoleId);
-      if (!customRole) return false;
-      return customRole.permissions.some((permission) => permission.module === module && permission.actions.includes(action)
-        && (permission.scope === 'all' || Boolean(scopeId && permission.scopeId === scopeId)));
-    }
+    if (!currentUser || !currentUser.isActive || currentUser.customRoleId) return false;
     if (!roleAllows(currentUser.role, module, action)) return false;
     if (!scopeId) return true;
     if (currentUser.pondScope?.length) return currentUser.pondScope.includes(scopeId);
@@ -135,9 +110,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const requireToken = () => sessionToken || getStoredSessionToken() || '';
-
   const createNewUser = async (userData: Omit<User, 'id' | 'createdAt'>, passwordPlain: string) => {
     if (passwordPlain.length < 12) throw new Error('PASSWORD_TOO_SHORT');
+    if (userData.customRoleId) throw new Error('SERVER_CUSTOM_ROLE_NOT_SUPPORTED');
     const token = requireToken();
     const response = await fetch('/api/auth/users', { method: 'POST', headers: sessionHeaders(token), body: JSON.stringify({ ...userData, password: passwordPlain }) });
     const data = await response.json().catch(() => ({}));
@@ -159,10 +134,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return updateUser(userId, { password: newPassPlain });
   };
 
-  const createCustomRole = (name: string, permissions: GranularPermission[]) => {
-    if (!name.trim()) throw new Error('ROLE_NAME_REQUIRED');
-    setCustomRoles((previous) => [...previous, { id: nextId('role'), name: name.trim(), permissions }]);
-  };
+  // Client-only custom roles were misleading and could not be enforced by the server.
+  // Keep the API fail-closed until custom roles are persisted and authorized server-side.
+  const customRoles: { id: string; name: string; permissions: GranularPermission[] }[] = [];
+  const createCustomRole = (_name: string, _permissions: GranularPermission[]) => { throw new Error('SERVER_CUSTOM_ROLE_NOT_SUPPORTED'); };
 
   return <AuthContext.Provider value={{ currentUser, isAuthenticated: Boolean(currentUser), login, bootstrapAdmin, logout, hasPermission, usersList, createNewUser, toggleUserActive, resetUserPassword, customRoles, createCustomRole }}>{children}</AuthContext.Provider>;
 };
