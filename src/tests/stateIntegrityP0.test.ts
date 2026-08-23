@@ -17,8 +17,8 @@ function processingMutation(previous: Record<string, any[]>) {
   next.ponds[0] = { ...next.ponds[0], fishCount: 90, biomassKg: 90, averageWeightKg: 1 };
   next.processingBatches = [{
     id: 'proc-1', batchCode: 'PROC-1', date: '2026-08-23', sourcePondId: 'pond-1',
-    fishCount: 10, liveBiomassKg: 10, caviarYieldKg: 1, filletMeatYieldKg: 7,
-    smokedMeatYieldKg: 1, byProductAndWasteKg: 1, outputLotIds: ['lot-1'],
+    fishCount: 10, liveBiomassKg: 10, caviarYieldKg: 1, filletMeatYieldKg: 0,
+    smokedMeatYieldKg: 0, byProductAndWasteKg: 9, outputLotIds: ['lot-1'],
   }];
   next.coldStorage = [{
     id: 'lot-1', sku: 'CAV-PROC-1', batchCode: 'PROC-1', productType: 'Caviar (Cans/Jars)',
