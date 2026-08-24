@@ -2,6 +2,16 @@ import { ProformaInvoice } from '../types';
 
 export type ReceivableBucket = 'Not Due' | '1-30' | '31-60' | '61-90' | '90+';
 
+export interface ReceivablePayment {
+  id: string;
+  proformaId?: string;
+  invoiceNumber?: string;
+  date: string;
+  amount: number;
+  currency: ProformaInvoice['currency'];
+  status?: 'Posted' | 'Voided' | 'Draft';
+}
+
 export interface ReceivableAgingRow {
   invoiceNumber: string;
   customerId: string;
@@ -11,6 +21,8 @@ export interface ReceivableAgingRow {
   invoiceDate: string;
   dueDate: string;
   currency: ProformaInvoice['currency'];
+  originalAmount: number;
+  paidAmount: number;
   amountDue: number;
   daysOverdue: number;
   bucket: ReceivableBucket;
@@ -36,12 +48,28 @@ function bucket(daysOverdue: number): ReceivableBucket {
   return '90+';
 }
 
-export function buildReceivablesAging(proformas: ProformaInvoice[], asOfIso: string): ReceivableAgingRow[] {
+function paymentMatches(invoice: ProformaInvoice, payment: ReceivablePayment): boolean {
+  return Boolean((payment.proformaId && payment.proformaId === invoice.id) || (payment.invoiceNumber && payment.invoiceNumber === invoice.invoiceNumber));
+}
+
+function postedPaymentAmount(invoice: ProformaInvoice, asOfIso: string, payments: ReceivablePayment[]): number {
+  const total = payments
+    .filter((payment) => paymentMatches(invoice, payment))
+    .filter((payment) => payment.currency === invoice.currency)
+    .filter((payment) => (payment.status || 'Posted') === 'Posted')
+    .filter((payment) => daysBetween(payment.date, asOfIso) >= 0)
+    .reduce((sum, payment) => sum + Math.max(0, Number(payment.amount) || 0), 0);
+  return Number(total.toFixed(2));
+}
+
+export function buildReceivablesAging(proformas: ProformaInvoice[], asOfIso: string, payments: ReceivablePayment[] = []): ReceivableAgingRow[] {
   return proformas
     .filter((invoice) => !PAID_OR_CLOSED_STAGES.has(invoice.stage) && !INACTIVE_STATUSES.has(invoice.status) && invoice.grandTotal > 0)
     .map((invoice) => {
       const dueDate = invoice.expiryDate || invoice.date;
-      const daysOverdue = Math.max(0, daysBetween(dueDate, asOfIso));
+      const paidAmount = postedPaymentAmount(invoice, asOfIso, payments);
+      const originalAmount = Number(invoice.grandTotal.toFixed(2));
+      const amountDue = Number(Math.max(0, originalAmount - paidAmount).toFixed(2));
       return {
         invoiceNumber: invoice.invoiceNumber,
         customerId: invoice.customerId,
@@ -51,13 +79,16 @@ export function buildReceivablesAging(proformas: ProformaInvoice[], asOfIso: str
         invoiceDate: invoice.date,
         dueDate,
         currency: invoice.currency,
-        amountDue: Number(invoice.grandTotal.toFixed(2)),
-        daysOverdue,
-        bucket: bucket(daysOverdue),
+        originalAmount,
+        paidAmount: Math.min(originalAmount, paidAmount),
+        amountDue,
+        daysOverdue: Math.max(0, daysBetween(dueDate, asOfIso)),
+        bucket: bucket(Math.max(0, daysBetween(dueDate, asOfIso))),
         stage: invoice.stage,
         status: invoice.status,
       };
     })
+    .filter((row) => row.amountDue > 0)
     .sort((a, b) => b.daysOverdue - a.daysOverdue || b.amountDue - a.amountDue);
 }
 
