@@ -41,9 +41,10 @@ describe('sale fulfillment conservation', () => {
     expect(result.coldStorage?.[0]).toMatchObject({ unitsCount: 150, weightKg: 7.5 });
   });
 
-  it('fails closed for expired, future-entry and already-dispatched lots', () => {
+  it('fails closed for expired, future-entry, dispatched and quality-hold lots', () => {
     expect(fulfillProforma(proforma, [{ ...lot, expiryDate: '2026-08-22' }], fulfillmentTime).success).toBe(false);
     expect(fulfillProforma(proforma, [{ ...lot, entryDate: '2026-08-24' }], fulfillmentTime).success).toBe(false);
     expect(fulfillProforma(proforma, [{ ...lot, status: 'Pending Dispatch' }], fulfillmentTime).success).toBe(false);
+    expect(fulfillProforma(proforma, [{ ...lot, qualityHold: true } as ColdStoragePallet], fulfillmentTime).success).toBe(false);
   });
 });
