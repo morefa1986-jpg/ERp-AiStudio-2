@@ -57,7 +57,7 @@ const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
   treatments: 'treatments', transfers: 'transfers', hatchery: 'hatchery', nursery: 'nursery', feedFactory: 'feedFactory', warehouse: 'warehouse', laboratory: 'laboratory',
   processing: 'processing', coldStorage: 'coldStorage', crm: 'crm', sales: 'sales', accounting: 'accounting', hr: 'hr', hrPayroll: 'hr', aiAssistant: 'aiAssistant',
   mediaStudio: 'mediaStudio', media: 'mediaStudio', caviarMarketing: 'mediaStudio', maintenance: 'maintenance', reports: 'reports', securityAudit: 'securityAudit', users: 'securityAudit',
-  backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'settings', adminSettings: 'adminSettings',
+  backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'platformHub', adminSettings: 'adminSettings',
 };
 
 const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'feedFactory']);
