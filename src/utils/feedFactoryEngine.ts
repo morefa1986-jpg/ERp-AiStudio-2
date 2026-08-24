@@ -1,5 +1,7 @@
 import type { InventoryItem } from '../types';
 
+export const FEED_RAW_MATERIAL_CATEGORY = 'Raw Material (مواد اولیه خوراک)' as const;
+
 export interface FeedFormulaIngredient {
   itemId: string;
   quantityKg: number;
@@ -40,6 +42,11 @@ export interface FeedProductionPlan {
 
 function supportedMassUnit(unit: string): unit is 'kg' | 'gram' {
   return unit === 'kg' || unit === 'gram';
+}
+
+export function isFeedFactoryIngredientItem(item: Pick<InventoryItem, 'category' | 'unit'>): boolean {
+  const category = String(item.category);
+  return supportedMassUnit(item.unit) && (category === 'Feed (خوراک)' || category === FEED_RAW_MATERIAL_CATEGORY);
 }
 
 function toKg(item: Pick<InventoryItem, 'unit'>, quantity: number): number {
@@ -87,7 +94,7 @@ export function validateFeedFormula(
     const qualityHold = Boolean((item as InventoryItem & { qualityHold?: boolean } | undefined)?.qualityHold);
     if (
       !item
-      || !supportedMassUnit(item.unit)
+      || !isFeedFactoryIngredientItem(item)
       || !Number.isFinite(ingredient.quantityKg)
       || ingredient.quantityKg <= 0
       || isExpired(item)
