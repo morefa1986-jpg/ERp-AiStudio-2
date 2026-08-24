@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, updateHallMaster, updatePondMetadata, updateSpeciesMaster } from './masterData';
+import { registerFxAccountingRoutes } from './fxAccountingRoutes';
 import { registerHrAttendanceRoutes } from './hrAttendanceRoutes';
 import { registerModuleSettingsRoutes } from './moduleSettingsRoutes';
 import { registerWaterTelemetryRoutes } from './waterTelemetryRoutes';
@@ -51,6 +52,7 @@ export function registerMasterDataRoutes(app: Express, deps: Dependencies): void
   });
   registerWaterTelemetryRoutes(app, deps);
   registerHrAttendanceRoutes(app, deps);
+  registerFxAccountingRoutes(app, deps);
 
   const commit = (
     req: AuthenticatedRequest,
