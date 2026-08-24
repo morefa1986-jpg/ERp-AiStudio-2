@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { FarmProvider } from './context/FarmContext';
 import { ModuleVisibilityId, ModuleVisibilityProvider, useModuleVisibility } from './context/ModuleVisibilityContext';
 import { PermissionModule } from './types';
+import { maintenanceRoleAllows } from './utils/maintenanceAccess';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import type { OperationsModuleId } from './components/views/OperationsModuleView';
@@ -25,6 +26,7 @@ const NurseryView = lazy(() => import('./components/views/NurseryView').then((mo
 const ProcessingView = lazy(() => import('./components/views/ProcessingView').then((module) => ({ default: module.ProcessingView })));
 const ColdStorageView = lazy(() => import('./components/views/ColdStorageView').then((module) => ({ default: module.ColdStorageView })));
 const LaboratoryView = lazy(() => import('./components/views/LaboratoryView').then((module) => ({ default: module.LaboratoryView })));
+const MaintenanceView = lazy(() => import('./components/views/MaintenanceView').then((module) => ({ default: module.MaintenanceView })));
 const SalesCrmView = lazy(() => import('./components/views/SalesCrmView').then((module) => ({ default: module.SalesCrmView })));
 const AccountingView = lazy(() => import('./components/views/AccountingView').then((module) => ({ default: module.AccountingView })));
 const HrPayrollView = lazy(() => import('./components/views/HrPayrollView').then((module) => ({ default: module.HrPayrollView })));
@@ -55,10 +57,10 @@ const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
   treatments: 'treatments', transfers: 'transfers', hatchery: 'hatchery', nursery: 'nursery', feedFactory: 'feedFactory', warehouse: 'warehouse', laboratory: 'laboratory',
   processing: 'processing', coldStorage: 'coldStorage', crm: 'crm', sales: 'sales', accounting: 'accounting', hr: 'hr', hrPayroll: 'hr', aiAssistant: 'aiAssistant',
   mediaStudio: 'mediaStudio', media: 'mediaStudio', caviarMarketing: 'mediaStudio', maintenance: 'maintenance', reports: 'reports', securityAudit: 'securityAudit', users: 'securityAudit',
-  backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'platformHub', adminSettings: 'adminSettings',
+  backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'settings', adminSettings: 'adminSettings',
 };
 
-const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'feedFactory', 'maintenance']);
+const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'feedFactory']);
 
 const MainAppContent: React.FC = () => {
   const { dir, t } = useI18n();
@@ -79,14 +81,19 @@ const MainAppContent: React.FC = () => {
     const visibilityId = VISIBILITY_ROUTE_MAP[activeView];
     if (visibilityId && !isModuleEnabled(visibilityId)) setActiveView('dashboard');
     if (activeView === 'adminSettings' && !canManageModules) setActiveView('dashboard');
-  }, [activeView, isModuleEnabled, canManageModules]);
+    if (activeView === 'maintenance' && !maintenanceRoleAllows(String(currentUser?.role || ''), 'view')) setActiveView('dashboard');
+  }, [activeView, isModuleEnabled, canManageModules, currentUser?.role]);
 
   const selectView = (viewId: string) => {
     const visibilityId = VISIBILITY_ROUTE_MAP[viewId];
     if (visibilityId && !isModuleEnabled(visibilityId)) return;
     if (viewId === 'adminSettings' && !canManageModules) return;
-    const module = VIEW_PERMISSIONS[viewId];
-    if (module && !hasPermission(module, 'view')) return;
+    if (viewId === 'maintenance') {
+      if (!maintenanceRoleAllows(String(currentUser?.role || ''), 'view')) return;
+    } else {
+      const module = VIEW_PERMISSIONS[viewId];
+      if (module && !hasPermission(module, 'view')) return;
+    }
     setActiveView(viewId);
   };
 
@@ -94,8 +101,12 @@ const MainAppContent: React.FC = () => {
     const visibilityId = VISIBILITY_ROUTE_MAP[activeView];
     if (visibilityId && !isModuleEnabled(visibilityId)) return <DashboardView onSelectNav={selectView} />;
     if (activeView === 'adminSettings' && !canManageModules) return <DashboardView onSelectNav={selectView} />;
-    const requiredModule = VIEW_PERMISSIONS[activeView];
-    if (requiredModule && !hasPermission(requiredModule, 'view')) return <DashboardView onSelectNav={selectView} />;
+    if (activeView === 'maintenance') {
+      if (!maintenanceRoleAllows(String(currentUser?.role || ''), 'view')) return <DashboardView onSelectNav={selectView} />;
+    } else {
+      const requiredModule = VIEW_PERMISSIONS[activeView];
+      if (requiredModule && !hasPermission(requiredModule, 'view')) return <DashboardView onSelectNav={selectView} />;
+    }
     if (OPERATIONS_VIEWS.has(activeView as OperationsModuleId)) return <OperationsModuleView moduleId={activeView as OperationsModuleId} />;
 
     switch (activeView) {
@@ -112,6 +123,7 @@ const MainAppContent: React.FC = () => {
       case 'processing': return <ProcessingView />;
       case 'coldStorage': return <ColdStorageView />;
       case 'laboratory': return <LaboratoryView />;
+      case 'maintenance': return <MaintenanceView />;
       case 'warehouse': return <WarehouseView />;
       case 'crm': case 'sales': return <SalesCrmView />;
       case 'accounting': return <AccountingView />;
