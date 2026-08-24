@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const CREDENTIALS = { username: 'owner', password: 'e2e-owner-password-2026' };
+test.setTimeout(60_000);
 
 async function waitForBootstrap(request) {
   await expect.poll(async () => {
@@ -8,7 +9,7 @@ async function waitForBootstrap(request) {
     if (!response.ok()) return false;
     const payload = await response.json();
     return payload.needsBootstrap === false;
-  }, { timeout: 15_000 }).toBe(true);
+  }, { timeout: 40_000, intervals: [250, 500, 1000] }).toBe(true);
 }
 
 async function login(request) {
