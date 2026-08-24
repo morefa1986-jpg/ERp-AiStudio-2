@@ -297,3 +297,103 @@ test('master data creation and hall-scoped user filtering are server authoritati
   expect(scopedState.state.data.halls.map((row) => row.id)).toEqual([hallId]);
   expect(scopedState.state.data.ponds.map((row) => row.id)).toEqual([pondId]);
 });
+
+test('IndexedDB outbox blocks stale startup offline then replays and deletes the recovered entry', async ({ page, request }) => {
+  await loginBrowser(page);
+  const token = await page.evaluate(() => sessionStorage.getItem('fathi_aqua_session_token'));
+  expect(token).toMatch(/^fathi_sec_/);
+
+  const sessionResponse = await request.get('/api/auth/session', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(sessionResponse.ok()).toBeTruthy();
+  const session = await sessionResponse.json();
+  const userId = session.user.id;
+
+  const stateResponse = await request.get('/api/state', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(stateResponse.ok()).toBeTruthy();
+  const base = await stateResponse.json();
+  expect(base.success).toBe(true);
+  expect(base.state?.data).toBeTruthy();
+
+  const durableId = `cust_indexeddb_${Date.now()}`;
+  const candidate = structuredClone(base.state.data);
+  candidate.customers = [customer(durableId, 'IndexedDB'), ...(candidate.customers || [])];
+  const entryId = `${userId}:e2e-${Date.now()}`;
+
+  await page.evaluate(async ({ entry }) => {
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open('fathi-aqua-supererp-offline', 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('state_outbox')) {
+          const store = db.createObjectStore('state_outbox', { keyPath: 'id' });
+          store.createIndex('userId', 'userId', { unique: false });
+          store.createIndex('sequence', 'sequence', { unique: false });
+        }
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction('state_outbox', 'readwrite');
+        tx.objectStore('state_outbox').put(entry);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+      };
+    });
+  }, {
+    entry: {
+      id: entryId,
+      userId,
+      sequence: Date.now() * 1000,
+      operation: { module: 'crm', action: 'create', entity: 'Customer', entityId: durableId },
+      state: candidate,
+      createdAt: new Date().toISOString(),
+    },
+  });
+
+  const storedBeforeReload = await page.evaluate(async ({ id }) => new Promise((resolve, reject) => {
+    const request = indexedDB.open('fathi-aqua-supererp-offline', 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction('state_outbox', 'readonly');
+      const get = tx.objectStore('state_outbox').get(id);
+      get.onsuccess = () => { const found = Boolean(get.result); db.close(); resolve(found); };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+  }), { id: entryId });
+  expect(storedBeforeReload).toBe(true);
+
+  await page.route('**/api/state', (route) => route.abort('failed'));
+  await page.reload();
+  await expect(page.getByText('بازیابی امن تغییرات آفلاین', { exact: true })).toBeVisible();
+  await expect(page.getByText(/عملیات ذخیره‌شده در IndexedDB محفوظ است/)).toBeVisible();
+  await expect(page.locator('main')).toHaveCount(0);
+
+  await page.unroute('**/api/state');
+  await page.getByRole('button', { name: 'تلاش مجدد' }).click();
+  await expect(page.locator('main')).toBeVisible({ timeout: 15_000 });
+
+  await expect.poll(async () => {
+    const response = await request.get('/api/state', { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok()) return false;
+    const payload = await response.json();
+    return payload.state?.data?.customers?.some((row) => row.id === durableId) || false;
+  }, { timeout: 15_000 }).toBe(true);
+
+  const storedAfterReplay = await page.evaluate(async ({ id }) => new Promise((resolve, reject) => {
+    const request = indexedDB.open('fathi-aqua-supererp-offline', 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction('state_outbox', 'readonly');
+      const get = tx.objectStore('state_outbox').get(id);
+      get.onsuccess = () => { const found = Boolean(get.result); db.close(); resolve(found); };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+  }), { id: entryId });
+  expect(storedAfterReplay).toBe(false);
+});
