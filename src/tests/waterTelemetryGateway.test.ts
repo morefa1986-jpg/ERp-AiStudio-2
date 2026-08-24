@@ -9,8 +9,8 @@ afterEach(() => {
 describe('server-side water telemetry gateway', () => {
   it('reports configuration without exposing credentials', () => {
     const status = dahirGatewayStatus({
-      DAHIR_BASE_URL: 'http://127.0.0.1:8080',
-      DAHIR_API_KEY: 'super-secret-key',
+      WATER_TELEMETRY_BASE_URL: 'http://127.0.0.1:8080',
+      WATER_TELEMETRY_API_KEY: 'super-secret-key',
     } as NodeJS.ProcessEnv);
 
     expect(status).toEqual({
@@ -29,7 +29,7 @@ describe('server-side water telemetry gateway', () => {
     await expect(fetchDahirTelemetryServerSide(
       '../unsafe/device',
       ['waterLevel'],
-      { DAHIR_BASE_URL: 'http://127.0.0.1:8080', DAHIR_API_KEY: 'key' } as NodeJS.ProcessEnv,
+      { WATER_TELEMETRY_BASE_URL: 'http://127.0.0.1:8080', WATER_TELEMETRY_API_KEY: 'key' } as NodeJS.ProcessEnv,
     )).rejects.toThrow('DAHIR_DEVICE_INVALID');
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -46,7 +46,7 @@ describe('server-side water telemetry gateway', () => {
     const result = await fetchDahirTelemetryServerSide(
       'pond-sensor-01',
       ['temperature', 'dissolvedOxygen'],
-      { DAHIR_BASE_URL: 'http://127.0.0.1:8080', DAHIR_BEARER_TOKEN: 'token' } as NodeJS.ProcessEnv,
+      { WATER_TELEMETRY_BASE_URL: 'http://127.0.0.1:8080', WATER_TELEMETRY_BEARER_TOKEN: 'token' } as NodeJS.ProcessEnv,
     );
 
     expect(result.temperature.numericValue).toBe(15.8);
@@ -66,7 +66,16 @@ describe('server-side water telemetry gateway', () => {
     await expect(fetchDahirTelemetryServerSide(
       'sensor-01',
       ['waterLevel'],
-      { DAHIR_BASE_URL: 'http://127.0.0.1:8080', DAHIR_API_KEY: 'bad-key' } as NodeJS.ProcessEnv,
+      { WATER_TELEMETRY_BASE_URL: 'http://127.0.0.1:8080', WATER_TELEMETRY_API_KEY: 'bad-key' } as NodeJS.ProcessEnv,
     )).rejects.toThrow('DAHIR_AUTH_FAILED');
+  });
+
+  it('keeps legacy environment keys as a backend-only migration fallback', () => {
+    const status = dahirGatewayStatus({
+      DAHIR_BASE_URL: 'http://127.0.0.1:8080',
+      DAHIR_BEARER_TOKEN: 'legacy-token',
+    } as NodeJS.ProcessEnv);
+    expect(status.configured).toBe(true);
+    expect(status.authMode).toBe('bearer');
   });
 });
