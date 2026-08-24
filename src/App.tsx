@@ -27,6 +27,7 @@ const WarehouseView = lazy(() => import('./components/views/WarehouseView').then
 const BiometricsView = lazy(() => import('./components/views/BiometricsView').then((module) => ({ default: module.BiometricsView })));
 const WaterQualityView = lazy(() => import('./components/views/WaterQualityView').then((module) => ({ default: module.WaterQualityView })));
 const LivestockOperationsView = lazy(() => import('./components/views/LivestockOperationsView').then((module) => ({ default: module.LivestockOperationsView })));
+const MedicineCompliancePanel = lazy(() => import('./components/views/MedicineCompliancePanel').then((module) => ({ default: module.MedicineCompliancePanel })));
 const AiAssistantView = lazy(() => import('./components/views/AiAssistantView').then((module) => ({ default: module.AiAssistantView })));
 const SocialMediaCommandCenterView = lazy(() => import('./components/views/SocialMediaCommandCenterView').then((module) => ({ default: module.SocialMediaCommandCenterView })));
 const CrossPlatformView = lazy(() => import('./components/views/CrossPlatformView').then((module) => ({ default: module.CrossPlatformView })));
@@ -99,7 +100,7 @@ const MainAppContent: React.FC = () => {
       case 'biometrics': return <BiometricsView />;
       case 'waterQuality': return <><DahirTelemetryPanel mode="treatmentPlant" /><WaterQualityView /></>;
       case 'mortality': return <LivestockOperationsView mode="mortality" />;
-      case 'treatments': return <LivestockOperationsView mode="treatments" />;
+      case 'treatments': return <div className="space-y-6"><MedicineCompliancePanel /><LivestockOperationsView mode="treatments" /></div>;
       case 'transfers': return <LivestockOperationsView mode="transfers" />;
       case 'hatchery': return <HatcheryView />;
       case 'nursery': return <NurseryView />;
