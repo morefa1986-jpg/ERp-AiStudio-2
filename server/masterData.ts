@@ -97,21 +97,21 @@ function normalizeStockGroups(state: Record<string, unknown>, groupsRaw: unknown
   const groups: PondStockGroupInput[] = [];
   for (const raw of groupsRaw) {
     const speciesId = text(raw?.speciesId, 128);
-    const sex = raw?.sex;
+    const sexRaw = String(raw?.sex || '');
     const count = Number(raw?.count);
     const averageWeightKg = Number(raw?.averageWeightKg);
-    const chips = Array.isArray(raw?.chipNumbers)
-      ? [...new Set(raw.chipNumbers.map((chip: unknown) => text(chip, 128)).filter(Boolean))]
+    const chips: string[] = Array.isArray(raw?.chipNumbers)
+      ? [...new Set<string>(raw.chipNumbers.map((chip: unknown) => text(chip, 128)).filter((chip: string) => chip.length > 0))]
       : [];
     if (!speciesId || !speciesIds.has(speciesId)) return { ok: false, error: 'POND_STOCK_SPECIES_INVALID' };
-    if (!['Female', 'Male', 'Unknown'].includes(sex)) return { ok: false, error: 'POND_STOCK_SEX_INVALID' };
+    if (!['Female', 'Male', 'Unknown'].includes(sexRaw)) return { ok: false, error: 'POND_STOCK_SEX_INVALID' };
     if (!Number.isInteger(count) || count < 0 || !nonNegative(averageWeightKg)) return { ok: false, error: 'POND_STOCK_COUNT_WEIGHT_INVALID' };
     if (chips.length > count) return { ok: false, error: 'POND_STOCK_CHIP_COUNT_INVALID' };
     for (const chip of chips) {
       if (seenChips.has(chip)) return { ok: false, error: 'POND_STOCK_CHIP_DUPLICATE' };
       seenChips.add(chip);
     }
-    groups.push({ speciesId, sex, count, averageWeightKg, chipNumbers: chips });
+    groups.push({ speciesId, sex: sexRaw as StockSex, count, averageWeightKg, chipNumbers: chips });
   }
   return { ok: true, groups };
 }
