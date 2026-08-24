@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Download, FileText, Printer } from 'lucide-react';
 import { useFarm } from '../../context/FarmContext';
 import { useI18n } from '../../i18n';
+import { downloadXlsx } from '../../utils/xlsxExport';
 import { ComparativeAnalyticsView } from './ComparativeAnalyticsView';
 
 type ScopeMode = 'farm' | 'multiHall' | 'hall' | 'pond';
@@ -64,7 +65,7 @@ const ReportsTablePanel: React.FC = () => {
     });
   };
 
-  const rows = useMemo<ReportRow[]>(() => {
+  const rows = useMemo<ReportRow[]>((() => {
     switch (reportType) {
       case 'ponds': return farm.ponds.filter((pond) => scopedPondIds.has(pond.id)).map((pond) => ({ pond: pond.name, number: pond.number, hall: farm.halls.find((hall) => hall.id === pond.hallId)?.name || pond.hallId, fishCount: pond.fishCount, biomassKg: pond.biomassKg, averageWeightKg: pond.averageWeightKg, fcr: pond.fcr, feedingStatus: pond.feedingStatus, sensorQuality: pond.sensorQuality || '', telemetryAt: pond.lastTelemetryTimestamp || '' }));
       case 'feeding': return farm.feedingRecords.filter((row) => scopedPondIds.has(row.pondId) && inDateRange(row.timestamp)).map((row) => ({ timestamp: row.timestamp, pond: row.pondName, amountKg: row.actualAmountKg, recommendedKg: row.recommendedAmountKg, feed: row.feedTypeName, operator: row.operatorName, telemetryAt: row.telemetryTimestamp || '' }));
@@ -80,7 +81,7 @@ const ReportsTablePanel: React.FC = () => {
       case 'audit': return farm.auditLogs.filter((row) => inDateRange(row.timestamp)).map((row) => ({ timestamp: row.timestamp, user: row.userName, role: row.userRole, action: row.action, entity: row.entity, entityId: row.entityId, details: row.details, transactionId: row.transactionId || '', ipAddress: row.ipAddress || '' }));
       default: return [];
     }
-  }, [reportType, farm, scopedPondIds, fromDate, toDate, scopeMode, scopeSupported, dateSupported]);
+  }), [reportType, farm, scopedPondIds, fromDate, toDate, scopeMode, scopeSupported, dateSupported]);
 
   const columns = useMemo(() => rows.length ? Object.keys(rows[0]) : [], [rows]);
   const exportCsv = () => {
@@ -89,12 +90,13 @@ const ReportsTablePanel: React.FC = () => {
     const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
     anchor.href = url; anchor.download = `fathi-erp-${reportType}-${new Date().toISOString().slice(0, 10)}.csv`; anchor.click(); URL.revokeObjectURL(url);
   };
+  const exportXlsx = () => downloadXlsx(`fathi-erp-${reportType}-${new Date().toISOString().slice(0, 10)}.xlsx`, REPORT_LABELS[reportType], rows, columns);
   const toggleHall = (id: string) => setHallIds((previous) => previous.includes(id) ? previous.filter((row) => row !== id) : [...previous, id]);
 
   const semantics = !scopeSupported ? 'این گزارش ذاتاً سراسری است؛ Scope سالن/استخر برای آن غیرفعال شده تا خروجی گمراه‌کننده تولید نشود.' : reportType === 'sales' && scopeMode !== 'farm' ? 'Scope فروش از Processing Batch و Lotهای صریح هر خط فروش استخراج می‌شود.' : CURRENT_SNAPSHOT_REPORTS.has(reportType) ? 'این گزارش Snapshot وضعیت فعلی است و فیلتر تاریخ برای آن معنا ندارد.' : 'Scope و بازه زمانی روی رکوردهای این گزارش اعمال می‌شود.';
 
   return <div className="space-y-5">
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><h1 className="text-xl font-black text-white flex items-center gap-2"><FileText className="w-6 h-6 text-amber-400" />مرکز گزارش‌های عملیاتی</h1><p className="text-xs text-slate-400 mt-1">Scope فقط جایی نمایش داده می‌شود که به‌طور واقعی قابل انتساب باشد؛ گزارش‌های سراسری با Scope جعلی نمایش داده نمی‌شوند.</p></div><div className="flex gap-2"><button disabled={!rows.length} onClick={exportCsv} className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Download className="w-4 h-4" />CSV</button><button disabled={!rows.length} onClick={() => window.print()} className="px-3 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Printer className="w-4 h-4" />چاپ / PDF</button></div></div>
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><h1 className="text-xl font-black text-white flex items-center gap-2"><FileText className="w-6 h-6 text-amber-400" />مرکز گزارش‌های عملیاتی</h1><p className="text-xs text-slate-400 mt-1">Scope فقط جایی نمایش داده می‌شود که به‌طور واقعی قابل انتساب باشد؛ گزارش‌های سراسری با Scope جعلی نمایش داده نمی‌شوند.</p></div><div className="flex gap-2"><button disabled={!rows.length} onClick={exportCsv} className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Download className="w-4 h-4" />CSV</button><button disabled={!rows.length} onClick={exportXlsx} className="px-3 py-2 rounded-xl bg-cyan-600 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Download className="w-4 h-4" />XLSX</button><button disabled={!rows.length} onClick={() => window.print()} className="px-3 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Printer className="w-4 h-4" />چاپ / PDF</button></div></div>
     <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3 text-[11px] text-cyan-100">{semantics}</div>
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 grid md:grid-cols-2 xl:grid-cols-5 gap-3 text-xs">
       <label className="text-slate-400">نوع گزارش<select value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)} className="field mt-1 w-full">{Object.entries(REPORT_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
