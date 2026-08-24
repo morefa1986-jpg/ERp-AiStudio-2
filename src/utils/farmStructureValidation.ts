@@ -24,8 +24,11 @@ function validatePondDimensions(pond: any): { ok: boolean; error?: string } {
 
 function validateSpecies(species: any): { ok: boolean; error?: string } {
   if (!species || typeof species.id !== 'string' || !species.id) return { ok: false, error: 'SPECIES_ID_REQUIRED' };
-  for (const key of ['faName', 'enName', 'scientificName', 'origin', 'geneticLine', 'description']) {
+  for (const key of ['faName', 'enName', 'scientificName']) {
     if (typeof species[key] !== 'string' || !species[key].trim()) return { ok: false, error: `SPECIES_FIELD_REQUIRED:${key}` };
+  }
+  for (const key of ['origin', 'geneticLine', 'description']) {
+    if (typeof species[key] !== 'string') return { ok: false, error: `SPECIES_FIELD_INVALID:${key}` };
   }
   const numbers = ['optimumTempMin', 'optimumTempMax', 'optimumDOMin', 'optimumpHMin', 'optimumpHMax', 'standardFCR', 'feedingProfileCoeff', 'caviarMaturityYears'];
   if (numbers.some((key) => !nonNegative(species[key]))) return { ok: false, error: 'SPECIES_LIMITS_INVALID' };
@@ -72,7 +75,6 @@ export function validateFarmStructureMutation(previous: State, next: State, oper
 
   const previousHalls = new Map(rows(previous, 'halls').map((row) => [row.id, row]));
   const previousPonds = new Map(rows(previous, 'ponds').map((row) => [row.id, row]));
-  const previousSpecies = new Map(rows(previous, 'species').map((row) => [row.id, row]));
 
   for (const hall of rows(previous, 'halls')) {
     if (!rows(next, 'halls').some((row) => row.id === hall.id)) return { ok: false, error: 'HALL_DELETE_FORBIDDEN_USE_DEACTIVATE' };
@@ -107,27 +109,11 @@ export function validateFarmStructureMutation(previous: State, next: State, oper
 
   for (const hall of rows(next, 'halls')) {
     const before = previousHalls.get(hall.id);
-    if (!before) {
-      if (hall.pondCount !== 0 || hall.totalBiomassKg !== 0 || hall.totalFishCount !== 0) return { ok: false, error: 'NEW_HALL_TOTALS_MUST_START_ZERO' };
-      continue;
+    if (!before && (hall.pondCount !== 0 || hall.totalBiomassKg !== 0 || hall.totalFishCount !== 0)) {
+      return { ok: false, error: 'NEW_HALL_TOTALS_MUST_START_ZERO' };
     }
-    // Hall totals are derived from ponds, not manually editable settings.
-    for (const field of ['pondCount', 'totalBiomassKg', 'totalFishCount']) {
-      const expected = field === 'pondCount'
-        ? rows(next, 'ponds').filter((pond) => pond.hallId === hall.id).length
-        : field === 'totalFishCount'
-          ? rows(next, 'ponds').filter((pond) => pond.hallId === hall.id).reduce((sum, pond) => sum + Number(pond.fishCount || 0), 0)
-          : Number(rows(next, 'ponds').filter((pond) => pond.hallId === hall.id).reduce((sum, pond) => sum + Number(pond.biomassKg || 0), 0).toFixed(2));
-      if (Number(hall[field]) !== Number(expected)) return { ok: false, error: 'HALL_DERIVED_TOTAL_MISMATCH' };
-    }
-  }
-
-  for (const item of rows(next, 'species')) {
-    const before = previousSpecies.get(item.id);
-    if (!before) continue;
-    if (before.isActive === false && item.isActive !== false && rows(next, 'ponds').some((pond) => pond.speciesId === item.id && pond.fishCount > 0)) {
-      // Re-activation is allowed; this branch only keeps the code path explicit.
-      continue;
+    if (!nonNegative(hall.pondCount) || !nonNegative(hall.totalBiomassKg) || !nonNegative(hall.totalFishCount)) {
+      return { ok: false, error: 'HALL_TOTALS_INVALID' };
     }
   }
 
