@@ -23,7 +23,7 @@ export function registerModuleSettingsRoutes(app: Express, deps: Dependencies): 
 
   app.put('/api/admin/module-visibility', deps.requireAuth, deps.requireAdmin, (req: AuthenticatedRequest, res: Response) => {
     const validation = validateModuleVisibilityPayload(req.body?.visibility);
-    if (!validation.ok) return res.status(400).json({ success: false, error: validation.error });
+    if (validation.ok === false) return res.status(400).json({ success: false, error: validation.error });
     const before = settings.getModuleVisibility();
     const visibility = settings.setModuleVisibility(validation.visibility);
     const audit = deps.auditFromOperation(
