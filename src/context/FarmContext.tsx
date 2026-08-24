@@ -7,6 +7,7 @@ import {
   PayrollRecord, PermissionAction, PermissionModule, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost,
   SturgeonSpecies, TreatmentRecord, WaterQualityLog,
 } from '../types';
+import { manualSnapshotCapacityCubicMeters, PondManualSnapshotInput, PondSpeciesManualGroup } from '../types/pondSnapshot';
 import {
   INITIAL_ACCOUNTS, INITIAL_BROODSTOCK, INITIAL_COLD_STORAGE, INITIAL_CUSTOMERS, INITIAL_EQUIPMENT,
   INITIAL_FERTILIZATIONS, INITIAL_HALLS, INITIAL_INCUBATORS, INITIAL_INVENTORY, INITIAL_INVENTORY_TXS,
@@ -49,6 +50,7 @@ interface FarmContextType {
   recordFeeding: (record: Omit<FeedingRecord, 'id' | 'timestamp'>) => { success: boolean; error?: string };
   stopPondFeeding: (pondId: string, reason: Pond['stopFeedingReason'], details: string, operator: string) => void;
   resumePondFeeding: (pondId: string, operator: string) => { success: boolean; error?: string };
+  updatePondManualSnapshot: (pondId: string, input: PondManualSnapshotInput) => { success: boolean; error?: string };
   recordMortality: (record: Omit<MortalityRecord, 'id' | 'timestamp'>) => void;
   recordBiometry: (session: Omit<BiometricSession, 'id' | 'averageWeightKg' | 'minWeightKg' | 'maxWeightKg' | 'estimatedBiomassKg' | 'estimatedCount' | 'growthRateKgPerDay' | 'sgr'>) => void;
   recordWaterTest: (test: Omit<WaterQualityLog, 'id' | 'timestamp'>) => void;
@@ -350,6 +352,71 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     createAuditLog('APPROVE', 'Pond', pondId, 'Feeding resumed after safety validation'); markLocalChange({ module: 'feeding', action: 'approve', entity: 'Pond', entityId: pondId }); return { success: true };
   };
 
+  const updatePondManualSnapshot = (pondId: string, input: PondManualSnapshotInput): { success: boolean; error?: string } => {
+    if (!can('ponds', 'edit', pondId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const pond = ponds.find((item) => item.id === pondId);
+    if (!pond) return { success: false, error: 'POND_NOT_FOUND' };
+    if (!input || !Array.isArray(input.speciesMix)) return { success: false, error: 'POND_SPECIES_MIX_REQUIRED' };
+    if (typeof input.manualWaterTemperature !== 'number' || !Number.isFinite(input.manualWaterTemperature) || input.manualWaterTemperature < 0 || input.manualWaterTemperature > 40) return { success: false, error: 'POND_MANUAL_TEMPERATURE_INVALID' };
+    if (typeof input.notes !== 'string' || input.notes.trim().length < 3) return { success: false, error: 'POND_MANUAL_REASON_REQUIRED' };
+
+    const knownSpecies = new Set(species.map((item) => item.id));
+    const speciesIds = new Set<string>();
+    const chipNumbers = new Set<string>();
+    const normalizedGroups: PondSpeciesManualGroup[] = [];
+    for (const raw of input.speciesMix) {
+      if (!raw || !knownSpecies.has(raw.speciesId) || speciesIds.has(raw.speciesId)) return { success: false, error: 'POND_SPECIES_GROUP_INVALID' };
+      if (!Number.isInteger(raw.count) || raw.count < 0 || !Number.isFinite(raw.avgWeightKg) || raw.avgWeightKg < 0) return { success: false, error: 'POND_SPECIES_GROUP_BIOMETRY_INVALID' };
+      if (![raw.maleCount, raw.femaleCount, raw.unknownSexCount].every((value) => Number.isInteger(value) && value >= 0) || raw.maleCount + raw.femaleCount + raw.unknownSexCount !== raw.count) return { success: false, error: 'POND_SEX_TOTAL_MISMATCH' };
+      const chips = Array.from(new Set((raw.chipNumbers || []).map((value) => value.trim()).filter(Boolean)));
+      if (chips.length > raw.count) return { success: false, error: 'POND_CHIP_COUNT_INVALID' };
+      if (chips.some((chip) => chipNumbers.has(chip))) return { success: false, error: 'POND_CHIP_DUPLICATE_OR_INVALID' };
+      chips.forEach((chip) => chipNumbers.add(chip));
+      speciesIds.add(raw.speciesId);
+      normalizedGroups.push({ ...raw, avgWeightKg: Number(raw.avgWeightKg.toFixed(3)), chipNumbers: chips });
+    }
+
+    const totalFishCount = normalizedGroups.reduce((sum, group) => sum + group.count, 0);
+    if (totalFishCount > 0 && normalizedGroups.length === 0) return { success: false, error: 'POND_SPECIES_MIX_REQUIRED' };
+    const biomassKg = Number(normalizedGroups.reduce((sum, group) => sum + group.count * group.avgWeightKg, 0).toFixed(2));
+    const averageWeightKg = totalFishCount > 0 ? Number((biomassKg / totalFishCount).toFixed(3)) : 0;
+    const capacityCubicMeters = manualSnapshotCapacityCubicMeters(input, pond.capacityCubicMeters);
+    const timestamp = new Date().toISOString();
+    const operator = currentUser?.fullName || currentUser?.username || 'operator';
+    const stopFeeding = input.stopFeeding && pond.feedingStatus === 'ACTIVE';
+
+    const updatedPond: Pond = {
+      ...pond,
+      fishCount: totalFishCount,
+      biomassKg,
+      averageWeightKg,
+      speciesId: normalizedGroups[0]?.speciesId || pond.speciesId,
+      speciesMix: normalizedGroups,
+      capacityCubicMeters,
+      ...(input as any).pondShape !== undefined ? { pondShape: input.pondShape } : {},
+      ...(input.lengthMeters !== undefined ? { lengthMeters: input.lengthMeters } : {}),
+      ...(input.widthMeters !== undefined ? { widthMeters: input.widthMeters } : {}),
+      ...(input.depthMeters !== undefined ? { depthMeters: input.depthMeters } : {}),
+      ...(input.diameterMeters !== undefined ? { diameterMeters: input.diameterMeters } : {}),
+      manualWaterTemperature: Number(input.manualWaterTemperature.toFixed(2)),
+      lastManualSnapshotAt: timestamp,
+      lastManualSnapshotBy: operator,
+      manualSnapshotNotes: input.notes.trim(),
+      ...(stopFeeding ? {
+        feedingStatus: 'STOPPED' as const,
+        stopFeedingReason: 'Manual Decision' as const,
+        stopFeedingDetails: `Manual pond snapshot: ${input.notes.trim()}`,
+        stopFeedingTimestamp: timestamp,
+        stopFeedingUser: operator,
+      } : {}),
+    } as Pond;
+
+    setPonds((previous) => previous.map((item) => item.id === pondId ? updatedPond : item));
+    createAuditLog('UPDATE', 'Pond', pondId, `Manual snapshot: ${totalFishCount} fish, ${biomassKg} kg biomass${stopFeeding ? ', feeding stopped' : ''}`, JSON.stringify(pond), JSON.stringify(updatedPond), `snapshot_${pondId}_${timestamp}`);
+    markLocalChange({ module: 'ponds', action: 'edit', entity: 'Pond', entityId: pondId, referenceId: `snapshot_${timestamp}`, transactionId: `snapshot_${pondId}_${timestamp}` });
+    return { success: true };
+  };
+
   const recordMortality = (record: Omit<MortalityRecord, 'id' | 'timestamp'>) => {
     if (!can('mortality', 'create', record.pondId)) return;
     const pond = ponds.find((item) => item.id === record.pondId);
@@ -521,7 +588,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id }); };
   const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { if (!can('media', 'create')) return; const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange({ module: 'media', action: 'create', entity: 'SocialMediaPost', entityId: newPost.id }); };
 
-  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, recordMortality, recordBiometry, recordWaterTest, recordTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 
