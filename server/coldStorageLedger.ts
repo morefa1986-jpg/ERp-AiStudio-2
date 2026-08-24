@@ -82,8 +82,8 @@ export class ColdStorageLedgerStore {
   list(limit = 500, palletId?: string): ColdStorageEvent[] {
     const safeLimit = Math.max(1, Math.min(2000, Number(limit) || 500));
     const rows = palletId
-      ? this.db.prepare('SELECT payload_json FROM cold_storage_events WHERE pallet_id = ? ORDER BY timestamp DESC LIMIT ?').all(clean(palletId, 160), safeLimit)
-      : this.db.prepare('SELECT payload_json FROM cold_storage_events ORDER BY timestamp DESC LIMIT ?').all(safeLimit);
+      ? this.db.prepare('SELECT payload_json FROM cold_storage_events WHERE pallet_id = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?').all(clean(palletId, 160), safeLimit)
+      : this.db.prepare('SELECT payload_json FROM cold_storage_events ORDER BY timestamp DESC, rowid DESC LIMIT ?').all(safeLimit);
     return rows.flatMap((row) => {
       try { return [JSON.parse(String(row.payload_json)) as ColdStorageEvent]; } catch { return []; }
     });
