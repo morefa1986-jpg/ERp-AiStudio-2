@@ -139,15 +139,30 @@ export interface SensorMeasurement {
   quality: SensorQuality;
 }
 
+export interface PondStockGroup {
+  speciesId: string;
+  sex: 'Female' | 'Male' | 'Unknown';
+  count: number;
+  averageWeightKg: number;
+  chipNumbers?: string[];
+}
+
 export interface Pond {
   id: string;
   number: string;
   name: string;
   hallId: string;
   capacityCubicMeters: number;
+  shape?: 'Rectangular' | 'Circular' | 'Other';
+  lengthMeters?: number;
+  widthMeters?: number;
+  depthMeters?: number;
+  diameterMeters?: number;
+  isActive?: boolean;
   fishCount: number;
   speciesId: string;
   speciesMix?: { speciesId: string; count: number; avgWeightKg: number }[];
+  stockGroups?: PondStockGroup[];
   biomassKg: number;
   averageWeightKg: number;
   lastFeedingKg: number;
@@ -409,7 +424,7 @@ export interface InventoryItem {
   id: string;
   sku: string;
   name: string;
-  category: 'Feed (خوراک)' | 'Medicine & Disinfectant (دارو و ضدعفونی)' | 'Oxygen & Chemicals' | 'Packaging & Cans' | 'Equipment & Spare Parts' | 'Caviar Cans & Jars' | 'Finished Goods';
+  category: 'Feed (خوراک)' | 'Raw Material (مواد اولیه خوراک)' | 'Medicine & Disinfectant (دارو و ضدعفونی)' | 'Oxygen & Chemicals' | 'Packaging & Cans' | 'Equipment & Spare Parts' | 'Caviar Cans & Jars' | 'Finished Goods';
   batchNumber: string;
   quantity: number;
   unit: 'kg' | 'gram' | 'liter' | 'can' | 'piece' | 'bag';
@@ -493,6 +508,7 @@ export interface ProcessingBatch {
 export interface ColdStoragePallet {
   id: string;
   sku?: string;
+  processingBatchId?: string;
   slotCode: string;
   temperatureC: number;
   productType: 'Caviar (Cans/Jars)' | 'Frozen Sturgeon Whole' | 'Vacuumed Fillet' | 'Smoked Sturgeon' | 'Raw Broodstock Eggs';
@@ -503,6 +519,9 @@ export interface ColdStoragePallet {
   entryDate: string;
   expiryDate: string;
   ownerCustomer?: string;
+  qualityHold?: boolean;
+  qualityHoldReason?: string;
+  qualityHoldSince?: string;
   status: 'Stored' | 'Pending Dispatch' | 'Reserved';
 }
 
@@ -542,6 +561,8 @@ export interface ProformaItem {
   id: string;
   productName: string;
   sku: string;
+  coldStorageLotId?: string;
+  processingBatchId?: string;
   quantity: number;
   unit: string;
   unitPrice: number;
