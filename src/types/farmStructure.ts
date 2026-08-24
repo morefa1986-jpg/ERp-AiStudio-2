@@ -17,6 +17,7 @@ export interface PondStructureAdminInput {
   hallId: string;
   speciesId: string;
   pondShape: PondShape;
+  capacityCubicMeters?: number;
   lengthMeters?: number;
   widthMeters?: number;
   depthMeters?: number;
@@ -31,6 +32,7 @@ export interface SpeciesAdminInput extends Omit<SturgeonSpecies, 'id'> {
 export type HallAdminPatch = Partial<Pick<Hall, 'number' | 'name' | 'description' | 'managerId' | 'isActive'>>;
 export type PondAdminPatch = Partial<Pick<Pond, 'number' | 'name' | 'hallId' | 'speciesId' | 'notes'>> & {
   pondShape?: PondShape;
+  capacityCubicMeters?: number;
   lengthMeters?: number;
   widthMeters?: number;
   depthMeters?: number;
