@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, updateHallMaster, updatePondMetadata, updateSpeciesMaster } from './masterData';
 import { registerCitesRoutes } from './citesRoutes';
 import { registerColdStorageRoutes } from './coldStorageRoutes';
+import { registerFeedFactoryRoutes } from './feedFactoryRoutes';
 import { registerFxAccountingRoutes } from './fxAccountingRoutes';
 import { registerHrAttendanceRoutes } from './hrAttendanceRoutes';
 import { registerIncidentRoutes } from './incidentRoutes';
@@ -26,6 +27,7 @@ interface MasterDataStore {
   getState(): StateEnvelope | null | undefined;
   saveStateAndAudit(data: Record<string, unknown>, expectedVersion: number | null, audit: StoredAuditLog): StateEnvelope;
   appendAuditLog(log: StoredAuditLog): void;
+  listAuditLogs(limit?: number): StoredAuditLog[];
 }
 
 /** Integration adapter around the server's canonical auth/audit middleware. */
@@ -55,6 +57,7 @@ export function registerMasterDataRoutes(app: Express, deps: Dependencies): void
   registerColdStorageRoutes(app, deps);
   registerLaboratoryRoutes(app, deps);
   registerMaintenanceRoutes(app, deps);
+  registerFeedFactoryRoutes(app, deps);
 
   const commit = (req: AuthenticatedRequest, res: Response, previous: StateEnvelope, result: MasterResult, operation: { action: 'create' | 'edit'; entity: string }) => {
     if (!result.ok || !result.state || !result.entity) return res.status(resultErrorStatus(result.error)).json({ success: false, error: result.error || 'MASTER_DATA_INVALID' });
