@@ -64,8 +64,8 @@ describe('server-side state integrity rules', () => {
   it('validates a pond-to-nursery transfer against both biological ledgers', () => {
     const previous = emptyState();
     previous.ponds = [
-      { id: 'p1', fishCount: 100, biomassKg: 100, averageWeightKg: 1 },
-      { id: 'p2', fishCount: 0, biomassKg: 0, averageWeightKg: 0 },
+      { id: 'p1', speciesId: 'sp1', fishCount: 100, biomassKg: 100, averageWeightKg: 1 },
+      { id: 'p2', speciesId: 'sp1', fishCount: 0, biomassKg: 0, averageWeightKg: 0 },
     ];
     previous.nurseryTanks = [{ id: 'tank1', fishCount: 0, totalBiomassGrams: 0, avgWeightGrams: 0, status: 'Empty' }];
     const transfer = {
