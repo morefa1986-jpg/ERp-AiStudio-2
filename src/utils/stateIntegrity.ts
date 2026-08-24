@@ -1,6 +1,6 @@
 import { assessWaterSafetyForFeeding } from './sensorValidation';
 import { inventoryQuantityForFeedKg, normalizeFeedAmountToKg } from './feedingEngine';
-import { saleLotMatchesSku, validateSaleFulfillmentConservation } from './salesEngine';
+import { saleLineMatchesLot, saleLotMatchesSku, validateSaleFulfillmentConservation } from './salesEngine';
 
 export const STATE_COLLECTIONS = [
   'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
@@ -168,6 +168,44 @@ function nearlyEqual(left: unknown, right: unknown, tolerance = 0.05): boolean {
 function changedRows(previous: State, next: State, key: string): any[] {
   const before = new Map(collection(previous, key).map((row) => [row?.id, row]));
   return collection(next, key).filter((row) => row?.id && before.has(row.id) && !sameValue(before.get(row.id), row));
+}
+
+function processingOriginForLot(state: State, lot: any): any | undefined {
+  const processingBatches = collection(state, 'processingBatches');
+  if (lot?.processingBatchId) {
+    const byId = processingBatches.find((batch) => batch.id === lot.processingBatchId);
+    if (byId) return byId;
+  }
+  const byOutputLot = processingBatches.filter((batch) => Array.isArray(batch.outputLotIds) && batch.outputLotIds.includes(lot?.id));
+  return byOutputLot.length === 1 ? byOutputLot[0] : undefined;
+}
+
+function processedLotRequiresOrigin(lot: any): boolean {
+  return ['Caviar (Cans/Jars)', 'Vacuumed Fillet', 'Smoked Sturgeon', 'Frozen Sturgeon Whole'].includes(String(lot?.productType || ''));
+}
+
+function proformaIsExport(state: State, proforma: any): boolean {
+  const customer = collection(state, 'customers').find((row) => row.id === proforma?.customerId);
+  if (customer?.category === 'Export Luxury Distributor') return true;
+  const country = String(customer?.country || proforma?.customerCountry || '').trim().toLowerCase();
+  return !['iran', 'ir', 'ایران', 'جمهوری اسلامی ایران'].includes(country);
+}
+
+function validateSaleTraceability(state: State, proforma: any): { ok: boolean; error?: string } {
+  const exportSale = proformaIsExport(state, proforma);
+  for (const item of Array.isArray(proforma?.items) ? proforma.items : []) {
+    const lotId = String(item?.coldStorageLotId || '').trim();
+    if (!lotId) return { ok: false, error: 'SALE_LOT_ID_REQUIRED' };
+    const lot = collection(state, 'coldStorage').find((candidate) => candidate.id === lotId);
+    if (!lot || !saleLineMatchesLot(lot, item)) return { ok: false, error: 'SALE_LOT_REFERENCE_INVALID' };
+    if (!processedLotRequiresOrigin(lot)) continue;
+    const origin = processingOriginForLot(state, lot);
+    if (!origin) return { ok: false, error: 'SALE_PROCESSING_ORIGIN_REQUIRED' };
+    if (!item.processingBatchId) return { ok: false, error: 'SALE_PROCESSING_BATCH_ID_REQUIRED' };
+    if (item.processingBatchId !== origin.id || (lot.processingBatchId && lot.processingBatchId !== origin.id)) return { ok: false, error: 'SALE_PROCESSING_ORIGIN_MISMATCH' };
+    if (exportSale && lot.productType === 'Caviar (Cans/Jars)' && !String(origin.citesPermitNumber || '').trim()) return { ok: false, error: 'SALE_CITES_PERMIT_REQUIRED' };
+  }
+  return { ok: true };
 }
 
 function validatePondMutation(previous: State, next: State, operation: { module?: string; action?: string }): { ok: boolean; error?: string } {
@@ -361,7 +399,7 @@ function validateColdStorageMutation(previous: State, next: State, operation: { 
     const changedLots = changedRows(previous, next, 'coldStorage');
     if (!changedLots.length) return { ok: true };
     if (!newlyFulfilled.length) return { ok: false, error: 'SALE_FULFILLMENT_LEDGER_MISSING' };
-    const allowedLots = changedLots.every((lot) => newlyFulfilled.some((proforma) => proforma.items?.some((item: any) => saleLotMatchesSku(lot, item.sku))));
+    const allowedLots = changedLots.every((lot) => newlyFulfilled.some((proforma) => proforma.items?.some((item: any) => saleLineMatchesLot(lot, item))));
     if (!allowedLots) return { ok: false, error: 'SALE_UNRELATED_STORAGE_MODIFIED' };
     for (const lot of changedLots) {
       const before = beforeById.get(lot.id);
@@ -460,7 +498,7 @@ export function validateStateMutation(previousRaw: unknown, nextRaw: unknown, op
     const lots = collection(next, 'coldStorage').filter((lot) => batch.outputLotIds.includes(lot.id));
     const storedOutput = lots.reduce((sum, lot) => sum + Number(lot.weightKg || 0), 0);
     const storableOutput = Number(batch.caviarYieldKg) + Number(batch.filletMeatYieldKg) + Number(batch.smokedMeatYieldKg);
-    if (lots.length !== batch.outputLotIds.length || Math.abs(storedOutput - storableOutput) > 0.05) return { ok: false, error: 'PROCESSING_OUTPUT_LOTS_INVALID' };
+    if (lots.length !== batch.outputLotIds.length || lots.some((lot) => lot.processingBatchId !== batch.id) || Math.abs(storedOutput - storableOutput) > 0.05) return { ok: false, error: 'PROCESSING_OUTPUT_LOTS_INVALID' };
   }
 
   const previousProformas = new Map(collection(previous, 'proformas').map((row) => [row.id, row]));
@@ -469,6 +507,8 @@ export function validateStateMutation(previousRaw: unknown, nextRaw: unknown, op
     const before = previousProformas.get(proforma.id);
     if (before?.fulfilledAt || before?.fulfillmentTransactionId) continue;
     if (proforma.stage !== 'Dispatched / Delivery (تحویل)') return { ok: false, error: 'SALE_FULFILLMENT_REQUIRES_DISPATCH_STAGE' };
+    const traceability = validateSaleTraceability(next, proforma);
+    if (!traceability.ok) return traceability;
     const saleValidation = validateSaleFulfillmentConservation(collection(previous, 'coldStorage'), collection(next, 'coldStorage'), proforma);
     if (!saleValidation.ok) return { ok: false, error: saleValidation.error || 'SALE_CONSERVATION_FAILED' };
   }
