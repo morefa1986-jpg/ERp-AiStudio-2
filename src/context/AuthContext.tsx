@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { GranularPermission, LanguageCode, PermissionAction, PermissionModule, User } from '../types';
+import { GranularPermission, LanguageCode, PermissionAction, PermissionModule, User, UserRole } from '../types';
 import { roleAllows } from '../utils/rbac';
 
 interface AuthContextType {
@@ -13,6 +13,7 @@ interface AuthContextType {
   createNewUser: (user: Omit<User, 'id' | 'createdAt'>, passwordPlain: string) => Promise<void>;
   toggleUserActive: (userId: string) => Promise<void>;
   resetUserPassword: (userId: string, newPassPlain: string) => Promise<void>;
+  updateUserAccess: (userId: string, patch: { role?: UserRole | string; hallScope?: string[]; pondScope?: string[] }) => Promise<void>;
   customRoles: { id: string; name: string; permissions: GranularPermission[] }[];
   createCustomRole: (name: string, permissions: GranularPermission[]) => void;
 }
@@ -118,8 +119,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!currentUser || !currentUser.isActive || currentUser.customRoleId) return false;
     if (!roleAllows(currentUser.role, module, action)) return false;
     if (!scopeId) return true;
+    // An explicit pond scope can be checked locally by id. Hall scope cannot safely map a pondId
+    // without duplicating farm topology inside AuthContext, so the server-filtered state and
+    // server write-scope validator remain authoritative for hall-scoped users.
     if (currentUser.pondScope?.length) return currentUser.pondScope.includes(scopeId);
-    if (currentUser.hallScope?.length) return currentUser.hallScope.includes(scopeId);
+    if (currentUser.hallScope?.length) return true;
     return true;
   };
 
@@ -140,6 +144,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.success) throw new Error(data.error || 'USER_UPDATE_FAILED');
     await refreshUsers(token);
+    if (currentUser?.id === userId && data.user) setCurrentUser(data.user);
   };
 
   const toggleUserActive = (userId: string) => updateUser(userId, { isActive: !usersList.find((user) => user.id === userId)?.isActive });
@@ -147,13 +152,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (newPassPlain.length < 12) return Promise.reject(new Error('PASSWORD_TOO_SHORT'));
     return updateUser(userId, { password: newPassPlain });
   };
+  const updateUserAccess = (userId: string, patch: { role?: UserRole | string; hallScope?: string[]; pondScope?: string[] }) => updateUser(userId, patch);
 
   // Client-only custom roles were misleading and could not be enforced by the server.
   // Keep the API fail-closed until custom roles are persisted and authorized server-side.
   const customRoles: { id: string; name: string; permissions: GranularPermission[] }[] = [];
   const createCustomRole = (_name: string, _permissions: GranularPermission[]) => { throw new Error('SERVER_CUSTOM_ROLE_NOT_SUPPORTED'); };
 
-  return <AuthContext.Provider value={{ currentUser, isAuthenticated: Boolean(currentUser), login, bootstrapAdmin, logout, hasPermission, usersList, createNewUser, toggleUserActive, resetUserPassword, customRoles, createCustomRole }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ currentUser, isAuthenticated: Boolean(currentUser), login, bootstrapAdmin, logout, hasPermission, usersList, createNewUser, toggleUserActive, resetUserPassword, updateUserAccess, customRoles, createCustomRole }}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = (): AuthContextType => {
