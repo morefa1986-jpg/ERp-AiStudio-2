@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { ModuleSettingsStore } from './moduleSettings';
+import { StoredAuditLog } from './storage';
 import { validateModuleVisibilityPayload } from '../src/utils/moduleVisibilityPolicy';
 
 interface AuthenticatedRequest extends Request {
@@ -9,7 +10,8 @@ interface AuthenticatedRequest extends Request {
 interface Dependencies {
   requireAuth: any;
   requireAdmin: any;
-  appendAuditFromOperation: (req: any, operation: any, beforeState?: string, afterState?: string) => void;
+  auditFromOperation: (req: any, operation: any, beforeState?: string, afterState?: string) => StoredAuditLog | null;
+  appendAuditLog: (log: StoredAuditLog) => void;
 }
 
 export function registerModuleSettingsRoutes(app: Express, deps: Dependencies): void {
@@ -24,12 +26,13 @@ export function registerModuleSettingsRoutes(app: Express, deps: Dependencies): 
     if (!validation.ok) return res.status(400).json({ success: false, error: validation.error });
     const before = settings.getModuleVisibility();
     const visibility = settings.setModuleVisibility(validation.visibility);
-    deps.appendAuditFromOperation(
+    const audit = deps.auditFromOperation(
       req,
       { module: 'settings', action: 'manage', entity: 'ModuleVisibility', entityId: 'global' },
       JSON.stringify(before),
       JSON.stringify(visibility),
     );
+    if (audit) deps.appendAuditLog(audit);
     return res.json({ success: true, visibility, source: 'server-sqlite' });
   });
 }
