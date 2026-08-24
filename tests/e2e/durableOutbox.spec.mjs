@@ -5,18 +5,23 @@ const CREDENTIALS = {
   password: 'e2e-owner-password-2026',
 };
 
-async function loginEventually(request) {
-  let token = '';
+async function waitForBootstrap(request) {
   await expect.poll(async () => {
-    const response = await request.post('/api/auth/login', {
-      data: { ...CREDENTIALS, language: 'fa' },
-    });
-    if (!response.ok()) return '';
-    const payload = await response.json();
-    token = payload?.token || '';
-    return token;
-  }, { timeout: 20_000, intervals: [200, 300, 500, 1000] }).toMatch(/^fathi_sec_/);
-  return token;
+    const response = await request.get('/api/auth/status');
+    if (!response.ok()) return false;
+    return (await response.json()).needsBootstrap === false;
+  }, { timeout: 20_000, intervals: [200, 300, 500, 1000] }).toBe(true);
+}
+
+async function loginAfterBootstrap(request) {
+  await waitForBootstrap(request);
+  const response = await request.post('/api/auth/login', {
+    data: { ...CREDENTIALS, language: 'fa' },
+  });
+  expect(response.ok()).toBeTruthy();
+  const payload = await response.json();
+  expect(payload.token).toMatch(/^fathi_sec_/);
+  return payload.token;
 }
 
 function customer(id) {
@@ -41,7 +46,7 @@ function customer(id) {
 }
 
 test('IndexedDB outbox blocks stale startup offline then replays and deletes the recovered entry', async ({ page, request }) => {
-  const token = await loginEventually(request);
+  const token = await loginAfterBootstrap(request);
   const sessionResponse = await request.get('/api/auth/session', {
     headers: { Authorization: `Bearer ${token}` },
   });
