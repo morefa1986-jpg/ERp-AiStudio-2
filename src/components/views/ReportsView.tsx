@@ -2,20 +2,21 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Download, FileText, Printer } from 'lucide-react';
 import { useFarm } from '../../context/FarmContext';
 import { useI18n } from '../../i18n';
+import { buildReceivablesAging } from '../../utils/receivablesAging';
 import { downloadXlsx } from '../../utils/xlsxExport';
 import { ComparativeAnalyticsView } from './ComparativeAnalyticsView';
 
 type ScopeMode = 'farm' | 'multiHall' | 'hall' | 'pond';
-type ReportType = 'ponds' | 'feeding' | 'water' | 'mortality' | 'treatments' | 'transfers' | 'inventory' | 'processing' | 'sales' | 'accounting' | 'payroll' | 'audit';
+type ReportType = 'ponds' | 'feeding' | 'water' | 'mortality' | 'treatments' | 'transfers' | 'inventory' | 'processing' | 'sales' | 'receivables' | 'accounting' | 'payroll' | 'audit';
 type ReportRow = Record<string, string | number | boolean | null | undefined>;
 
 const REPORT_LABELS: Record<ReportType, string> = {
   ponds: 'وضعیت استخرها', feeding: 'خوراک‌دهی', water: 'کیفیت آب', mortality: 'تلفات', treatments: 'درمان‌ها', transfers: 'انتقالات',
-  inventory: 'انبار', processing: 'فرآوری', sales: 'فروش', accounting: 'حسابداری', payroll: 'حقوق', audit: 'Audit Trail',
+  inventory: 'انبار', processing: 'فرآوری', sales: 'فروش', receivables: 'مطالبات و سررسید', accounting: 'حسابداری', payroll: 'حقوق', audit: 'Audit Trail',
 };
 
-const SCOPED_REPORTS = new Set<ReportType>(['ponds', 'feeding', 'water', 'mortality', 'treatments', 'transfers', 'processing', 'sales']);
-const DATED_REPORTS = new Set<ReportType>(['feeding', 'water', 'mortality', 'treatments', 'transfers', 'processing', 'sales', 'accounting', 'payroll', 'audit']);
+const SCOPED_REPORTS = new Set<ReportType>(['ponds', 'feeding', 'water', 'mortality', 'treatments', 'transfers', 'processing', 'sales', 'receivables']);
+const DATED_REPORTS = new Set<ReportType>(['feeding', 'water', 'mortality', 'treatments', 'transfers', 'processing', 'sales', 'receivables', 'accounting', 'payroll', 'audit']);
 const CURRENT_SNAPSHOT_REPORTS = new Set<ReportType>(['ponds', 'inventory']);
 
 function csvCell(value: unknown): string { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
@@ -76,6 +77,7 @@ const ReportsTablePanel: React.FC = () => {
       case 'inventory': return farm.inventory.map((row) => ({ sku: row.sku, name: row.name, category: row.category, batch: row.batchNumber, quantity: row.quantity, unit: row.unit, expiryDate: row.expiryDate || '', supplier: row.supplierName, location: row.warehouseLocation, status: row.status }));
       case 'processing': return farm.processingBatches.filter((row) => scopedPondIds.has(row.sourcePondId) && inDateRange(row.date)).map((row) => ({ batch: row.batchCode, date: row.date, pond: row.sourcePondName, species: row.speciesName, fishCount: row.fishCount, liveBiomassKg: row.liveBiomassKg, caviarKg: row.caviarYieldKg, filletKg: row.filletMeatYieldKg, qualityScore: row.qualityScore, status: row.status }));
       case 'sales': return farm.proformas.filter((row) => proformaTouchesScope(row) && inDateRange(row.date)).map((row) => ({ invoice: row.invoiceNumber, date: row.date, customer: row.customerName, country: row.customerCountry, currency: row.currency, total: row.grandTotal, stage: row.stage, fulfilledAt: row.fulfilledAt || '', sourceLots: row.items.map((item) => item.coldStorageLotId || '').filter(Boolean).join(' | ') }));
+      case 'receivables': return buildReceivablesAging(farm.proformas.filter((row) => proformaTouchesScope(row)), toDate || new Date().toISOString().slice(0, 10)).filter((row) => inDateRange(row.dueDate)).map((row) => ({ invoice: row.invoiceNumber, dueDate: row.dueDate, customer: row.customerName, company: row.customerCompany, country: row.customerCountry, currency: row.currency, amountDue: row.amountDue, daysOverdue: row.daysOverdue, bucket: row.bucket, stage: row.stage, status: row.status }));
       case 'accounting': return farm.journals.filter((row) => inDateRange(row.date)).map((row) => ({ entryNumber: row.entryNumber, date: row.date, referenceType: row.referenceType, referenceId: row.referenceId || '', description: row.description, totalDebit: row.totalDebit, totalCredit: row.totalCredit, approvedBy: row.approvedBy, balanced: row.isBalanced }));
       case 'payroll': return farm.payrolls.filter((row) => inDateRange(`${row.payrollMonth}-01`)).map((row) => ({ month: row.payrollMonth, employee: row.employeeName, department: row.department, gross: row.grossSalary, deductions: row.socialSecurityInsurance + row.incomeTax + row.loanDeduction, net: row.netPay, currency: row.currency, status: row.paymentStatus }));
       case 'audit': return farm.auditLogs.filter((row) => inDateRange(row.timestamp)).map((row) => ({ timestamp: row.timestamp, user: row.userName, role: row.userRole, action: row.action, entity: row.entity, entityId: row.entityId, details: row.details, transactionId: row.transactionId || '', ipAddress: row.ipAddress || '' }));
@@ -93,7 +95,7 @@ const ReportsTablePanel: React.FC = () => {
   const exportXlsx = () => downloadXlsx(`fathi-erp-${reportType}-${new Date().toISOString().slice(0, 10)}.xlsx`, REPORT_LABELS[reportType], rows, columns);
   const toggleHall = (id: string) => setHallIds((previous) => previous.includes(id) ? previous.filter((row) => row !== id) : [...previous, id]);
 
-  const semantics = !scopeSupported ? 'این گزارش ذاتاً سراسری است؛ Scope سالن/استخر برای آن غیرفعال شده تا خروجی گمراه‌کننده تولید نشود.' : reportType === 'sales' && scopeMode !== 'farm' ? 'Scope فروش از Processing Batch و Lotهای صریح هر خط فروش استخراج می‌شود.' : CURRENT_SNAPSHOT_REPORTS.has(reportType) ? 'این گزارش Snapshot وضعیت فعلی است و فیلتر تاریخ برای آن معنا ندارد.' : 'Scope و بازه زمانی روی رکوردهای این گزارش اعمال می‌شود.';
+  const semantics = !scopeSupported ? 'این گزارش ذاتاً سراسری است؛ Scope سالن/استخر برای آن غیرفعال شده تا خروجی گمراه‌کننده تولید نشود.' : reportType === 'sales' && scopeMode !== 'farm' ? 'Scope فروش از Processing Batch و Lotهای صریح هر خط فروش استخراج می‌شود.' : reportType === 'receivables' ? 'مطالبات فقط از پیش‌فاکتورهای تسویه‌نشده و لغونشده ساخته می‌شود؛ سررسید از expiryDate محاسبه می‌شود.' : CURRENT_SNAPSHOT_REPORTS.has(reportType) ? 'این گزارش Snapshot وضعیت فعلی است و فیلتر تاریخ برای آن معنا ندارد.' : 'Scope و بازه زمانی روی رکوردهای این گزارش اعمال می‌شود.';
 
   return <div className="space-y-5">
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><h1 className="text-xl font-black text-white flex items-center gap-2"><FileText className="w-6 h-6 text-amber-400" />مرکز گزارش‌های عملیاتی</h1><p className="text-xs text-slate-400 mt-1">Scope فقط جایی نمایش داده می‌شود که به‌طور واقعی قابل انتساب باشد؛ گزارش‌های سراسری با Scope جعلی نمایش داده نمی‌شوند.</p></div><div className="flex gap-2"><button disabled={!rows.length} onClick={exportCsv} className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Download className="w-4 h-4" />CSV</button><button disabled={!rows.length} onClick={exportXlsx} className="px-3 py-2 rounded-xl bg-cyan-600 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Download className="w-4 h-4" />XLSX</button><button disabled={!rows.length} onClick={() => window.print()} className="px-3 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold disabled:opacity-40 flex items-center gap-1"><Printer className="w-4 h-4" />چاپ / PDF</button></div></div>
