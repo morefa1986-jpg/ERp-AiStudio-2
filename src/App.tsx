@@ -24,6 +24,7 @@ const FeedingView = lazy(() => import('./components/views/FeedingView').then((mo
 const HatcheryView = lazy(() => import('./components/views/HatcheryOperationsView').then((module) => ({ default: module.HatcheryOperationsView })));
 const NurseryView = lazy(() => import('./components/views/NurseryView').then((module) => ({ default: module.NurseryView })));
 const FeedFactoryView = lazy(() => import('./components/views/FeedFactoryView').then((module) => ({ default: module.FeedFactoryView })));
+const FeedRawMaterialPanel = lazy(() => import('./components/views/FeedRawMaterialPanel').then((module) => ({ default: module.FeedRawMaterialPanel })));
 const ProcessingView = lazy(() => import('./components/views/ProcessingView').then((module) => ({ default: module.ProcessingView })));
 const ColdStorageView = lazy(() => import('./components/views/ColdStorageView').then((module) => ({ default: module.ColdStorageView })));
 const LaboratoryView = lazy(() => import('./components/views/LaboratoryView').then((module) => ({ default: module.LaboratoryView })));
@@ -132,7 +133,7 @@ const MainAppContent: React.FC = () => {
       case 'transfers': return <LivestockOperationsView mode="transfers" />;
       case 'hatchery': return <HatcheryView />;
       case 'nursery': return <NurseryView />;
-      case 'feedFactory': return <FeedFactoryView />;
+      case 'feedFactory': return <div className="space-y-6"><FeedRawMaterialPanel /><FeedFactoryView /></div>;
       case 'processing': return <ProcessingView />;
       case 'coldStorage': return <ColdStorageView />;
       case 'laboratory': return <LaboratoryView />;
