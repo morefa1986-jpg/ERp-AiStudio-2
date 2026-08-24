@@ -218,3 +218,82 @@ test('an offline state write survives reload and is replayed from the durable ou
     return payload.state?.data?.customers?.some((row) => row.id === durableId) || false;
   }, { timeout: 10_000 }).toBe(true);
 });
+
+test('master data creation and hall-scoped user filtering are server authoritative', async ({ request }) => {
+  const token = await loginApi(request);
+  const suffix = Date.now();
+  const auth = { Authorization: `Bearer ${token}` };
+
+  const speciesResponse = await request.post('/api/master-data/species', {
+    headers: auth,
+    data: {
+      faName: `گونه تست ${suffix}`,
+      enName: `E2E Species ${suffix}`,
+      scientificName: `Acipenser e2e ${suffix}`,
+      origin: 'E2E',
+      geneticLine: 'E2E-LINE',
+      description: 'E2E master data',
+      optimumTempMin: 14,
+      optimumTempMax: 18,
+      optimumDOMin: 6,
+      optimumpHMin: 7,
+      optimumpHMax: 8.2,
+      standardFCR: 1.1,
+      feedingProfileCoeff: 1,
+      caviarMaturityYears: 8,
+    },
+  });
+  expect(speciesResponse.ok()).toBeTruthy();
+  const speciesPayload = await speciesResponse.json();
+  const speciesId = speciesPayload.entity.id;
+
+  const hallResponse = await request.post('/api/master-data/halls', {
+    headers: auth,
+    data: { number: `H-${suffix}`, name: `E2E Hall ${suffix}`, description: 'Scoped hall' },
+  });
+  expect(hallResponse.ok()).toBeTruthy();
+  const hallPayload = await hallResponse.json();
+  const hallId = hallPayload.entity.id;
+
+  const pondResponse = await request.post('/api/master-data/ponds', {
+    headers: auth,
+    data: {
+      hallId,
+      number: `P-${suffix}`,
+      name: `E2E Pond ${suffix}`,
+      shape: 'Rectangular',
+      lengthMeters: 10,
+      widthMeters: 5,
+      depthMeters: 2,
+      stockGroups: [{ speciesId, sex: 'Unknown', count: 100, averageWeightKg: 2.5, chipNumbers: [] }],
+    },
+  });
+  expect(pondResponse.ok()).toBeTruthy();
+  const pondPayload = await pondResponse.json();
+  const pondId = pondPayload.entity.id;
+  expect(pondPayload.entity).toMatchObject({ hallId, fishCount: 100, biomassKg: 250, feedingStatus: 'STOPPED', sensorQuality: 'OFFLINE' });
+  expect(pondPayload.entity.capacityCubicMeters).toBe(100);
+
+  const missingScope = await request.post('/api/auth/users', {
+    headers: auth,
+    data: { username: `noscope${suffix}`, fullName: 'No Scope', email: `noscope${suffix}@example.test`, role: 'Hall Manager', password: 'e2e-scoped-password-2026', preferredLanguage: 'fa' },
+  });
+  expect(missingScope.status()).toBe(400);
+
+  const scopedUsername = `scoped${suffix}`;
+  const scopedPassword = 'e2e-scoped-password-2026';
+  const userResponse = await request.post('/api/auth/users', {
+    headers: auth,
+    data: { username: scopedUsername, fullName: 'Scoped Manager', email: `${scopedUsername}@example.test`, role: 'Hall Manager', password: scopedPassword, preferredLanguage: 'fa', hallScope: [hallId], pondScope: [] },
+  });
+  expect(userResponse.ok()).toBeTruthy();
+
+  const scopedLogin = await request.post('/api/auth/login', { data: { username: scopedUsername, password: scopedPassword, language: 'fa' } });
+  expect(scopedLogin.ok()).toBeTruthy();
+  const scopedToken = (await scopedLogin.json()).token;
+  const scopedStateResponse = await request.get('/api/state', { headers: { Authorization: `Bearer ${scopedToken}` } });
+  expect(scopedStateResponse.ok()).toBeTruthy();
+  const scopedState = await scopedStateResponse.json();
+  expect(scopedState.state.data.halls.map((row) => row.id)).toEqual([hallId]);
+  expect(scopedState.state.data.ponds.map((row) => row.id)).toEqual([pondId]);
+});
