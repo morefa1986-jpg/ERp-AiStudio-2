@@ -23,6 +23,7 @@ const PondsView = lazy(() => import('./components/views/PondDigitalTwinView').th
 const FeedingView = lazy(() => import('./components/views/FeedingView').then((module) => ({ default: module.FeedingView })));
 const HatcheryView = lazy(() => import('./components/views/HatcheryOperationsView').then((module) => ({ default: module.HatcheryOperationsView })));
 const NurseryView = lazy(() => import('./components/views/NurseryView').then((module) => ({ default: module.NurseryView })));
+const FeedFactoryView = lazy(() => import('./components/views/FeedFactoryView').then((module) => ({ default: module.FeedFactoryView })));
 const ProcessingView = lazy(() => import('./components/views/ProcessingView').then((module) => ({ default: module.ProcessingView })));
 const ColdStorageView = lazy(() => import('./components/views/ColdStorageView').then((module) => ({ default: module.ColdStorageView })));
 const LaboratoryView = lazy(() => import('./components/views/LaboratoryView').then((module) => ({ default: module.LaboratoryView })));
@@ -60,13 +61,24 @@ const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
   backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'platformHub', adminSettings: 'adminSettings',
 };
 
-const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'feedFactory']);
+const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls']);
+
+function restoredInitialView(): string {
+  try {
+    const restored = window.sessionStorage.getItem('fathi_restore_view');
+    if (restored) {
+      window.sessionStorage.removeItem('fathi_restore_view');
+      return restored;
+    }
+  } catch { /* SSR/test runtime */ }
+  return 'dashboard';
+}
 
 const MainAppContent: React.FC = () => {
   const { dir, t } = useI18n();
   const { isAuthenticated, currentUser, hasPermission } = useAuth();
   const { isModuleEnabled, canManageModules } = useModuleVisibility();
-  const [activeView, setActiveView] = useState('dashboard');
+  const [activeView, setActiveView] = useState(restoredInitialView);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -120,6 +132,7 @@ const MainAppContent: React.FC = () => {
       case 'transfers': return <LivestockOperationsView mode="transfers" />;
       case 'hatchery': return <HatcheryView />;
       case 'nursery': return <NurseryView />;
+      case 'feedFactory': return <FeedFactoryView />;
       case 'processing': return <ProcessingView />;
       case 'coldStorage': return <ColdStorageView />;
       case 'laboratory': return <LaboratoryView />;
