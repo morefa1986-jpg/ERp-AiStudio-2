@@ -74,6 +74,7 @@ function availableAt(lot: ColdStoragePallet, timestamp: number): boolean {
   if (!Number.isFinite(expiry) || !Number.isFinite(entered)) return false;
   if (entered > timestamp || expiry < timestamp) return false;
   if (lot.status === 'Pending Dispatch') return false;
+  if ((lot as ColdStoragePallet & { qualityHold?: boolean }).qualityHold) return false;
   return Number(lot.unitsCount || 0) > 0 || Number(lot.weightKg || 0) > 0.001;
 }
 
