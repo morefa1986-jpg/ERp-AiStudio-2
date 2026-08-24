@@ -76,6 +76,7 @@ export function executeAtomicProcessing(
     outputLots.push({
       id,
       sku,
+      processingBatchId: batchId,
       slotCode: `PENDING-${normalizedBatch}-${suffix}`,
       temperatureC: productType.includes('Caviar') ? -2.8 : -18,
       productType,
