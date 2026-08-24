@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { InventoryItem } from '../types';
-import { planFeedProduction, validateFeedFormula, type FeedFormulaDefinition } from '../utils/feedFactoryEngine';
+import { FEED_RAW_MATERIAL_CATEGORY, planFeedProduction, validateFeedFormula, type FeedFormulaDefinition } from '../utils/feedFactoryEngine';
 
-const inventory: InventoryItem[] = [
+type FeedFactoryInventoryItem = Omit<InventoryItem, 'category'> & { category: InventoryItem['category'] | typeof FEED_RAW_MATERIAL_CATEGORY };
+
+const inventory = [
   {
-    id: 'raw-a', sku: 'RAW-A', name: 'Ingredient A', category: 'Finished Goods', batchNumber: 'RA-1', quantity: 200, unit: 'kg',
+    id: 'raw-a', sku: 'RAW-A', name: 'Ingredient A', category: FEED_RAW_MATERIAL_CATEGORY, batchNumber: 'RA-1', quantity: 200, unit: 'kg',
     purchasePricePerUnit: 2, currency: 'USD', supplierName: 'Supplier', warehouseLocation: 'R1', minimumStockThreshold: 10, reorderLevel: 20, status: 'Adequate',
   },
   {
-    id: 'raw-b', sku: 'RAW-B', name: 'Ingredient B', category: 'Packaging & Cans', batchNumber: 'RB-1', quantity: 50000, unit: 'gram',
+    id: 'raw-b', sku: 'RAW-B', name: 'Ingredient B', category: FEED_RAW_MATERIAL_CATEGORY, batchNumber: 'RB-1', quantity: 50000, unit: 'gram',
     purchasePricePerUnit: 0.003, currency: 'USD', supplierName: 'Supplier', warehouseLocation: 'R2', minimumStockThreshold: 1000, reorderLevel: 5000, status: 'Adequate',
   },
-];
+] as FeedFactoryInventoryItem[] as InventoryItem[];
 
 const formula: FeedFormulaDefinition = {
   id: 'f1', code: 'F-001', name: 'User Formula', outputName: 'Finished Feed', outputSkuBase: 'FEED-X', outputUnit: 'kg',
@@ -19,7 +21,7 @@ const formula: FeedFormulaDefinition = {
 };
 
 describe('feed factory production planning', () => {
-  it('scales user-entered formula and conserves mass without requiring ingredient category to be Feed', () => {
+  it('scales a registered raw-material recipe and conserves mass', () => {
     const result = planFeedProduction(formula, 200, inventory);
     expect(result.ok).toBe(true);
     expect(result.totalInputKg).toBe(210);
@@ -49,11 +51,17 @@ describe('feed factory production planning', () => {
     expect(planFeedProduction(formula, 100, mixed)).toMatchObject({ ok: false, error: 'FEED_PRODUCTION_MIXED_CURRENCY_COST' });
   });
 
-  it('rejects expired or quality-held ingredients', () => {
+  it('rejects expired or quality-held ingredients and non-feed chemical/medicine inventory', () => {
     const held = inventory.map((item) => item.id === 'raw-a' ? ({ ...item, qualityHold: true } as InventoryItem & { qualityHold: boolean }) : item);
     expect(validateFeedFormula(formula, held)).toMatchObject({ ok: false, error: 'FEED_FORMULA_INGREDIENT_INVALID' });
 
     const expired = inventory.map((item) => item.id === 'raw-a' ? { ...item, expiryDate: '2000-01-01' } : item);
     expect(validateFeedFormula(formula, expired)).toMatchObject({ ok: false, error: 'FEED_FORMULA_INGREDIENT_INVALID' });
+
+    const medicine: InventoryItem = {
+      id: 'med', sku: 'MED-X', name: 'Not a feed ingredient', category: 'Medicine & Disinfectant (دارو و ضدعفونی)', batchNumber: 'M1', quantity: 100,
+      unit: 'kg', purchasePricePerUnit: 1, currency: 'USD', supplierName: 'Supplier', warehouseLocation: 'M', minimumStockThreshold: 0, reorderLevel: 0, status: 'Adequate',
+    };
+    expect(validateFeedFormula({ ...formula, ingredients: [{ itemId: 'med', quantityKg: 100 }] }, [medicine])).toMatchObject({ ok: false, error: 'FEED_FORMULA_INGREDIENT_INVALID' });
   });
 });
