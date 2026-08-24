@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, updateHallMaster, updatePondMetadata, updateSpeciesMaster } from './masterData';
+import { registerHrAttendanceRoutes } from './hrAttendanceRoutes';
 import { registerModuleSettingsRoutes } from './moduleSettingsRoutes';
 import { registerWaterTelemetryRoutes } from './waterTelemetryRoutes';
 import { StateConflictError, StoredAuditLog } from './storage';
@@ -49,6 +50,7 @@ export function registerMasterDataRoutes(app: Express, deps: Dependencies): void
     appendAuditLog: (log) => deps.store.appendAuditLog(log),
   });
   registerWaterTelemetryRoutes(app, deps);
+  registerHrAttendanceRoutes(app, deps);
 
   const commit = (
     req: AuthenticatedRequest,
