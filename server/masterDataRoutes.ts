@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, updateHallMaster, updatePondMetadata } from './masterData';
+import { registerModuleSettingsRoutes } from './moduleSettingsRoutes';
 import { StateConflictError, StoredAuditLog } from './storage';
 import { validateStateSnapshot } from '../src/utils/stateIntegrity';
 
@@ -15,6 +16,7 @@ interface StateEnvelope {
 interface MasterDataStore {
   getState(): StateEnvelope | null | undefined;
   saveStateAndAudit(data: Record<string, unknown>, expectedVersion: number | null, audit: StoredAuditLog): StateEnvelope;
+  appendAuditLog(log: StoredAuditLog): void;
 }
 
 /**
@@ -39,6 +41,13 @@ function resultErrorStatus(error?: string): number {
 }
 
 export function registerMasterDataRoutes(app: Express, deps: Dependencies): void {
+  registerModuleSettingsRoutes(app, {
+    requireAuth: deps.requireAuth,
+    requireAdmin: deps.requireAdmin,
+    auditFromOperation: deps.auditFromOperation,
+    appendAuditLog: (log) => deps.store.appendAuditLog(log),
+  });
+
   const commit = (
     req: AuthenticatedRequest,
     res: Response,
