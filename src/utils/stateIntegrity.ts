@@ -2,6 +2,7 @@ import { assessWaterSafetyForFeeding } from './sensorValidation';
 import { inventoryQuantityForFeedKg, normalizeFeedAmountToKg } from './feedingEngine';
 import { saleLotMatchesSku, validateSaleFulfillmentConservation } from './salesEngine';
 import { validateManualPondSnapshotMutation } from './pondSnapshotValidation';
+import { validateFarmStructureMutation, validateFarmStructureSnapshot } from './farmStructureValidation';
 
 export const STATE_COLLECTIONS = [
   'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
@@ -35,7 +36,7 @@ export const MODULE_COLLECTIONS: Record<string, string[]> = {
   hr: ['employees', 'attendance', 'payrolls', 'auditLogs'],
   media: ['socialPosts', 'auditLogs'],
   backup: ['backups', 'auditLogs'],
-  settings: ['auditLogs'],
+  settings: ['halls', 'ponds', 'species', 'auditLogs'],
 };
 
 function sameValue(left: unknown, right: unknown): boolean {
@@ -76,6 +77,8 @@ export function validateStateSnapshot(raw: unknown): { ok: boolean; error?: stri
     const ids = rows.map((row) => row && typeof row.id === 'string' ? row.id : '');
     if (ids.some((id) => !id) || new Set(ids).size !== ids.length) return { ok: false, error: `STATE_COLLECTION_IDS_INVALID:${key}` };
   }
+  const structureCheck = validateFarmStructureSnapshot(state);
+  if (!structureCheck.ok) return structureCheck;
   for (const pond of state.ponds) {
     if (!pond || typeof pond.id !== 'string' || !finiteNonNegative(pond.fishCount) || !finiteNonNegative(pond.biomassKg)) return { ok: false, error: 'STATE_POND_INVALID' };
   }
@@ -144,7 +147,7 @@ const IMMUTABLE_LEDGER_COLLECTIONS = [
 
 const NON_DELETABLE_REGISTERED_COLLECTIONS = [
   ...IMMUTABLE_LEDGER_COLLECTIONS,
-  'halls', 'ponds', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks', 'inventory', 'accounts',
+  'halls', 'ponds', 'species', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks', 'inventory', 'accounts',
 ];
 
 function modifiedExistingRows(previous: State, next: State, key: string): boolean {
@@ -418,6 +421,10 @@ export function validateStateMutation(previousRaw: unknown, nextRaw: unknown, op
   // snapshot. It is still schema/checksum validated above, but must not be
   // rejected as an ordinary append-only mutation.
   if (operation.module === 'backup' && operation.action === 'approve') return { ok: true };
+  if (operation.module === 'settings' && operation.action === 'manage') {
+    const structureMutation = validateFarmStructureMutation(previous, next, operation);
+    if (!structureMutation.ok) return structureMutation;
+  }
 
   // Historical telemetry, stock movements and biological events are
   // append-only. Authorized clients may add a new event, but cannot rewrite
