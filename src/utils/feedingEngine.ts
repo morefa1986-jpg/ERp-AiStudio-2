@@ -34,9 +34,17 @@ export function normalizeFeedAmountToKg(
   return Number(amount.toFixed(4));
 }
 
+export function feedItemIsExpired(item: InventoryItem, at: Date = new Date()): boolean {
+  if (item.status === 'Expired') return true;
+  if (!item.expiryDate) return false;
+  const expiry = new Date(`${item.expiryDate}T23:59:59.999`).getTime();
+  return !Number.isFinite(expiry) || expiry < at.getTime();
+}
+
 /** Convert a normalized kilogram amount to the unit used by the inventory ledger. */
 export function inventoryQuantityForFeedKg(item: InventoryItem, amountKg: number): number {
   if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
+  if (feedItemIsExpired(item)) return 0;
   if (item.unit === 'gram') return Number((amountKg * 1000).toFixed(4));
   if (item.unit === 'kg') return Number(amountKg.toFixed(4));
   return 0;
@@ -61,7 +69,7 @@ function validatePondSafety(pond: Pond, telemetry?: AuthoritativeFeedingTelemetr
     return { safe: false, error: 'ثبت خوراک غیرمجاز است: استخر دارای درمان فعال است.', assessment };
   }
   if (effectiveSensorStatus === 'MANUAL') {
-    return { safe: false, error: 'ثبت خوراک خودکار غیرمجاز است: اندازه‌گیری دستی منبع authoritative تله‌متری نیست.', assessment };
+    return { safe: false, error: 'ثبت خوراک غیرمجاز است: اندازه‌گیری دستی منبع authoritative تله‌متری نیست.', assessment };
   }
   if (effectiveSensorStatus === 'INVALID' || effectiveSensorStatus === 'STALE' || effectiveSensorStatus === 'OFFLINE' || effectiveSensorStatus !== 'VALID') {
     return { safe: false, error: 'ثبت خوراک غیرمجاز است: کیفیت سنسور معتبر نیست.', assessment };
@@ -164,14 +172,8 @@ export function validateFeedingSubmission(
   if (!feedItem.category.includes('Feed')) {
     return { success: false, error: 'کالای انتخاب‌شده خوراک نیست.', normalizedAmountKg: normalizedKg, feedItem };
   }
-  if (feedItem.status === 'Expired') {
+  if (feedItemIsExpired(feedItem)) {
     return { success: false, error: 'مصرف خوراک منقضی‌شده در ERP مجاز نیست.', normalizedAmountKg: normalizedKg, feedItem };
-  }
-  if (feedItem.expiryDate) {
-    const expiry = new Date(`${feedItem.expiryDate}T23:59:59.999`).getTime();
-    if (!Number.isFinite(expiry) || expiry < Date.now()) {
-      return { success: false, error: 'مصرف خوراک منقضی‌شده در ERP مجاز نیست.', normalizedAmountKg: normalizedKg, feedItem };
-    }
   }
   const requiredInventoryQuantity = inventoryQuantityForFeedKg(feedItem, normalizedKg);
   if (requiredInventoryQuantity <= 0) {
