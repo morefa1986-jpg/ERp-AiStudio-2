@@ -1,4 +1,5 @@
 import { getStoredSessionToken } from '../context/AuthContext';
+import type { InventoryItem } from '../types';
 import type { FeedFormulaIngredient } from '../utils/feedFactoryEngine';
 
 export interface FeedFormulaRecord {
@@ -62,6 +63,24 @@ async function call(path: string, options: { method?: string; body?: unknown } =
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.success) throw new Error(payload.error || 'FEED_FACTORY_REQUEST_FAILED');
   return payload;
+}
+
+export async function registerFeedRawMaterial(input: {
+  sku: string;
+  name: string;
+  batchNumber: string;
+  quantity: number;
+  unit: 'kg' | 'gram';
+  purchasePricePerUnit: number;
+  currency: string;
+  expiryDate: string;
+  supplierName: string;
+  warehouseLocation: string;
+  minimumStockThreshold: number;
+  reorderLevel: number;
+}): Promise<InventoryItem> {
+  const payload = await call('/api/feed-factory/raw-materials', { body: input });
+  return payload.item as InventoryItem;
 }
 
 export async function listFeedFormulas(): Promise<FeedFormulaRecord[]> {
