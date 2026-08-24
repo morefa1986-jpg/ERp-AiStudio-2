@@ -26,3 +26,4 @@ export const updateHallMaster = (id: string, input: Record<string, unknown>) => 
 export const createPondMaster = (input: Record<string, unknown>) => masterRequest('/api/master-data/ponds', 'POST', input);
 export const updatePondMaster = (id: string, input: Record<string, unknown>) => masterRequest(`/api/master-data/ponds/${encodeURIComponent(id)}`, 'PATCH', input);
 export const createSpeciesMaster = (input: Record<string, unknown>) => masterRequest('/api/master-data/species', 'POST', input);
+export const updateSpeciesMaster = (id: string, input: Record<string, unknown>) => masterRequest(`/api/master-data/species/${encodeURIComponent(id)}`, 'PATCH', input);
