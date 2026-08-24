@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useFarm } from '../../context/FarmContext';
 import {
   appendDurableEntry,
-  fallbackDurableOperation,
+  DurableStateOperation,
   inferDurableOperation,
   queueDurableWrite,
   trimDurableEntriesToCount,
@@ -16,6 +16,12 @@ function withoutBackupPayload(backups: any[]): any[] {
     return metadata;
   });
 }
+
+const INITIALIZATION_FALLBACK: DurableStateOperation = {
+  module: 'settings',
+  action: 'manage',
+  entity: 'StateInitializationOrRecovery',
+};
 
 export const DurableOutboxBridge: React.FC = () => {
   const { currentUser } = useAuth();
@@ -84,7 +90,7 @@ export const DurableOutboxBridge: React.FC = () => {
 
     const delta = pending - previousPending.current;
     if (delta > 0) {
-      const operation = inferDurableOperation(previousState.current, snapshot) || fallbackDurableOperation();
+      const operation = inferDurableOperation(previousState.current, snapshot) || INITIALIZATION_FALLBACK;
       queueDurableWrite(async () => {
         for (let index = 0; index < delta; index += 1) {
           await appendDurableEntry(userId, operation, snapshot);
