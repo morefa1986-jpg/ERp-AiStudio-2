@@ -5,6 +5,7 @@ import { registerColdStorageRoutes } from './coldStorageRoutes';
 import { registerFxAccountingRoutes } from './fxAccountingRoutes';
 import { registerHrAttendanceRoutes } from './hrAttendanceRoutes';
 import { registerIncidentRoutes } from './incidentRoutes';
+import { registerLaboratoryRoutes } from './laboratoryRoutes';
 import { registerMedicineLedgerRoutes } from './medicineLedgerRoutes';
 import { registerModuleSettingsRoutes } from './moduleSettingsRoutes';
 import { registerWaterTelemetryRoutes } from './waterTelemetryRoutes';
@@ -51,6 +52,7 @@ export function registerMasterDataRoutes(app: Express, deps: Dependencies): void
   registerIncidentRoutes(app, deps);
   registerCitesRoutes(app, deps);
   registerColdStorageRoutes(app, deps);
+  registerLaboratoryRoutes(app, deps);
 
   const commit = (req: AuthenticatedRequest, res: Response, previous: StateEnvelope, result: MasterResult, operation: { action: 'create' | 'edit'; entity: string }) => {
     if (!result.ok || !result.state || !result.entity) return res.status(resultErrorStatus(result.error)).json({ success: false, error: result.error || 'MASTER_DATA_INVALID' });
