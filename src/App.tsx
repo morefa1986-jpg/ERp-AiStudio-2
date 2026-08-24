@@ -15,6 +15,7 @@ import { ManualFeedingModeNotice } from './components/common/ManualFeedingModeNo
 import { useSmartInputFocus } from './hooks/useSmartInputFocus';
 
 const DashboardView = lazy(() => import('./components/views/SafeDashboardView').then((module) => ({ default: module.SafeDashboardView })));
+const IncidentPanel = lazy(() => import('./components/views/IncidentPanel').then((module) => ({ default: module.IncidentPanel })));
 const PondsView = lazy(() => import('./components/views/PondDigitalTwinView').then((module) => ({ default: module.PondDigitalTwinView })));
 const FeedingView = lazy(() => import('./components/views/FeedingView').then((module) => ({ default: module.FeedingView })));
 const HatcheryView = lazy(() => import('./components/views/HatcheryOperationsView').then((module) => ({ default: module.HatcheryOperationsView })));
@@ -94,7 +95,7 @@ const MainAppContent: React.FC = () => {
     if (OPERATIONS_VIEWS.has(activeView as OperationsModuleId)) return <OperationsModuleView moduleId={activeView as OperationsModuleId} />;
 
     switch (activeView) {
-      case 'dashboard': return <DashboardView onSelectNav={selectView} />;
+      case 'dashboard': return <div className="space-y-6"><IncidentPanel /><DashboardView onSelectNav={selectView} /></div>;
       case 'ponds': return <><DahirTelemetryPanel mode="pondLevels" /><PondsView onSelectNav={selectView} /></>;
       case 'feeding': return <><ManualFeedingModeNotice /><FeedingView /></>;
       case 'biometrics': return <BiometricsView />;
