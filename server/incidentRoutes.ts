@@ -10,7 +10,6 @@ interface Dependencies {
   store: { getState(): { version: number; data: Record<string, unknown> } | null | undefined; appendAuditLog(log: StoredAuditLog): void };
   auditFromOperation: (req: any, operation: any, beforeState?: string, afterState?: string) => StoredAuditLog | null;
 }
-const VIEW_ROLES = new Set(['Super Admin','Farm Owner','Farm Manager','Hall Manager','Technician','Veterinarian','Feed Manager','Warehouse Manager','Processing Manager','Viewer/Auditor']);
 const ESCALATE_ROLES = new Set(['Super Admin','Farm Owner','Farm Manager','Hall Manager','Veterinarian']);
 const RESOLVE_ROLES = new Set(['Super Admin','Farm Owner','Farm Manager','Hall Manager','Veterinarian']);
 
@@ -32,19 +31,17 @@ export function registerIncidentRoutes(app: Express, deps: Dependencies): void {
   app.get('/api/incidents/capabilities', deps.requireAuth, (_req: AuthenticatedRequest, res: Response) => {
     return res.json({ success: true, internalWorkflow: true, externalNotifications: { configured: false, sms: false, email: false }, note: 'External notification provider is not configured or implemented in this build.' });
   });
-
   app.get('/api/incidents', deps.requireAuth, (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user || !VIEW_ROLES.has(req.user.role)) return res.status(403).json({ success: false, error: 'ACTION_NOT_ALLOWED' });
+    if (!req.user) return res.status(401).json({ success: false, error: 'AUTH_REQUIRED' });
     return res.json({ success: true, incidents: syncAndList(req) });
   });
-
   app.post('/api/incidents/sync', deps.requireAuth, (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user || !VIEW_ROLES.has(req.user.role)) return res.status(403).json({ success: false, error: 'ACTION_NOT_ALLOWED' });
+    if (!req.user) return res.status(401).json({ success: false, error: 'AUTH_REQUIRED' });
     return res.json({ success: true, incidents: syncAndList(req) });
   });
 
   app.patch('/api/incidents/:id', deps.requireAuth, (req: AuthenticatedRequest, res: Response) => {
-    if (!req.user || !VIEW_ROLES.has(req.user.role)) return res.status(403).json({ success: false, error: 'ACTION_NOT_ALLOWED' });
+    if (!req.user) return res.status(401).json({ success: false, error: 'AUTH_REQUIRED' });
     const before = incidents.get(req.params.id);
     if (!before) return res.status(404).json({ success: false, error: 'INCIDENT_NOT_FOUND' });
     if (!scoped(req.user, before)) return res.status(403).json({ success: false, error: 'INCIDENT_SCOPE_DENIED' });
