@@ -14,6 +14,18 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
+  projects: [
+    {
+      name: 'bootstrap',
+      testMatch: /bootstrap\.setup\.mjs/,
+      fullyParallel: false,
+    },
+    {
+      name: 'erp-e2e',
+      testIgnore: /bootstrap\.setup\.mjs/,
+      dependencies: ['bootstrap'],
+    },
+  ],
   webServer: {
     // Use the production bundle so CI/browser tests do not depend on tsx's
     // IPC helper and exercise the same server artifact shipped to desktop.
