@@ -62,8 +62,8 @@ export class LaboratoryLedgerStore {
   list(limit = 500, sampleId?: string): LaboratoryEvent[] {
     const safeLimit = Math.max(1, Math.min(2000, Number(limit) || 500));
     const rows = sampleId
-      ? this.db.prepare('SELECT payload_json FROM laboratory_events WHERE sample_id = ? ORDER BY timestamp DESC LIMIT ?').all(clean(sampleId, 160), safeLimit)
-      : this.db.prepare('SELECT payload_json FROM laboratory_events ORDER BY timestamp DESC LIMIT ?').all(safeLimit);
+      ? this.db.prepare('SELECT payload_json FROM laboratory_events WHERE sample_id = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?').all(clean(sampleId, 160), safeLimit)
+      : this.db.prepare('SELECT payload_json FROM laboratory_events ORDER BY timestamp DESC, rowid DESC LIMIT ?').all(safeLimit);
     return rows.flatMap((row) => { try { return [JSON.parse(String(row.payload_json)) as LaboratoryEvent]; } catch { return []; } });
   }
   close(): void { this.db.close(); }
