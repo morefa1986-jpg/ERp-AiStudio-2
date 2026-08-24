@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { dahirGatewayStatus, fetchDahirTelemetryServerSide } from '../../server/dahirGateway';
 
@@ -77,5 +79,13 @@ describe('server-side water telemetry gateway', () => {
     } as NodeJS.ProcessEnv);
     expect(status.configured).toBe(true);
     expect(status.authMode).toBe('bearer');
+  });
+
+  it('keeps vendor branding out of user-visible water monitoring copy', () => {
+    const source = fs.readFileSync(path.resolve(process.cwd(), 'src/components/common/DahirTelemetryPanel.tsx'), 'utf8');
+    for (const forbiddenVisibleCopy of ['Dahir API', 'داهیر', 'Telemetry مستقیم از', 'آدرس Dahir', 'نام کاربری داهیر']) {
+      expect(source).not.toContain(forbiddenVisibleCopy);
+    }
+    expect(source).toContain('بررسی آنلاین پارامترهای آب');
   });
 });
