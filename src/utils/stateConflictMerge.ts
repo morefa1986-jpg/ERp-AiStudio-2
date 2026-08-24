@@ -10,11 +10,13 @@ export interface StateMergeResult {
   conflicts: StateMergeConflict[];
 }
 
+type IdRow = { id: string; [key: string]: unknown };
+
 function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function isIdRow(value: unknown): value is { id: string; [key: string]: unknown } {
+function isIdRow(value: unknown): value is IdRow {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value) && typeof (value as { id?: unknown }).id === 'string');
 }
 
@@ -30,11 +32,14 @@ function mergeRows(
     return { conflicts: [{ collection, reason: 'VALUE_CONFLICT' }] };
   }
 
-  const base = new Map(baseRows.map((row) => [row.id, row]));
-  const local = new Map(localRows.map((row) => [row.id, row]));
-  const remote = new Map(remoteRows.map((row) => [row.id, row]));
+  const baseTyped = baseRows as IdRow[];
+  const localTyped = localRows as IdRow[];
+  const remoteTyped = remoteRows as IdRow[];
+  const base = new Map(baseTyped.map((row) => [row.id, row]));
+  const local = new Map(localTyped.map((row) => [row.id, row]));
+  const remote = new Map(remoteTyped.map((row) => [row.id, row]));
   const ids = new Set([...base.keys(), ...local.keys(), ...remote.keys()]);
-  const merged = new Map<string, unknown>();
+  const merged = new Map<string, IdRow>();
   const conflicts: StateMergeConflict[] = [];
 
   for (const id of ids) {
@@ -75,17 +80,17 @@ function mergeRows(
   if (conflicts.length) return { conflicts };
 
   // Preserve server ordering first, then append local-only rows in their local order.
-  const ordered: unknown[] = [];
+  const ordered: IdRow[] = [];
   const emitted = new Set<string>();
-  for (const row of remoteRows) {
+  for (const row of remoteTyped) {
     if (merged.has(row.id)) {
-      ordered.push(merged.get(row.id));
+      ordered.push(merged.get(row.id)!);
       emitted.add(row.id);
     }
   }
-  for (const row of localRows) {
+  for (const row of localTyped) {
     if (merged.has(row.id) && !emitted.has(row.id)) {
-      ordered.push(merged.get(row.id));
+      ordered.push(merged.get(row.id)!);
       emitted.add(row.id);
     }
   }
