@@ -31,8 +31,8 @@ describe('receivablesAging', () => {
     const rows = buildReceivablesAging([
       invoice({ invoiceNumber: 'PF-CURRENT', expiryDate: '2026-08-30', grandTotal: 100 }),
       invoice({ invoiceNumber: 'PF-30', expiryDate: '2026-08-01', grandTotal: 200 }),
-      invoice({ invoiceNumber: 'PF-60', expiryDate: '2026-06-20', grandTotal: 300 }),
-      invoice({ invoiceNumber: 'PF-90', expiryDate: '2026-05-30', grandTotal: 400 }),
+      invoice({ invoiceNumber: 'PF-60', expiryDate: '2026-07-05', grandTotal: 300 }),
+      invoice({ invoiceNumber: 'PF-90', expiryDate: '2026-06-05', grandTotal: 400 }),
       invoice({ invoiceNumber: 'PF-OLD', expiryDate: '2026-01-01', grandTotal: 500 }),
       invoice({ invoiceNumber: 'PF-PAID', stage: 'Payment Received (تسویه)', expiryDate: '2026-01-01', grandTotal: 999 }),
       invoice({ invoiceNumber: 'PF-CANCELLED', status: 'Cancelled', expiryDate: '2026-01-01', grandTotal: 999 }),
