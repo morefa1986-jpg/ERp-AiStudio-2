@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, updateHallMaster, updatePondMetadata, updateSpeciesMaster } from './masterData';
 import { registerModuleSettingsRoutes } from './moduleSettingsRoutes';
+import { registerWaterTelemetryRoutes } from './waterTelemetryRoutes';
 import { StateConflictError, StoredAuditLog } from './storage';
 import { validateStateSnapshot } from '../src/utils/stateIntegrity';
 
@@ -47,6 +48,7 @@ export function registerMasterDataRoutes(app: Express, deps: Dependencies): void
     auditFromOperation: deps.auditFromOperation,
     appendAuditLog: (log) => deps.store.appendAuditLog(log),
   });
+  registerWaterTelemetryRoutes(app, deps);
 
   const commit = (
     req: AuthenticatedRequest,
