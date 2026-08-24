@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createHallMaster, createPondMaster, createSpeciesMaster, updatePondMetadata } from '../../server/masterData';
+import { createHallMaster, createPondMaster, createSpeciesMaster, updateHallMaster, updatePondMetadata, updateSpeciesMaster } from '../../server/masterData';
 
 function baseState() {
   return {
@@ -64,5 +64,37 @@ describe('farm master data domain', () => {
     const updated = updatePondMetadata(created.state!, pondId, { name: 'New', shape: 'Rectangular', lengthMeters: 12, widthMeters: 5, depthMeters: 2 });
     expect(updated.ok).toBe(true);
     expect(updated.entity).toMatchObject({ name: 'New', capacityCubicMeters: 120, fishCount: 10, biomassKg: 20 });
+    const forbiddenStockEdit = updatePondMetadata(created.state!, pondId, { stockGroups: [] });
+    expect(forbiddenStockEdit).toMatchObject({ ok: false, error: 'POND_STOCK_MUTATION_REQUIRES_OPERATIONAL_WORKFLOW' });
+  });
+
+  it('blocks deactivation of a stocked pond and a hall that still has active ponds', () => {
+    const { state, speciesId, hallId } = withSpeciesAndHall();
+    const created = createPondMaster(state, { hallId, number: 'P-01', name: 'Stocked', shape: 'Other', capacityCubicMeters: 50, stockGroups: [{ speciesId, sex: 'Unknown', count: 10, averageWeightKg: 2 }] });
+    const pondId = String(created.entity!.id);
+    expect(updatePondMetadata(created.state!, pondId, { isActive: false })).toMatchObject({ ok: false, error: 'POND_DEACTIVATION_REQUIRES_EMPTY_STOCK' });
+    expect(updateHallMaster(created.state!, hallId, { isActive: false })).toMatchObject({ ok: false, error: 'HALL_HAS_ACTIVE_PONDS' });
+  });
+
+  it('allows an empty pond then its hall to be deactivated in order', () => {
+    const { state, hallId } = withSpeciesAndHall();
+    const created = createPondMaster(state, { hallId, number: 'P-EMPTY', name: 'Empty', shape: 'Other', capacityCubicMeters: 20, stockGroups: [] });
+    const pondId = String(created.entity!.id);
+    const pondOff = updatePondMetadata(created.state!, pondId, { isActive: false });
+    expect(pondOff.ok).toBe(true);
+    const hallOff = updateHallMaster(pondOff.state!, hallId, { isActive: false });
+    expect(hallOff.ok).toBe(true);
+    expect(hallOff.entity).toMatchObject({ isActive: false });
+  });
+
+  it('updates species limits but blocks deactivation while the species is in active stock', () => {
+    const { state, speciesId, hallId } = withSpeciesAndHall();
+    const updated = updateSpeciesMaster(state, speciesId, { standardFCR: 1.25, description: 'updated' });
+    expect(updated.ok).toBe(true);
+    expect(updated.entity).toMatchObject({ standardFCR: 1.25, description: 'updated' });
+
+    const stocked = createPondMaster(updated.state!, { hallId, number: 'P-SP', name: 'Species use', shape: 'Other', capacityCubicMeters: 30, stockGroups: [{ speciesId, sex: 'Female', count: 2, averageWeightKg: 4 }] });
+    const blocked = updateSpeciesMaster(stocked.state!, speciesId, { isActive: false });
+    expect(blocked).toMatchObject({ ok: false, error: 'SPECIES_IN_ACTIVE_USE' });
   });
 });
