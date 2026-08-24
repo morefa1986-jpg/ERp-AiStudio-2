@@ -3,6 +3,7 @@ import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, 
 import { registerCitesRoutes } from './citesRoutes';
 import { registerColdStorageRoutes } from './coldStorageRoutes';
 import { registerFeedFactoryRoutes } from './feedFactoryRoutes';
+import { registerFeedFactoryRawMaterialRoutes } from './feedFactoryRawMaterialRoutes';
 import { registerFxAccountingRoutes } from './fxAccountingRoutes';
 import { registerHrAttendanceRoutes } from './hrAttendanceRoutes';
 import { registerIncidentRoutes } from './incidentRoutes';
@@ -58,6 +59,7 @@ export function registerMasterDataRoutes(app: Express, deps: Dependencies): void
   registerLaboratoryRoutes(app, deps);
   registerMaintenanceRoutes(app, deps);
   registerFeedFactoryRoutes(app, deps);
+  registerFeedFactoryRawMaterialRoutes(app, deps);
 
   const commit = (req: AuthenticatedRequest, res: Response, previous: StateEnvelope, result: MasterResult, operation: { action: 'create' | 'edit'; entity: string }) => {
     if (!result.ok || !result.state || !result.entity) return res.status(resultErrorStatus(result.error)).json({ success: false, error: result.error || 'MASTER_DATA_INVALID' });
