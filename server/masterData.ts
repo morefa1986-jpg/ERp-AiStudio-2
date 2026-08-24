@@ -87,7 +87,7 @@ function calculatedCapacity(input: PondMasterInput): number | null {
 function normalizeStockGroups(state: Record<string, unknown>, groupsRaw: unknown): { ok: true; groups: PondStockGroupInput[] } | { ok: false; error: string } {
   if (groupsRaw === undefined) return { ok: true, groups: [] };
   if (!Array.isArray(groupsRaw) || groupsRaw.length > 100) return { ok: false, error: 'POND_STOCK_GROUPS_INVALID' };
-  const speciesIds = new Set(rows(state, 'species').map((row) => String(row?.id || '')));
+  const speciesIds = new Set(rows(state, 'species').filter((row) => row?.isActive !== false).map((row) => String(row?.id || '')));
   const seenChips = new Set<string>();
   for (const pond of rows(state, 'ponds')) {
     for (const group of Array.isArray(pond?.stockGroups) ? pond.stockGroups : []) {
@@ -135,6 +135,20 @@ function stockSummary(groups: PondStockGroupInput[]) {
   return { fishCount, biomassKg, averageWeightKg, speciesMix, primarySpeciesId: speciesMix[0]?.speciesId || '' };
 }
 
+function speciesInActiveUse(state: Record<string, unknown>, speciesId: string): boolean {
+  const pondUse = rows(state, 'ponds').some((pond) => {
+    if (pond?.isActive === false) return false;
+    if (pond?.speciesId === speciesId && Number(pond?.fishCount || 0) > 0) return true;
+    if (Array.isArray(pond?.speciesMix) && pond.speciesMix.some((mix: any) => mix?.speciesId === speciesId && Number(mix?.count || 0) > 0)) return true;
+    return Array.isArray(pond?.stockGroups) && pond.stockGroups.some((group: any) => group?.speciesId === speciesId && Number(group?.count || 0) > 0);
+  });
+  if (pondUse) return true;
+  if (rows(state, 'broodstock').some((fish) => fish?.speciesId === speciesId && fish?.status !== 'Retired')) return true;
+  if (rows(state, 'larvae').some((batch) => batch?.speciesId === speciesId && batch?.status !== 'Graduated')) return true;
+  if (rows(state, 'nurseryTanks').some((tank) => tank?.speciesId === speciesId && Number(tank?.fishCount || 0) > 0)) return true;
+  return false;
+}
+
 export function createHallMaster(state: Record<string, unknown>, raw: HallMasterInput): MasterResult {
   const number = text(raw?.number, 64);
   const name = text(raw?.name, 160);
@@ -159,6 +173,9 @@ export function updateHallMaster(state: Record<string, unknown>, hallId: string,
   const halls = rows(state, 'halls');
   const existing = halls.find((hall) => hall?.id === hallId);
   if (!existing) return { ok: false, error: 'HALL_NOT_FOUND' };
+  if (raw.isActive === false && rows(state, 'ponds').some((pond) => pond?.hallId === hallId && pond?.isActive !== false)) {
+    return { ok: false, error: 'HALL_HAS_ACTIVE_PONDS' };
+  }
   const number = raw.number === undefined ? existing.number : text(raw.number, 64);
   const name = raw.name === undefined ? existing.name : text(raw.name, 160);
   if (!number || !name) return { ok: false, error: 'HALL_NUMBER_NAME_REQUIRED' };
@@ -187,7 +204,7 @@ export function createPondMaster(state: Record<string, unknown>, raw: PondMaster
   const ponds = rows(state, 'ponds');
   if (ponds.some((pond) => pond?.hallId === hallId && String(pond?.number).toLowerCase() === number.toLowerCase())) return { ok: false, error: 'POND_NUMBER_DUPLICATE_IN_HALL' };
   const stock = normalizeStockGroups(state, raw.stockGroups);
-  if (!stock.ok) return stock;
+  if (stock.ok === false) return stock;
   const summary = stockSummary(stock.groups);
   const pond = {
     id: `pond_${crypto.randomUUID()}`,
@@ -230,8 +247,17 @@ export function updatePondMetadata(state: Record<string, unknown>, pondId: strin
   const ponds = rows(state, 'ponds');
   const existing = ponds.find((pond) => pond?.id === pondId);
   if (!existing) return { ok: false, error: 'POND_NOT_FOUND' };
+  if (raw.stockGroups !== undefined) return { ok: false, error: 'POND_STOCK_MUTATION_REQUIRES_OPERATIONAL_WORKFLOW' };
+  if (raw.isActive === false) {
+    const hasStock = Number(existing.fishCount || 0) > 0 || Number(existing.biomassKg || 0) > 0;
+    const hasActiveTreatment = Boolean(existing.activeTreatmentId) || rows(state, 'treatments').some((treatment) => treatment?.pondId === pondId && treatment?.status === 'ACTIVE');
+    if (hasStock) return { ok: false, error: 'POND_DEACTIVATION_REQUIRES_EMPTY_STOCK' };
+    if (hasActiveTreatment) return { ok: false, error: 'POND_DEACTIVATION_ACTIVE_TREATMENT' };
+  }
   const hallId = raw.hallId === undefined ? existing.hallId : text(raw.hallId, 128);
-  if (!rows(state, 'halls').some((hall) => hall?.id === hallId)) return { ok: false, error: 'POND_HALL_INVALID' };
+  const targetHall = rows(state, 'halls').find((hall) => hall?.id === hallId);
+  if (!targetHall) return { ok: false, error: 'POND_HALL_INVALID' };
+  if (raw.hallId !== undefined && targetHall.isActive === false) return { ok: false, error: 'POND_HALL_INACTIVE' };
   const number = raw.number === undefined ? existing.number : text(raw.number, 64);
   const name = raw.name === undefined ? existing.name : text(raw.name, 160);
   if (!number || !name) return { ok: false, error: 'POND_NUMBER_NAME_REQUIRED' };
@@ -292,4 +318,48 @@ export function createSpeciesMaster(state: Record<string, unknown>, raw: Species
     isActive: true,
   };
   return { ok: true, entity, state: { ...state, species: [entity, ...species] } };
+}
+
+export function updateSpeciesMaster(state: Record<string, unknown>, speciesId: string, raw: Partial<SpeciesMasterInput> & { isActive?: boolean }): MasterResult {
+  const species = rows(state, 'species');
+  const existing = species.find((row) => row?.id === speciesId);
+  if (!existing) return { ok: false, error: 'SPECIES_NOT_FOUND' };
+  if (raw.isActive === false && speciesInActiveUse(state, speciesId)) return { ok: false, error: 'SPECIES_IN_ACTIVE_USE' };
+
+  const faName = raw.faName === undefined ? existing.faName : text(raw.faName, 160);
+  const enName = raw.enName === undefined ? existing.enName : text(raw.enName, 160);
+  const scientificName = raw.scientificName === undefined ? existing.scientificName : text(raw.scientificName, 200);
+  if (!faName || !enName || !scientificName) return { ok: false, error: 'SPECIES_NAMES_REQUIRED' };
+  if (species.some((row) => row?.id !== speciesId && String(row?.scientificName).toLowerCase() === String(scientificName).toLowerCase())) return { ok: false, error: 'SPECIES_DUPLICATE' };
+
+  const optimumTempMin = raw.optimumTempMin ?? existing.optimumTempMin;
+  const optimumTempMax = raw.optimumTempMax ?? existing.optimumTempMax;
+  const optimumDOMin = raw.optimumDOMin ?? existing.optimumDOMin;
+  const optimumpHMin = raw.optimumpHMin ?? existing.optimumpHMin;
+  const optimumpHMax = raw.optimumpHMax ?? existing.optimumpHMax;
+  const standardFCR = raw.standardFCR ?? existing.standardFCR;
+  const feedingProfileCoeff = raw.feedingProfileCoeff ?? existing.feedingProfileCoeff;
+  const caviarMaturityYears = raw.caviarMaturityYears ?? existing.caviarMaturityYears;
+  const numeric = [optimumTempMin, optimumTempMax, optimumDOMin, optimumpHMin, optimumpHMax, standardFCR, feedingProfileCoeff, caviarMaturityYears];
+  if (numeric.some((value) => !nonNegative(value)) || optimumTempMax <= optimumTempMin || optimumpHMax <= optimumpHMin) return { ok: false, error: 'SPECIES_LIMITS_INVALID' };
+
+  const updated = {
+    ...existing,
+    faName,
+    enName,
+    scientificName,
+    origin: raw.origin === undefined ? existing.origin : text(raw.origin, 300),
+    geneticLine: raw.geneticLine === undefined ? existing.geneticLine : text(raw.geneticLine, 300),
+    description: raw.description === undefined ? existing.description : text(raw.description, 1500),
+    optimumTempMin,
+    optimumTempMax,
+    optimumDOMin,
+    optimumpHMin,
+    optimumpHMax,
+    standardFCR,
+    feedingProfileCoeff,
+    caviarMaturityYears,
+    isActive: typeof raw.isActive === 'boolean' ? raw.isActive : existing.isActive !== false,
+  };
+  return { ok: true, entity: updated, state: { ...state, species: species.map((row) => row?.id === speciesId ? updated : row) } };
 }
