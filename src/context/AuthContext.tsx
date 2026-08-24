@@ -19,9 +19,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 const SESSION_STORAGE_KEY = 'fathi_aqua_session_token';
+const LAST_USER_STORAGE_KEY = 'fathi_aqua_last_user_id';
 
 export function getStoredSessionToken(): string | null {
   try { return typeof window !== 'undefined' ? window.sessionStorage.getItem(SESSION_STORAGE_KEY) : null; } catch { return null; }
+}
+
+export function getLastAuthenticatedUserId(): string | null {
+  try { return typeof window !== 'undefined' ? window.localStorage.getItem(LAST_USER_STORAGE_KEY) : null; } catch { return null; }
+}
+
+function setLastAuthenticatedUserId(userId: string): void {
+  try {
+    if (typeof window !== 'undefined' && userId.trim()) window.localStorage.setItem(LAST_USER_STORAGE_KEY, userId.trim());
+  } catch { /* Non-secret identity hint is optional. */ }
 }
 
 function setStoredSessionToken(token: string | null): void {
@@ -56,6 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const response = await fetch('/api/auth/session', { headers: sessionHeaders(token) });
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.success || !data.user?.id || !data.user?.isActive) throw new Error('INVALID_SESSION');
+        setLastAuthenticatedUserId(String(data.user.id));
         setCurrentUser(data.user);
         setSessionToken(token);
         if (data.user.role === 'Super Admin' || data.user.role === 'Farm Owner') await refreshUsers(token);
@@ -76,6 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success || !data.user?.id || !data.token) return { success: false, error: data.error || 'INVALID_CREDENTIALS' };
       if (data.user.customRoleId) return { success: false, error: 'SERVER_CUSTOM_ROLE_NOT_SUPPORTED' };
+      setLastAuthenticatedUserId(String(data.user.id));
       setStoredSessionToken(data.token); setCurrentUser(data.user); setSessionToken(data.token);
       if (data.user.role === 'Super Admin' || data.user.role === 'Farm Owner') await refreshUsers(data.token);
       return { success: true };
@@ -98,6 +111,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const token = sessionToken;
     if (token) fetch('/api/auth/logout', { method: 'POST', headers: sessionHeaders(token) }).catch(() => {});
     setCurrentUser(null); setSessionToken(null); setUsersList([]); setStoredSessionToken(null);
+    // Intentionally keep LAST_USER_STORAGE_KEY so an unsynced durable outbox remains owned by the correct account after restart/login.
   };
 
   const hasPermission = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean => {
