@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FeedingRecord, InventoryItem, Pond } from '../types';
-import { validateFeedingSubmission } from '../utils/feedingEngine';
+import { inventoryQuantityForFeedKg, validateFeedingSubmission } from '../utils/feedingEngine';
 
 const fresh = new Date().toISOString();
 
@@ -37,6 +37,11 @@ describe('feeding inventory safety', () => {
     const result = validateFeedingSubmission(record, pond, [feed({ expiryDate: '2020-01-01', status: 'Adequate' })]);
     expect(result.success).toBe(false);
     expect(result.error).toContain('منقضی');
+  });
+
+  it('returns zero inventory conversion for expired feed so server invariants cannot match a forged feeding tx', () => {
+    expect(inventoryQuantityForFeedKg(feed({ status: 'Expired' }), 1)).toBe(0);
+    expect(inventoryQuantityForFeedKg(feed({ expiryDate: '2020-01-01', status: 'Adequate' }), 1)).toBe(0);
   });
 
   it('accepts a non-expired feed item when all other feeding safeguards pass', () => {
