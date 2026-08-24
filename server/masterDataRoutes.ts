@@ -2,6 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, updateHallMaster, updatePondMetadata, updateSpeciesMaster } from './masterData';
 import { registerFxAccountingRoutes } from './fxAccountingRoutes';
 import { registerHrAttendanceRoutes } from './hrAttendanceRoutes';
+import { registerMedicineLedgerRoutes } from './medicineLedgerRoutes';
 import { registerModuleSettingsRoutes } from './moduleSettingsRoutes';
 import { registerWaterTelemetryRoutes } from './waterTelemetryRoutes';
 import { StateConflictError, StoredAuditLog } from './storage';
@@ -23,10 +24,7 @@ interface MasterDataStore {
 }
 
 /**
- * This module is an integration adapter around the server's existing auth/audit middleware.
- * Keep those dependency signatures intentionally structural so the adapter does not create
- * a second incompatible AuthenticatedRequest type. Runtime authorization is still enforced
- * by the canonical middleware supplied by server.ts.
+ * Integration adapter around the server's canonical auth/audit middleware.
  */
 interface Dependencies {
   requireAuth: any;
@@ -53,6 +51,7 @@ export function registerMasterDataRoutes(app: Express, deps: Dependencies): void
   registerWaterTelemetryRoutes(app, deps);
   registerHrAttendanceRoutes(app, deps);
   registerFxAccountingRoutes(app, deps);
+  registerMedicineLedgerRoutes(app, deps);
 
   const commit = (
     req: AuthenticatedRequest,
