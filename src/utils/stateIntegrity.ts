@@ -1,6 +1,7 @@
 import { assessWaterSafetyForFeeding } from './sensorValidation';
 import { inventoryQuantityForFeedKg, normalizeFeedAmountToKg } from './feedingEngine';
 import { saleLotMatchesSku, validateSaleFulfillmentConservation } from './salesEngine';
+import { validateManualPondSnapshotMutation } from './pondSnapshotValidation';
 
 export const STATE_COLLECTIONS = [
   'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
@@ -15,6 +16,7 @@ const finiteNonNegative = (value: unknown): boolean => typeof value === 'number'
 const collection = (state: State, key: string): any[] => Array.isArray(state[key]) ? state[key] : [];
 
 export const MODULE_COLLECTIONS: Record<string, string[]> = {
+  ponds: ['ponds', 'halls', 'auditLogs'],
   feeding: ['feedingRecords', 'ponds', 'halls', 'inventory', 'inventoryTxs', 'auditLogs'],
   biometrics: ['biometricSessions', 'ponds', 'halls', 'auditLogs'],
   water_quality: ['waterLogs', 'ponds', 'halls', 'auditLogs'],
@@ -177,6 +179,7 @@ function validatePondMutation(previous: State, next: State, operation: { module?
   const changed = collection(next, 'ponds').filter((pond) => pond?.id && (!beforeById.has(pond.id) || !sameValue(beforeById.get(pond.id), pond)));
   if (!changed.length) return { ok: true };
   if (module === 'settings' || module === 'backup') return { ok: true };
+  if (module === 'ponds') return validateManualPondSnapshotMutation(previous, next, operation);
   if (changed.some((pond) => !beforeById.has(pond.id))) return { ok: false, error: 'POND_CREATION_REQUIRES_REGISTERED_WORKFLOW' };
 
   const mutableFields = new Set([
