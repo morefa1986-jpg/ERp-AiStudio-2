@@ -95,6 +95,12 @@ export function validateFarmStructureMutation(previous: State, next: State, oper
       continue;
     }
 
+    // A stocked pond cannot be reassigned to another hall/species through
+    // settings; a biological transfer workflow is required instead.
+    if (before.fishCount > 0 && (before.hallId !== pond.hallId || before.speciesId !== pond.speciesId)) {
+      return { ok: false, error: 'STOCKED_POND_REASSIGNMENT_FORBIDDEN' };
+    }
+
     // Structure settings may not rewrite biological inventory, safety telemetry,
     // feeding decisions or operational ledgers. Those have dedicated workflows.
     const protectedFields = [
