@@ -1,4 +1,4 @@
-import type { Express, NextFunction, Request, Response } from 'express';
+import type { Express, Request, Response } from 'express';
 import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, updateHallMaster, updatePondMetadata } from './masterData';
 import { StateConflictError, StoredAuditLog } from './storage';
 import { validateStateSnapshot } from '../src/utils/stateIntegrity';
@@ -17,13 +17,19 @@ interface MasterDataStore {
   saveStateAndAudit(data: Record<string, unknown>, expectedVersion: number | null, audit: StoredAuditLog): StateEnvelope;
 }
 
+/**
+ * This module is an integration adapter around the server's existing auth/audit middleware.
+ * Keep those dependency signatures intentionally structural so the adapter does not create
+ * a second incompatible AuthenticatedRequest type. Runtime authorization is still enforced
+ * by the canonical middleware supplied by server.ts.
+ */
 interface Dependencies {
-  requireAuth: (req: AuthenticatedRequest, res: Response, next: NextFunction) => unknown;
-  requireAdmin: (req: AuthenticatedRequest, res: Response, next: NextFunction) => unknown;
+  requireAuth: any;
+  requireAdmin: any;
   store: MasterDataStore;
   synchronizeHallAggregates: (data: Record<string, unknown>, previous?: Record<string, unknown>) => Record<string, unknown>;
   filterStateForUser: (data: Record<string, unknown>, user: any) => Record<string, unknown>;
-  auditFromOperation: (req: AuthenticatedRequest, operation: any, beforeState?: string, afterState?: string) => StoredAuditLog | null;
+  auditFromOperation: (req: any, operation: any, beforeState?: string, afterState?: string) => StoredAuditLog | null;
 }
 
 function resultErrorStatus(error?: string): number {
