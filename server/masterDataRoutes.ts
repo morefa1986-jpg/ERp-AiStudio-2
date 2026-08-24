@@ -13,7 +13,7 @@ interface StateEnvelope {
 }
 
 interface MasterDataStore {
-  getState(): StateEnvelope | undefined;
+  getState(): StateEnvelope | null | undefined;
   saveStateAndAudit(data: Record<string, unknown>, expectedVersion: number | null, audit: StoredAuditLog): StateEnvelope;
 }
 
