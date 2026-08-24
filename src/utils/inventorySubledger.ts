@@ -1,11 +1,13 @@
 import type { InventoryItem, InventoryTransaction } from '../types';
 
+export type InventoryIssueReferenceType = 'Maintenance' | 'Treatment' | 'Medicine' | 'Laboratory' | 'Adjustment';
+
 export interface InventoryIssueRequest {
   itemId: string;
   quantity: number;
   unit: InventoryItem['unit'];
   reason: string;
-  referenceType: InventoryTransaction['referenceType'];
+  referenceType: InventoryIssueReferenceType;
   referenceId: string;
   performedBy: string;
   timestamp?: string;
@@ -45,16 +47,18 @@ export function applyInventoryIssues(inventory: InventoryItem[], requests: Inven
       id: `invtx_${request.referenceType.toLowerCase()}_${request.referenceId}_${item.id}_${transactions.length}`.replace(/[^a-zA-Z0-9_:-]/g, '_'),
       itemId: item.id,
       itemName: item.name,
-      transactionType: 'Consumption',
+      sku: item.sku,
+      type: 'Consumption (مصرف روزانه)',
       quantityChange: -request.quantity,
-      unit: item.unit,
-      reason: request.reason,
-      referenceType: request.referenceType,
-      referenceId: request.referenceId,
       resultingQuantity: item.quantity,
-      performedBy: request.performedBy,
+      unit: item.unit,
+      unitPrice: item.purchasePricePerUnit,
+      totalValue: Number((request.quantity * item.purchasePricePerUnit).toFixed(2)),
+      referenceDoc: `${request.referenceType}:${request.referenceId}`,
+      operator: request.performedBy,
       timestamp: request.timestamp || new Date().toISOString(),
-    } as InventoryTransaction);
+      notes: request.reason,
+    });
   }
   return { ok: true, inventory: next, transactions };
 }
