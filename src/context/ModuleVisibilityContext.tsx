@@ -1,35 +1,13 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { useAuth } from './AuthContext';
+import { getStoredSessionToken, useAuth } from './AuthContext';
+import {
+  defaultModuleVisibility,
+  normalizeModuleVisibility,
+  SharedModuleVisibilityId,
+  SharedModuleVisibilityMap,
+} from '../utils/moduleVisibilityPolicy';
 
-export type ModuleVisibilityId =
-  | 'dashboard'
-  | 'farmHalls'
-  | 'ponds'
-  | 'feeding'
-  | 'biometrics'
-  | 'waterQuality'
-  | 'mortality'
-  | 'treatments'
-  | 'transfers'
-  | 'hatchery'
-  | 'nursery'
-  | 'feedFactory'
-  | 'warehouse'
-  | 'laboratory'
-  | 'processing'
-  | 'coldStorage'
-  | 'crm'
-  | 'sales'
-  | 'accounting'
-  | 'hr'
-  | 'aiAssistant'
-  | 'mediaStudio'
-  | 'maintenance'
-  | 'reports'
-  | 'securityAudit'
-  | 'backup'
-  | 'platformHub'
-  | 'adminSettings';
+export type ModuleVisibilityId = SharedModuleVisibilityId;
 
 export type ModuleSection = 'breeding' | 'hatchery' | 'commercial' | 'system';
 
@@ -73,29 +51,21 @@ export const MODULE_CATALOG: ModuleCatalogItem[] = [
   { id: 'adminSettings', titleFa: 'تنظیمات ادمین و کنترل ماژول‌ها', titleEn: 'Admin Settings', descriptionFa: 'مرکز کنترل کل ERP و روشن/خاموش کردن هر بخش', section: 'system', locked: true },
 ];
 
+// Cache only. SQLite on the ERP server is the authoritative source.
 export const MODULE_VISIBILITY_STORAGE_KEY = 'fathi_erp_module_visibility_v1';
+type VisibilityMap = SharedModuleVisibilityMap;
 
-type VisibilityMap = Record<ModuleVisibilityId, boolean>;
-
-function defaults(): VisibilityMap {
-  return Object.fromEntries(MODULE_CATALOG.map((item) => [item.id, true])) as VisibilityMap;
+function loadCache(): VisibilityMap {
+  try {
+    if (typeof window === 'undefined') return defaultModuleVisibility();
+    const raw = window.localStorage.getItem(MODULE_VISIBILITY_STORAGE_KEY);
+    return raw ? normalizeModuleVisibility(JSON.parse(raw)) : defaultModuleVisibility();
+  } catch { return defaultModuleVisibility(); }
 }
 
-function loadStored(): VisibilityMap {
-  const base = defaults();
-  try {
-    if (typeof window === 'undefined') return base;
-    const raw = window.localStorage.getItem(MODULE_VISIBILITY_STORAGE_KEY);
-    if (!raw) return base;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    for (const item of MODULE_CATALOG) {
-      if (item.locked) base[item.id] = true;
-      else if (typeof parsed[item.id] === 'boolean') base[item.id] = parsed[item.id] as boolean;
-    }
-  } catch {
-    return base;
-  }
-  return base;
+function cacheVisibility(visibility: VisibilityMap): void {
+  try { if (typeof window !== 'undefined') window.localStorage.setItem(MODULE_VISIBILITY_STORAGE_KEY, JSON.stringify(visibility)); }
+  catch { /* cache is optional */ }
 }
 
 interface ModuleVisibilityContextValue {
@@ -107,44 +77,81 @@ interface ModuleVisibilityContextValue {
   disableOptionalModules: () => void;
   resetModuleVisibility: () => void;
   enabledCount: number;
+  serverShared: boolean;
+  syncing: boolean;
+  lastError?: string;
 }
 
 const ModuleVisibilityContext = createContext<ModuleVisibilityContextValue | null>(null);
 
 export const ModuleVisibilityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser } = useAuth();
-  const [visibility, setVisibility] = useState<VisibilityMap>(loadStored);
+  const [visibility, setVisibility] = useState<VisibilityMap>(loadCache);
+  const [serverShared, setServerShared] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [lastError, setLastError] = useState<string>();
   const canManageModules = currentUser?.role === 'Super Admin' || currentUser?.role === 'Farm Owner';
 
-  useEffect(() => {
+  const loadServerVisibility = async () => {
+    const token = getStoredSessionToken();
+    if (!token) return;
+    setSyncing(true);
     try {
-      window.localStorage.setItem(MODULE_VISIBILITY_STORAGE_KEY, JSON.stringify(visibility));
-    } catch {
-      // The ERP remains usable if the host browser blocks local persistence.
-    }
-  }, [visibility]);
+      const response = await fetch('/api/admin/module-visibility', { headers: { Authorization: `Bearer ${token}` } });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) throw new Error(payload.error || 'MODULE_VISIBILITY_LOAD_FAILED');
+      const next = normalizeModuleVisibility(payload.visibility);
+      setVisibility(next); cacheVisibility(next); setServerShared(true); setLastError(undefined);
+    } catch (error) {
+      setServerShared(false);
+      setLastError(error instanceof Error ? error.message : 'MODULE_VISIBILITY_LOAD_FAILED');
+    } finally { setSyncing(false); }
+  };
+
+  useEffect(() => {
+    if (!currentUser) { setServerShared(false); return; }
+    void loadServerVisibility();
+  }, [currentUser?.id]);
+
+  const persist = async (next: VisibilityMap, previous: VisibilityMap) => {
+    const token = getStoredSessionToken();
+    if (!token) { setVisibility(previous); setLastError('AUTH_REQUIRED'); return; }
+    setSyncing(true);
+    try {
+      const response = await fetch('/api/admin/module-visibility', {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visibility: next }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.success) throw new Error(payload.error || 'MODULE_VISIBILITY_SAVE_FAILED');
+      const authoritative = normalizeModuleVisibility(payload.visibility);
+      setVisibility(authoritative); cacheVisibility(authoritative); setServerShared(true); setLastError(undefined);
+    } catch (error) {
+      setVisibility(previous);
+      setLastError(error instanceof Error ? error.message : 'MODULE_VISIBILITY_SAVE_FAILED');
+      void loadServerVisibility();
+    } finally { setSyncing(false); }
+  };
+
+  const commit = (next: VisibilityMap) => {
+    if (!canManageModules || syncing) return;
+    const previous = visibility;
+    const normalized = normalizeModuleVisibility(next);
+    setVisibility(normalized);
+    void persist(normalized, previous);
+  };
 
   const setModuleEnabled = (id: ModuleVisibilityId, enabled: boolean) => {
     if (!canManageModules) return;
     const item = MODULE_CATALOG.find((candidate) => candidate.id === id);
     if (!item || item.locked) return;
-    setVisibility((previous) => ({ ...previous, [id]: enabled }));
+    commit({ ...visibility, [id]: enabled });
   };
 
-  const enableAllModules = () => {
-    if (!canManageModules) return;
-    setVisibility(defaults());
-  };
-
-  const disableOptionalModules = () => {
-    if (!canManageModules) return;
-    setVisibility(Object.fromEntries(MODULE_CATALOG.map((item) => [item.id, Boolean(item.locked)])) as VisibilityMap);
-  };
-
-  const resetModuleVisibility = () => {
-    if (!canManageModules) return;
-    setVisibility(defaults());
-  };
+  const enableAllModules = () => commit(defaultModuleVisibility());
+  const disableOptionalModules = () => commit(Object.fromEntries(MODULE_CATALOG.map((item) => [item.id, Boolean(item.locked)])) as VisibilityMap);
+  const resetModuleVisibility = () => commit(defaultModuleVisibility());
 
   const value = useMemo<ModuleVisibilityContextValue>(() => ({
     visibility,
@@ -159,7 +166,10 @@ export const ModuleVisibilityProvider: React.FC<{ children: React.ReactNode }> =
     disableOptionalModules,
     resetModuleVisibility,
     enabledCount: MODULE_CATALOG.filter((item) => item.locked || visibility[item.id] !== false).length,
-  }), [visibility, canManageModules]);
+    serverShared,
+    syncing,
+    lastError,
+  }), [visibility, canManageModules, serverShared, syncing, lastError]);
 
   return <ModuleVisibilityContext.Provider value={value}>{children}</ModuleVisibilityContext.Provider>;
 };
