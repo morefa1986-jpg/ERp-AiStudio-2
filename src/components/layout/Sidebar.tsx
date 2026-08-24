@@ -3,6 +3,7 @@ import { useI18n } from '../../i18n';
 import { useAuth } from '../../context/AuthContext';
 import { useFarm } from '../../context/FarmContext';
 import { ModuleVisibilityId, useModuleVisibility } from '../../context/ModuleVisibilityContext';
+import { maintenanceRoleAllows } from '../../utils/maintenanceAccess';
 import {
   LayoutDashboard,
   Building2,
@@ -160,7 +161,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {sections.map((sec, secIdx) => {
             const visibleItems = sec.items.filter((item) =>
               isModuleEnabled(item.id)
-              && hasPermission(item.module, 'view')
+              && (item.id === 'maintenance' ? maintenanceRoleAllows(String(currentUser?.role || ''), 'view') : hasPermission(item.module, 'view'))
               && (!item.adminOnly || canManageModules)
             );
             if (visibleItems.length === 0) return null;
