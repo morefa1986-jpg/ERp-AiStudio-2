@@ -26,6 +26,8 @@ describe('atomic processing conservation', () => {
     expect(result.batch?.outputLotIds).toHaveLength(3);
     expect(result.coldStorage?.reduce((sum, lot) => sum + lot.weightKg, 0)).toBe(90);
     expect(result.coldStorage?.every((lot) => lot.expiryDate === '2026-12-31')).toBe(true);
+    expect(result.coldStorage?.every((lot) => lot.processingBatchId === result.batch?.id)).toBe(true);
+    expect(result.coldStorage?.every((lot) => result.batch?.outputLotIds?.includes(lot.id))).toBe(true);
     expect(result.coldStorage?.some((lot) => lot.sku?.startsWith('CAV-PROC-001'))).toBe(true);
   });
 
