@@ -2,6 +2,8 @@ import React from 'react';
 import { useI18n } from '../../i18n';
 import { useAuth } from '../../context/AuthContext';
 import { useFarm } from '../../context/FarmContext';
+import { ModuleVisibilityId, useModuleVisibility } from '../../context/ModuleVisibilityContext';
+import { maintenanceRoleAllows } from '../../utils/maintenanceAccess';
 import {
   LayoutDashboard,
   Building2,
@@ -30,7 +32,7 @@ import {
   ShieldCheck,
   Database,
   Smartphone,
-  ChevronDown,
+  Settings2,
 } from 'lucide-react';
 import { PermissionModule } from '../../types';
 
@@ -42,12 +44,14 @@ interface SidebarProps {
 }
 
 interface NavItem {
-  id: string;
-  labelKey: string;
+  id: ModuleVisibilityId;
+  labelKey?: string;
+  customLabel?: string;
   icon: React.ElementType;
   module: PermissionModule;
   badge?: number | string;
   badgeColor?: string;
+  adminOnly?: boolean;
 }
 
 interface NavSection {
@@ -63,6 +67,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { t, dir } = useI18n();
   const { hasPermission, currentUser } = useAuth();
+  const { isModuleEnabled, canManageModules } = useModuleVisibility();
   const { ponds, proformas, coldStorage, syncStatus } = useFarm();
 
   const stoppedPondsCount = ponds.filter((p) => p.feedingStatus === 'STOPPED').length;
@@ -136,74 +141,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'securityAudit', labelKey: 'nav.securityAudit', icon: ShieldCheck, module: 'users' },
         { id: 'backup', labelKey: 'nav.backup', icon: Database, module: 'backup' },
         { id: 'platformHub', labelKey: 'nav.platformHub', icon: Smartphone, module: 'settings' },
+        { id: 'adminSettings', customLabel: 'تنظیمات ادمین', icon: Settings2, module: 'settings', adminOnly: true, badge: 'ADMIN', badgeColor: 'bg-amber-500/10 text-amber-300 border-amber-500/30' },
       ],
     },
   ];
 
   return (
     <>
-      {/* Mobile Backdrop */}
       {isOpenMobile && (
-        <div
-          onClick={onCloseMobile}
-          className="fixed inset-0 bg-black/80 z-40 lg:hidden backdrop-blur-sm"
-        />
+        <div onClick={onCloseMobile} className="fixed inset-0 bg-black/80 z-40 lg:hidden backdrop-blur-sm" />
       )}
 
       <aside
-        className={`fixed lg:sticky top-[64px] bottom-0 ${
-          dir === 'rtl' ? 'right-0' : 'left-0'
-        } z-40 w-[245px] flex-shrink-0 bg-[#121214] border-r border-l border-[#1F1F22] text-[#A1A1AA] flex flex-col h-[calc(100vh-64px)] transition-transform duration-300 ease-in-out ${
-          isOpenMobile
-            ? 'translate-x-0'
-            : dir === 'rtl'
-            ? 'translate-x-full lg:translate-x-0'
-            : '-translate-x-full lg:translate-x-0'
+        className={`fixed lg:sticky top-[64px] bottom-0 ${dir === 'rtl' ? 'right-0' : 'left-0'} z-40 w-[245px] flex-shrink-0 bg-[#121214] border-r border-l border-[#1F1F22] text-[#A1A1AA] flex flex-col h-[calc(100vh-64px)] transition-transform duration-300 ease-in-out ${
+          isOpenMobile ? 'translate-x-0' : dir === 'rtl' ? 'translate-x-full lg:translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        {/* Navigation items list */}
         <div className="flex-1 overflow-y-auto px-3.5 py-4 space-y-5 scrollbar-thin">
           {sections.map((sec, secIdx) => {
-            const visibleItems = sec.items.filter((item) => hasPermission(item.module, 'view'));
+            const visibleItems = sec.items.filter((item) =>
+              isModuleEnabled(item.id)
+              && (item.id === 'maintenance' ? maintenanceRoleAllows(String(currentUser?.role || ''), 'view') : hasPermission(item.module, 'view'))
+              && (!item.adminOnly || canManageModules)
+            );
             if (visibleItems.length === 0) return null;
 
             return (
               <div key={secIdx}>
-                <h3 className="px-3 text-[10px] uppercase tracking-widest font-semibold text-[#71717A] mb-1.5">
-                  {t(sec.titleKey)}
-                </h3>
+                <h3 className="px-3 text-[10px] uppercase tracking-widest font-semibold text-[#71717A] mb-1.5">{t(sec.titleKey)}</h3>
                 <nav className="space-y-0.5">
                   {visibleItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = currentView === item.id;
-
                     return (
                       <button
                         key={item.id}
-                        onClick={() => {
-                          onSelectNav(item.id);
-                          onCloseMobile();
-                        }}
+                        onClick={() => { onSelectNav(item.id); onCloseMobile(); }}
                         className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
-                          isActive
-                            ? 'bg-[#1F1F22] text-[#D4AF37] border border-[#D4AF37]/30 font-semibold shadow-sm'
-                            : 'text-[#A1A1AA] hover:bg-[#1F1F22] hover:text-white'
+                          isActive ? 'bg-[#1F1F22] text-[#D4AF37] border border-[#D4AF37]/30 font-semibold shadow-sm' : 'text-[#A1A1AA] hover:bg-[#1F1F22] hover:text-white'
                         }`}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
                           <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#D4AF37]' : 'text-[#71717A]'}`} />
-                          <span className="truncate">{t(item.labelKey)}</span>
+                          <span className="truncate">{item.customLabel || (item.labelKey ? t(item.labelKey) : item.id)}</span>
                         </div>
-
-                        {item.badge && (
-                          <span
-                            className={`text-[9px] px-1.5 py-0.5 rounded border font-mono font-bold ${
-                              item.badgeColor || 'bg-[#18181B] text-[#A1A1AA] border-[#27272A]'
-                            }`}
-                          >
-                            {item.badge}
-                          </span>
-                        )}
+                        {item.badge && <span className={`text-[9px] px-1.5 py-0.5 rounded border font-mono font-bold ${item.badgeColor || 'bg-[#18181B] text-[#A1A1AA] border-[#27272A]'}`}>{item.badge}</span>}
                       </button>
                     );
                   })}
@@ -213,18 +195,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </div>
 
-        {/* Footer info widget */}
         <div className="p-3 border-t border-[#1F1F22] mt-auto">
           <div className="bg-[#18181B] border border-[#27272A] rounded-lg p-3">
             <div className="text-[10px] text-[#71717A] uppercase tracking-widest mb-1">{t('auth.sessionActive')}</div>
-            <div className="text-xs font-semibold text-white truncate">
-              {currentUser?.fullName || '—'}
-            </div>
+            <div className="text-xs font-semibold text-white truncate">{currentUser?.fullName || '—'}</div>
             <div className="text-[10px] text-[#52525B] font-mono mt-0.5 flex items-center justify-between">
-              <span>Enterprise v6.0</span>
-              <span className={syncStatus.status === 'ONLINE' ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
-                ● {syncStatus.status === 'ONLINE' ? t('online') : t('offline')}
-              </span>
+              <span>Enterprise v6.1</span>
+              <span className={syncStatus.status === 'ONLINE' ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>● {syncStatus.status === 'ONLINE' ? t('online') : t('offline')}</span>
             </div>
           </div>
         </div>

@@ -7,9 +7,18 @@ import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { DUMMY_PASSWORD_HASH, hashPasswordServer, verifyPasswordServer } from './server/auth';
+import { dahirGatewayStatus, fetchDahirTelemetryServerSide } from './server/dahirGateway';
 import { resolveServerListenConfig } from './server/lanConfig';
+import { registerMasterDataRoutes } from './server/masterDataRoutes';
 import { constantTimeEqual, isSessionExpired, resolveSessionPolicy } from './server/sessionPolicy';
+import {
+  filterRowsByUserScope,
+  mergeSubmittedRowsWithinScope,
+  validateRequestedUserScope,
+  validateSubmittedUserScope,
+} from './server/stateScope';
 import { defaultDatabasePath, SqliteERPStore, StateConflictError, StoredAuditLog, StoredSocialConnection, StoredSocialDraft, StoredUser } from './server/storage';
+import { UserDataScope, UserScopeStore } from './server/userScope';
 import { MODULE_COLLECTIONS, STATE_COLLECTIONS, validateMutationScope, validateStateMutation, validateStateSnapshot } from './src/utils/stateIntegrity';
 
 dotenv.config();
@@ -25,7 +34,9 @@ const LOGIN_MAX_FAILURES = 5;
 const LAN_MODE = listenConfig.lanMode;
 const LAN_TLS_ENABLED = listenConfig.tlsEnabled;
 const BIND_HOST = listenConfig.host;
-const store = new SqliteERPStore(defaultDatabasePath());
+const databasePath = defaultDatabasePath();
+const store = new SqliteERPStore(databasePath);
+const userScopeStore = new UserScopeStore(databasePath);
 
 app.disable('x-powered-by');
 app.set('trust proxy', false);
@@ -40,7 +51,7 @@ app.use((_req, res, next) => {
 });
 app.use(express.json({ limit: '10mb' }));
 
-type ServerUser = StoredUser;
+type ServerUser = StoredUser & UserDataScope;
 
 interface ActiveSession {
   token: string;
@@ -73,6 +84,10 @@ const VALID_STATE_MODULES = new Set([
 ]);
 const VALID_STATE_ACTIONS = new Set(['view', 'create', 'edit', 'delete', 'approve', 'export', 'print', 'manage']);
 
+function withUserScope(user: StoredUser): ServerUser {
+  return { ...user, ...userScopeStore.get(user.id) };
+}
+
 function sanitizeUser(user: ServerUser) {
   const { passwordHash: _passwordHash, ...safeUser } = user;
   return safeUser;
@@ -94,13 +109,13 @@ function resolveSession(token: string | null): { session: ActiveSession; user: S
     SESSIONS.delete(token);
     return null;
   }
-  const user = store.getUserById(session.userId);
-  if (!user?.isActive) {
+  const storedUser = store.getUserById(session.userId);
+  if (!storedUser?.isActive) {
     SESSIONS.delete(token);
     return null;
   }
   session.lastActivityAt = now;
-  return { session, user };
+  return { session, user: withUserScope(storedUser) };
 }
 
 function revokeUserSessions(userId: string, exceptToken?: string): void {
@@ -227,27 +242,32 @@ function canViewCollection(role: string, collection: string): boolean {
   return (COLLECTION_VIEW_MODULES[collection] || []).some((module) => roleAllowsServer(role, module, 'view'));
 }
 
-function filterStateForUser(data: Record<string, unknown>, role: string): Record<string, unknown> {
+function filterStateForUser(data: Record<string, unknown>, user: ServerUser | undefined): Record<string, unknown> {
+  const role = user?.role || '';
   const filtered: Record<string, unknown> = Object.fromEntries(STATE_COLLECTIONS.map((collection) => [collection, data[collection]]));
   for (const collection of STATE_COLLECTIONS) {
-    if (!canViewCollection(role, collection)) filtered[collection] = [];
+    if (!canViewCollection(role, collection)) {
+      filtered[collection] = [];
+      continue;
+    }
+    if (user) filtered[collection] = filterRowsByUserScope(collection, data[collection], data, user);
   }
   return filtered;
 }
 
-function mergeStateForOperation(previous: Record<string, unknown> | undefined, submitted: Record<string, unknown>, operation: { module?: string; action?: string }, role: string): Record<string, unknown> {
+function mergeStateForOperation(previous: Record<string, unknown> | undefined, submitted: Record<string, unknown>, operation: { module?: string; action?: string }, user: ServerUser): Record<string, unknown> {
   if (!previous) return submitted;
   if (operation.module === 'backup' && operation.action === 'approve') {
-    // The SQL audit table is authoritative. Never let a restored document
-    // replace it with client-provided or stale audit rows.
     return { ...submitted, auditLogs: previous.auditLogs };
   }
   const allowed = new Set(MODULE_COLLECTIONS[operation.module || ''] || []);
   const merged: Record<string, unknown> = Object.fromEntries(STATE_COLLECTIONS.map((collection) => [collection, previous[collection]]));
   for (const collection of allowed) {
     if (collection === 'auditLogs') continue;
-    if (!canViewCollection(role, collection)) continue;
-    if (Array.isArray(submitted[collection])) merged[collection] = submitted[collection];
+    if (!canViewCollection(user.role, collection)) continue;
+    if (Array.isArray(submitted[collection])) {
+      merged[collection] = mergeSubmittedRowsWithinScope(collection, previous[collection], submitted[collection], previous, user);
+    }
   }
   return merged;
 }
@@ -362,9 +382,10 @@ app.post('/api/auth/bootstrap', (req, res) => {
     const user: ServerUser = {
       id: `usr_${crypto.randomUUID()}`, username, fullName, email, role: 'Super Admin',
       passwordHash: hashPasswordServer(password), isActive: true, preferredLanguage: isSupportedLanguage(req.body?.language) ? req.body.language : 'fa',
-      createdAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(), hallScope: [], pondScope: [],
     };
     if (!store.insertUserIfEmpty(user)) return res.status(409).json({ success: false, error: 'BOOTSTRAP_ALREADY_COMPLETED' });
+    userScopeStore.set(user.id, { hallScope: [], pondScope: [] });
     if (lanMode) store.clearLoginFailures(throttleKey);
     store.appendAuditLog({
       id: `audit_${crypto.randomUUID()}`, timestamp: new Date().toISOString(), userId: user.id, userRole: user.role,
@@ -386,13 +407,14 @@ app.post('/api/auth/login', (req, res) => {
   const key = loginKey(req, username);
   const usernameKey = loginUsernameKey(username);
   if (store.isLoginBlocked(key, Date.now(), LOGIN_WINDOW_MS, LOGIN_MAX_FAILURES) || store.isLoginBlocked(usernameKey, Date.now(), LOGIN_WINDOW_MS, LOGIN_MAX_FAILURES)) return res.status(429).json({ success: false, error: 'LOGIN_RATE_LIMITED' });
-  const user = store.getUserByUsername(username);
-  const passwordMatches = verifyPasswordServer(password, user?.passwordHash || DUMMY_PASSWORD_HASH);
-  if (!user || !user.isActive || !passwordMatches) {
+  const storedUser = store.getUserByUsername(username);
+  const passwordMatches = verifyPasswordServer(password, storedUser?.passwordHash || DUMMY_PASSWORD_HASH);
+  if (!storedUser || !storedUser.isActive || !passwordMatches) {
     store.recordLoginFailure(key, Date.now(), LOGIN_WINDOW_MS);
     store.recordLoginFailure(usernameKey, Date.now(), LOGIN_WINDOW_MS);
     return res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS' });
   }
+  const user = withUserScope(storedUser);
   store.clearLoginFailures(key);
   store.clearLoginFailures(usernameKey);
 
@@ -434,7 +456,7 @@ app.get('/api/auth/session', requireAuth, (req: AuthenticatedRequest, res) => {
 });
 
 app.get('/api/auth/users', requireAuth, requireAdmin, (_req, res) => {
-  return res.json({ success: true, users: store.listUsers().map(sanitizeUser) });
+  return res.json({ success: true, users: store.listUsers().map((user) => sanitizeUser(withUserScope(user))) });
 });
 
 app.post('/api/auth/users', requireAuth, requireAdmin, (req: AuthenticatedRequest, res) => {
@@ -446,14 +468,17 @@ app.post('/api/auth/users', requireAuth, requireAdmin, (req: AuthenticatedReques
   if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(username) || password.length < 12 || !fullName || !email.includes('@') || !VALID_SERVER_ROLES.has(role)) {
     return res.status(400).json({ success: false, error: 'USER_INPUT_INVALID' });
   }
+  const scope = validateRequestedUserScope(store.getState()?.data, role, req.body?.hallScope, req.body?.pondScope);
+  if (!scope.ok) return res.status(400).json({ success: false, error: scope.error });
   try {
     const user: ServerUser = {
       id: `usr_${crypto.randomUUID()}`, username, fullName, email, role,
       passwordHash: hashPasswordServer(password), isActive: true,
       preferredLanguage: isSupportedLanguage(req.body?.preferredLanguage) ? req.body.preferredLanguage : 'fa',
-      createdAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(), hallScope: scope.hallScope, pondScope: scope.pondScope,
     };
     store.insertUser(user);
+    userScopeStore.set(user.id, scope);
     appendAuditFromOperation(req, { module: 'users', action: 'create', entity: 'User', entityId: user.id }, undefined, JSON.stringify(sanitizeUser(user)));
     return res.status(201).json({ success: true, user: sanitizeUser(user) });
   } catch {
@@ -462,13 +487,20 @@ app.post('/api/auth/users', requireAuth, requireAdmin, (req: AuthenticatedReques
 });
 
 app.patch('/api/auth/users/:id', requireAuth, requireAdmin, (req: AuthenticatedRequest, res) => {
-  const user = store.getUserById(req.params.id);
-  if (!user) return res.status(404).json({ success: false, error: 'USER_NOT_FOUND' });
+  const storedUser = store.getUserById(req.params.id);
+  if (!storedUser) return res.status(404).json({ success: false, error: 'USER_NOT_FOUND' });
+  let user = withUserScope(storedUser);
   const beforeState = JSON.stringify(sanitizeUser(user));
   if (typeof req.body?.isActive === 'boolean' && user.id === req.user?.id && !req.body.isActive) {
     return res.status(400).json({ success: false, error: 'CANNOT_DISABLE_CURRENT_USER' });
   }
   let revokeExistingSessions = false;
+  if (typeof req.body?.role === 'string') {
+    const nextRole = req.body.role.trim();
+    if (!VALID_SERVER_ROLES.has(nextRole)) return res.status(400).json({ success: false, error: 'USER_ROLE_INVALID' });
+    if (nextRole !== user.role) revokeExistingSessions = true;
+    user.role = nextRole;
+  }
   if (typeof req.body?.isActive === 'boolean') {
     user.isActive = req.body.isActive;
     if (!user.isActive) revokeExistingSessions = true;
@@ -478,7 +510,16 @@ app.patch('/api/auth/users/:id', requireAuth, requireAdmin, (req: AuthenticatedR
     user.passwordHash = hashPasswordServer(req.body.password);
     revokeExistingSessions = true;
   }
+  const scope = validateRequestedUserScope(
+    store.getState()?.data,
+    user.role,
+    req.body?.hallScope !== undefined ? req.body.hallScope : user.hallScope,
+    req.body?.pondScope !== undefined ? req.body.pondScope : user.pondScope,
+  );
+  if (!scope.ok) return res.status(400).json({ success: false, error: scope.error });
+  user = { ...user, hallScope: scope.hallScope, pondScope: scope.pondScope };
   store.updateUser(user);
+  userScopeStore.set(user.id, scope);
   if (revokeExistingSessions) {
     const keepCurrentToken = user.id === req.user?.id && user.isActive ? req.session?.token : undefined;
     revokeUserSessions(user.id, keepCurrentToken);
@@ -556,11 +597,27 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
+app.get('/api/dahir/status', requireAuth, requireModuleAction('water_quality', 'view'), (_req, res) => {
+  return res.json({ success: true, gateway: dahirGatewayStatus() });
+});
+
+app.get('/api/dahir/telemetry/:deviceId', requireAuth, requireModuleAction('water_quality', 'view'), async (req: AuthenticatedRequest, res) => {
+  const keys = typeof req.query.keys === 'string' ? req.query.keys.split(',').map((key) => key.trim()).filter(Boolean) : [];
+  try {
+    const points = await fetchDahirTelemetryServerSide(req.params.deviceId, keys);
+    return res.json({ success: true, points, gateway: dahirGatewayStatus() });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'DAHIR_GATEWAY_FAILED';
+    const status = code === 'DAHIR_TIMEOUT' ? 504 : code === 'DAHIR_NOT_CONFIGURED' || code === 'DAHIR_SERVER_CREDENTIAL_REQUIRED' ? 503 : code === 'DAHIR_DEVICE_INVALID' || code === 'DAHIR_KEYS_INVALID' ? 400 : 502;
+    return res.status(status).json({ success: false, error: code });
+  }
+});
+
 app.get('/api/state', requireAuth, (req: AuthenticatedRequest, res) => {
   const state = store.getState();
   const serverAudit = req.user && roleAllowsServer(req.user.role, 'users', 'view') ? store.listAuditLogs() : [];
   if (!state) return res.json({ success: true, state: null, auditLogs: serverAudit });
-  return res.json({ success: true, state: { ...state, data: filterStateForUser(state.data, req.user?.role || '') }, auditLogs: serverAudit });
+  return res.json({ success: true, state: { ...state, data: filterStateForUser(state.data, req.user) }, auditLogs: serverAudit });
 });
 
 app.put('/api/state', requireAuth, requireStateAction, (req: AuthenticatedRequest, res) => {
@@ -578,7 +635,13 @@ app.put('/api/state', requireAuth, requireStateAction, (req: AuthenticatedReques
   if (previous && expectedVersion === null) {
     return res.status(409).json({ success: false, error: 'STATE_VERSION_REQUIRED', version: previous.version });
   }
-  const state = synchronizeHallAggregates(mergeStateForOperation(previous?.data, submittedState as Record<string, unknown>, req.body.operation, req.user?.role || ''), previous?.data);
+  if (!req.user) return res.status(401).json({ success: false, error: 'AUTH_REQUIRED' });
+  if (previous) {
+    const allowed = new Set(MODULE_COLLECTIONS[req.body.operation?.module || ''] || []);
+    const userScopeValidation = validateSubmittedUserScope(previous.data, submittedState as Record<string, unknown>, allowed, req.user);
+    if (!userScopeValidation.ok) return res.status(403).json({ success: false, error: userScopeValidation.error });
+  }
+  const state = synchronizeHallAggregates(mergeStateForOperation(previous?.data, submittedState as Record<string, unknown>, req.body.operation, req.user), previous?.data);
   const snapshotValidation = validateStateSnapshot(state);
   if (!snapshotValidation.ok) return res.status(400).json({ success: false, error: snapshotValidation.error });
   const mutationValidation = validateStateMutation(previous?.data, state, req.body.operation);
@@ -591,13 +654,26 @@ app.put('/api/state', requireAuth, requireStateAction, (req: AuthenticatedReques
     const saved = audit
       ? store.saveStateAndAudit(state as Record<string, unknown>, expectedVersion, audit)
       : store.saveState(state as Record<string, unknown>, expectedVersion);
-    return res.json({ success: true, state: { ...saved, data: filterStateForUser(saved.data, req.user?.role || '') } });
+    return res.json({ success: true, state: { ...saved, data: filterStateForUser(saved.data, req.user) } });
   } catch (error) {
     if (error instanceof StateConflictError) {
-      return res.status(409).json({ success: false, error: 'STATE_VERSION_CONFLICT', state: error.current });
+      return res.status(409).json({
+        success: false,
+        error: 'STATE_VERSION_CONFLICT',
+        state: { ...error.current, data: filterStateForUser(error.current.data, req.user) },
+      });
     }
     return res.status(500).json({ success: false, error: 'STATE_SAVE_FAILED' });
   }
+});
+
+registerMasterDataRoutes(app, {
+  requireAuth,
+  requireAdmin,
+  store,
+  synchronizeHallAggregates,
+  filterStateForUser,
+  auditFromOperation,
 });
 
 app.get('/api/audit-logs', requireAuth, (req: AuthenticatedRequest, res) => {
@@ -611,7 +687,7 @@ const handleAiAssistant = async (req: AuthenticatedRequest, res: Response) => {
   if (!userQuery.trim()) return res.status(400).json({ success: false, error: 'QUERY_REQUIRED' });
 
   const authoritativeState = store.getState()?.data;
-  const farmContext = sanitizeFarmContext(authoritativeState ? filterStateForUser(authoritativeState, req.user?.role || '') : {});
+  const farmContext = sanitizeFarmContext(authoritativeState ? filterStateForUser(authoritativeState, req.user) : {});
   const ai = getAIClient();
   if (!ai) {
     return res.json({ success: true, answer: offlineFarmAnswer(userQuery, language, farmContext), source: 'local-deterministic-engine', aiStatus: 'NOT_CONFIGURED' });

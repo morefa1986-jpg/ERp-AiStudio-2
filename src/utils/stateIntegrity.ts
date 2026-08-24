@@ -1,6 +1,8 @@
 import { assessWaterSafetyForFeeding } from './sensorValidation';
 import { inventoryQuantityForFeedKg, normalizeFeedAmountToKg } from './feedingEngine';
-import { saleLotMatchesSku, validateSaleFulfillmentConservation } from './salesEngine';
+import { saleLineMatchesLot, saleLotMatchesSku, validateSaleFulfillmentConservation } from './salesEngine';
+import { addPondStock, consumePondStock, pondStockLedgerIsConsistent } from './pondStockLedger';
+import { applyBiometryToPondStock, applyMortalityToPondStock } from './pondStockOperations';
 
 export const STATE_COLLECTIONS = [
   'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
@@ -76,6 +78,7 @@ export function validateStateSnapshot(raw: unknown): { ok: boolean; error?: stri
   }
   for (const pond of state.ponds) {
     if (!pond || typeof pond.id !== 'string' || !finiteNonNegative(pond.fishCount) || !finiteNonNegative(pond.biomassKg)) return { ok: false, error: 'STATE_POND_INVALID' };
+    if (Array.isArray(pond.stockGroups) && pond.stockGroups.length > 0 && !pondStockLedgerIsConsistent(pond)) return { ok: false, error: 'STATE_POND_STOCK_LEDGER_INVALID' };
   }
   for (const tank of state.nurseryTanks) {
     if (!tank || typeof tank.id !== 'string' || !Number.isInteger(tank.fishCount) || tank.fishCount < 0 || !finiteNonNegative(tank.totalBiomassGrams) || !finiteNonNegative(tank.avgWeightGrams)) {
@@ -106,25 +109,11 @@ export function validateActiveFeedingState(raw: unknown): { ok: boolean; error?:
   const state = raw as State;
   for (const pond of collection(state, 'ponds')) {
     if (pond?.feedingStatus !== 'ACTIVE') continue;
-    if (pond.activeTreatmentId || collection(state, 'treatments').some((treatment) => treatment?.pondId === pond.id && treatment?.status === 'ACTIVE')) {
-      return { ok: false, error: 'FEEDING_ACTIVE_DURING_TREATMENT' };
-    }
-    const latest = collection(state, 'waterLogs')
-      .filter((log) => log?.pondId === pond.id)
-      .sort((left, right) => new Date(String(right.timestamp || '')).getTime() - new Date(String(left.timestamp || '')).getTime())[0];
+    if (pond.activeTreatmentId || collection(state, 'treatments').some((treatment) => treatment?.pondId === pond.id && treatment?.status === 'ACTIVE')) return { ok: false, error: 'FEEDING_ACTIVE_DURING_TREATMENT' };
+    const latest = collection(state, 'waterLogs').filter((log) => log?.pondId === pond.id).sort((left, right) => new Date(String(right.timestamp || '')).getTime() - new Date(String(left.timestamp || '')).getTime())[0];
     if (!latest || latest.sensorStatus !== 'VALID' || !latest.timestamp) return { ok: false, error: 'FEEDING_TELEMETRY_NOT_AUTHORITATIVE' };
-    if (pond.lastTelemetryTimestamp !== latest.timestamp || pond.sensorQuality !== latest.sensorStatus || pond.dissolvedOxygen !== latest.dissolvedOxygen || pond.waterTemperature !== latest.temperature || pond.ph !== latest.ph || pond.ammonia !== latest.ammonia || pond.nitrite !== latest.nitrite) {
-      return { ok: false, error: 'FEEDING_TELEMETRY_LEDGER_MISSING' };
-    }
-    const safety = assessWaterSafetyForFeeding({
-      dissolvedOxygen: latest.dissolvedOxygen,
-      waterTemperature: latest.temperature,
-      ph: latest.ph,
-      ammonia: latest.ammonia,
-      nitrite: latest.nitrite,
-      timestamp: latest.timestamp,
-      sensorStatus: latest.sensorStatus,
-    });
+    if (pond.lastTelemetryTimestamp !== latest.timestamp || pond.sensorQuality !== latest.sensorStatus || pond.dissolvedOxygen !== latest.dissolvedOxygen || pond.waterTemperature !== latest.temperature || pond.ph !== latest.ph || pond.ammonia !== latest.ammonia || pond.nitrite !== latest.nitrite) return { ok: false, error: 'FEEDING_TELEMETRY_LEDGER_MISSING' };
+    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: latest.dissolvedOxygen, waterTemperature: latest.temperature, ph: latest.ph, ammonia: latest.ammonia, nitrite: latest.nitrite, timestamp: latest.timestamp, sensorStatus: latest.sensorStatus });
     if (!safety.isSafeForFeeding) return { ok: false, error: 'FEEDING_SAFETY_FAILED' };
   }
   return { ok: true };
@@ -135,39 +124,53 @@ function newRows(previous: State, next: State, key: string): any[] {
   return collection(next, key).filter((row) => row?.id && !oldIds.has(row.id));
 }
 
-const IMMUTABLE_LEDGER_COLLECTIONS = [
-  'feedingRecords', 'waterLogs', 'mortalityRecords', 'transfers',
-  'processingBatches', 'inventoryTxs', 'biometricSessions', 'journals',
-];
-
-const NON_DELETABLE_REGISTERED_COLLECTIONS = [
-  ...IMMUTABLE_LEDGER_COLLECTIONS,
-  'halls', 'ponds', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks', 'inventory', 'accounts',
-];
+const IMMUTABLE_LEDGER_COLLECTIONS = ['feedingRecords', 'waterLogs', 'mortalityRecords', 'transfers', 'processingBatches', 'inventoryTxs', 'biometricSessions', 'journals'];
+const NON_DELETABLE_REGISTERED_COLLECTIONS = [...IMMUTABLE_LEDGER_COLLECTIONS, 'halls', 'ponds', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks', 'inventory', 'accounts'];
 
 function modifiedExistingRows(previous: State, next: State, key: string): boolean {
   const previousById = new Map(collection(previous, key).filter((row) => row?.id).map((row) => [row.id, row]));
   return collection(next, key).some((row) => row?.id && previousById.has(row.id) && !sameValue(previousById.get(row.id), row));
 }
-
 function deletedExistingRows(previous: State, next: State, key: string): boolean {
   const nextIds = new Set(collection(next, key).map((row) => row?.id).filter(Boolean));
   return collection(previous, key).some((row) => row?.id && !nextIds.has(row.id));
 }
-
-function pondById(state: State, id: string): any | undefined {
-  return collection(state, 'ponds').find((pond) => pond.id === id);
+function pondById(state: State, id: string): any | undefined { return collection(state, 'ponds').find((pond) => pond.id === id); }
+function nearlyEqual(left: unknown, right: unknown, tolerance = 0.05): boolean { const a = Number(left); const b = Number(right); return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tolerance; }
+function changedRows(previous: State, next: State, key: string): any[] { const before = new Map(collection(previous, key).map((row) => [row?.id, row])); return collection(next, key).filter((row) => row?.id && before.has(row.id) && !sameValue(before.get(row.id), row)); }
+function explicitStockLedger(pond: any): boolean { return Array.isArray(pond?.stockGroups) && pond.stockGroups.length > 0; }
+function stockProjection(pond: any): Record<string, unknown> {
+  return { speciesId: pond?.speciesId, speciesMix: pond?.speciesMix || [], stockGroups: pond?.stockGroups || [], fishCount: pond?.fishCount, biomassKg: pond?.biomassKg, averageWeightKg: pond?.averageWeightKg };
 }
 
-function nearlyEqual(left: unknown, right: unknown, tolerance = 0.05): boolean {
-  const a = Number(left);
-  const b = Number(right);
-  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tolerance;
+function processingOriginForLot(state: State, lot: any): any | undefined {
+  const processingBatches = collection(state, 'processingBatches');
+  if (lot?.processingBatchId) { const byId = processingBatches.find((batch) => batch.id === lot.processingBatchId); if (byId) return byId; }
+  const byOutputLot = processingBatches.filter((batch) => Array.isArray(batch.outputLotIds) && batch.outputLotIds.includes(lot?.id));
+  return byOutputLot.length === 1 ? byOutputLot[0] : undefined;
 }
-
-function changedRows(previous: State, next: State, key: string): any[] {
-  const before = new Map(collection(previous, key).map((row) => [row?.id, row]));
-  return collection(next, key).filter((row) => row?.id && before.has(row.id) && !sameValue(before.get(row.id), row));
+function processedLotRequiresOrigin(lot: any): boolean { return ['Caviar (Cans/Jars)', 'Vacuumed Fillet', 'Smoked Sturgeon', 'Frozen Sturgeon Whole'].includes(String(lot?.productType || '')); }
+function proformaIsExport(state: State, proforma: any): boolean {
+  const customer = collection(state, 'customers').find((row) => row.id === proforma?.customerId);
+  if (customer?.category === 'Export Luxury Distributor') return true;
+  const country = String(customer?.country || proforma?.customerCountry || '').trim().toLowerCase();
+  return !['iran', 'ir', 'ایران', 'جمهوری اسلامی ایران'].includes(country);
+}
+function validateSaleTraceability(state: State, proforma: any): { ok: boolean; error?: string } {
+  const exportSale = proformaIsExport(state, proforma);
+  for (const item of Array.isArray(proforma?.items) ? proforma.items : []) {
+    const lotId = String(item?.coldStorageLotId || '').trim();
+    if (!lotId) return { ok: false, error: 'SALE_LOT_ID_REQUIRED' };
+    const lot = collection(state, 'coldStorage').find((candidate) => candidate.id === lotId);
+    if (!lot || !saleLineMatchesLot(lot, item)) return { ok: false, error: 'SALE_LOT_REFERENCE_INVALID' };
+    if (!processedLotRequiresOrigin(lot)) continue;
+    const origin = processingOriginForLot(state, lot);
+    if (!origin) return { ok: false, error: 'SALE_PROCESSING_ORIGIN_REQUIRED' };
+    if (!item.processingBatchId) return { ok: false, error: 'SALE_PROCESSING_BATCH_ID_REQUIRED' };
+    if (item.processingBatchId !== origin.id || (lot.processingBatchId && lot.processingBatchId !== origin.id)) return { ok: false, error: 'SALE_PROCESSING_ORIGIN_MISMATCH' };
+    if (exportSale && lot.productType === 'Caviar (Cans/Jars)' && !String(origin.citesPermitNumber || '').trim()) return { ok: false, error: 'SALE_CITES_PERMIT_REQUIRED' };
+  }
+  return { ok: true };
 }
 
 function validatePondMutation(previous: State, next: State, operation: { module?: string; action?: string }): { ok: boolean; error?: string } {
@@ -180,10 +183,9 @@ function validatePondMutation(previous: State, next: State, operation: { module?
   if (changed.some((pond) => !beforeById.has(pond.id))) return { ok: false, error: 'POND_CREATION_REQUIRES_REGISTERED_WORKFLOW' };
 
   const mutableFields = new Set([
-    'fishCount', 'biomassKg', 'averageWeightKg', 'lastFeedingKg', 'lastFeedingTime', 'feedingStatus',
-    'stopFeedingReason', 'stopFeedingDetails', 'stopFeedingTimestamp', 'stopFeedingUser', 'dailyMortalityCount',
-    'dissolvedOxygen', 'waterTemperature', 'ph', 'ammonia', 'nitrite', 'lastTelemetryTimestamp', 'sensorQuality',
-    'activeTreatmentId', 'lastBiometryDate', 'lastTransferDate', 'criticalAlerts',
+    'fishCount', 'biomassKg', 'averageWeightKg', 'speciesId', 'speciesMix', 'stockGroups',
+    'lastFeedingKg', 'lastFeedingTime', 'feedingStatus', 'stopFeedingReason', 'stopFeedingDetails', 'stopFeedingTimestamp', 'stopFeedingUser', 'dailyMortalityCount',
+    'dissolvedOxygen', 'waterTemperature', 'ph', 'ammonia', 'nitrite', 'lastTelemetryTimestamp', 'sensorQuality', 'activeTreatmentId', 'lastBiometryDate', 'lastTransferDate', 'criticalAlerts',
   ]);
   for (const pond of changed) {
     const before = beforeById.get(pond.id)!;
@@ -192,19 +194,30 @@ function validatePondMutation(previous: State, next: State, operation: { module?
     if (!sameValue(beforeMetadata, nextMetadata)) return { ok: false, error: 'POND_METADATA_MUTATION_NOT_ALLOWED' };
   }
 
-  const biologicalFields = ['fishCount', 'biomassKg', 'averageWeightKg'];
-  const biologicalChanged = changed.some((pond) => biologicalFields.some((field) => !nearlyEqual(beforeById.get(pond.id)?.[field], pond[field], field === 'fishCount' ? 0 : 0.001)));
+  const biologicalFields = ['fishCount', 'biomassKg', 'averageWeightKg', 'speciesId', 'speciesMix', 'stockGroups'];
+  const biologicalChanged = changed.some((pond) => biologicalFields.some((field) => !sameValue(beforeById.get(pond.id)?.[field], pond[field])));
   if (['feeding', 'water_quality', 'treatments'].includes(module) && biologicalChanged) return { ok: false, error: 'POND_BIOLOGY_MUTATION_NOT_ALLOWED' };
 
   if (module === 'biometrics') {
     const sessions = newRows(previous, next, 'biometricSessions');
     if (!sessions.length) return { ok: false, error: 'BIOMETRY_LEDGER_MISSING' };
     for (const pond of changed) {
-      const session = sessions.filter((row) => row.pondId === pond.id).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+      const pondSessions = sessions.filter((row) => row.pondId === pond.id).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      if (!pondSessions.length) return { ok: false, error: 'BIOMETRY_LEDGER_MISSING' };
       const before = beforeById.get(pond.id);
-      if (!session || pond.fishCount !== before.fishCount || !nearlyEqual(pond.averageWeightKg, session.averageWeightKg, 0.001) || !nearlyEqual(pond.biomassKg, session.estimatedBiomassKg, 0.05) || !nearlyEqual(session.estimatedBiomassKg, pond.fishCount * session.averageWeightKg, 0.05)) {
-        return { ok: false, error: 'BIOMETRY_CONSERVATION_FAILED' };
+      const stockAware = explicitStockLedger(before) || pondSessions.some((session) => Boolean(session.stockSex));
+      if (!stockAware) {
+        const session = pondSessions[pondSessions.length - 1];
+        if (pond.fishCount !== before.fishCount || !nearlyEqual(pond.averageWeightKg, session.averageWeightKg, 0.001) || !nearlyEqual(pond.biomassKg, session.estimatedBiomassKg, 0.05) || !nearlyEqual(session.estimatedBiomassKg, pond.fishCount * session.averageWeightKg, 0.05)) return { ok: false, error: 'BIOMETRY_CONSERVATION_FAILED' };
+        continue;
       }
+      let expected = before;
+      for (const session of pondSessions) {
+        const applied = applyBiometryToPondStock(expected, { speciesId: String(session.speciesId || ''), stockSex: session.stockSex, averageWeightKg: Number(session.averageWeightKg), date: String(session.date || '') });
+        if (!applied.ok || !applied.pond || applied.selectedCount !== Number(session.estimatedCount) || !nearlyEqual(Number(session.estimatedBiomassKg), Number(applied.selectedCount || 0) * Number(session.averageWeightKg), 0.05)) return { ok: false, error: 'BIOMETRY_STOCK_CONSERVATION_FAILED' };
+        expected = applied.pond;
+      }
+      if (!sameValue(stockProjection(expected), stockProjection(pond)) || expected.lastBiometryDate !== pond.lastBiometryDate) return { ok: false, error: 'BIOMETRY_STOCK_CONSERVATION_FAILED' };
     }
   }
 
@@ -218,9 +231,7 @@ function validatePondMutation(previous: State, next: State, operation: { module?
       const latest = logs.filter((row) => row.pondId === pond.id).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
       const before = beforeById.get(pond.id);
       const telemetryChanged = before.lastTelemetryTimestamp !== pond.lastTelemetryTimestamp || before.sensorQuality !== pond.sensorQuality || before.dissolvedOxygen !== pond.dissolvedOxygen || before.waterTemperature !== pond.waterTemperature || before.ph !== pond.ph || before.ammonia !== pond.ammonia || before.nitrite !== pond.nitrite;
-      if ((telemetryChanged && !latest) || (latest && (pond.lastTelemetryTimestamp !== latest.timestamp || pond.sensorQuality !== latest.sensorStatus || pond.dissolvedOxygen !== latest.dissolvedOxygen || pond.waterTemperature !== latest.temperature || pond.ph !== latest.ph || pond.ammonia !== latest.ammonia || pond.nitrite !== latest.nitrite))) {
-        return { ok: false, error: 'WATER_TELEMETRY_LEDGER_MISSING' };
-      }
+      if ((telemetryChanged && !latest) || (latest && (pond.lastTelemetryTimestamp !== latest.timestamp || pond.sensorQuality !== latest.sensorStatus || pond.dissolvedOxygen !== latest.dissolvedOxygen || pond.waterTemperature !== latest.temperature || pond.ph !== latest.ph || pond.ammonia !== latest.ammonia || pond.nitrite !== latest.nitrite))) return { ok: false, error: 'WATER_TELEMETRY_LEDGER_MISSING' };
     }
   }
 
@@ -240,20 +251,27 @@ function validatePondMutation(previous: State, next: State, operation: { module?
   if (module === 'mortality') {
     const records = newRows(previous, next, 'mortalityRecords');
     if (!records.length) return { ok: false, error: 'MORTALITY_LEDGER_MISSING' };
-    const totals = new Map<string, { count: number; biomass: number }>();
-    for (const record of records) {
-      const current = totals.get(record.pondId) || { count: 0, biomass: 0 };
-      current.count += Number(record.count);
-      current.biomass += Number(record.estimatedWeightKg);
-      totals.set(record.pondId, current);
-    }
-    for (const [pondId, total] of totals) {
-      const before = beforeById.get(pondId);
-      const after = nextById.get(pondId);
-      if (!before || !after || before.fishCount - after.fishCount !== total.count || !nearlyEqual(before.biomassKg - after.biomassKg, total.biomass) || after.dailyMortalityCount - before.dailyMortalityCount !== total.count) return { ok: false, error: 'MORTALITY_CONSERVATION_FAILED' };
+    const byPond = new Map<string, any[]>();
+    for (const record of records) byPond.set(record.pondId, [...(byPond.get(record.pondId) || []), record]);
+    for (const [pondId, pondRecords] of byPond) {
+      const before = beforeById.get(pondId); const after = nextById.get(pondId);
+      if (!before || !after) return { ok: false, error: 'MORTALITY_CONSERVATION_FAILED' };
+      const stockAware = explicitStockLedger(before) || pondRecords.some((record) => Boolean(record.stockSex) || (Array.isArray(record.chipNumbers) && record.chipNumbers.length));
+      if (!stockAware) {
+        const count = pondRecords.reduce((sum, record) => sum + Number(record.count), 0);
+        const biomass = pondRecords.reduce((sum, record) => sum + Number(record.estimatedWeightKg), 0);
+        if (before.fishCount - after.fishCount !== count || !nearlyEqual(before.biomassKg - after.biomassKg, biomass) || after.dailyMortalityCount - before.dailyMortalityCount !== count) return { ok: false, error: 'MORTALITY_CONSERVATION_FAILED' };
+        continue;
+      }
+      let expected = before;
+      for (const record of pondRecords) {
+        const applied = applyMortalityToPondStock(expected, { speciesId: String(record.speciesId || ''), stockSex: record.stockSex, count: Number(record.count), biomassKg: Number(record.estimatedWeightKg), chipNumbers: record.chipNumbers });
+        if (!applied.ok || !applied.pond) return { ok: false, error: 'MORTALITY_STOCK_CONSERVATION_FAILED' };
+        expected = applied.pond;
+      }
+      if (!sameValue(stockProjection(expected), stockProjection(after)) || Number(expected.dailyMortalityCount) !== Number(after.dailyMortalityCount)) return { ok: false, error: 'MORTALITY_STOCK_CONSERVATION_FAILED' };
     }
   }
-
   return { ok: true };
 }
 
@@ -263,12 +281,9 @@ function validateTransferConservation(previous: State, next: State): { ok: boole
   const pondDeltas = new Map<string, { count: number; biomass: number }>();
   const tankDeltas = new Map<string, { count: number; biomass: number }>();
   const larvalDeltas = new Map<string, { count: number; biomass: number }>();
-  const addDelta = (map: Map<string, { count: number; biomass: number }>, id: string, count: number, biomass: number) => {
-    const current = map.get(id) || { count: 0, biomass: 0 };
-    current.count += count;
-    current.biomass += biomass;
-    map.set(id, current);
-  };
+  const workingPonds = new Map(collection(previous, 'ponds').map((pond) => [pond.id, pond]));
+  const stockAffected = new Set<string>();
+  const addDelta = (map: Map<string, { count: number; biomass: number }>, id: string, count: number, biomass: number) => { const current = map.get(id) || { count: 0, biomass: 0 }; current.count += count; current.biomass += biomass; map.set(id, current); };
   for (const transfer of transfers) {
     if (!['Pond', 'Nursery', 'Hatchery'].includes(transfer.sourceType) || !['Pond', 'Nursery'].includes(transfer.destinationType)) return { ok: false, error: 'TRANSFER_DESTINATION_LEDGER_REQUIRED' };
     if (!Number.isInteger(transfer.fishCount) || transfer.fishCount <= 0 || !finiteNonNegative(transfer.totalBiomassKg) || transfer.totalBiomassKg <= 0 || !Number.isFinite(transfer.averageWeightKg) || transfer.averageWeightKg <= 0 || !nearlyEqual(transfer.totalBiomassKg, transfer.fishCount * transfer.averageWeightKg)) return { ok: false, error: 'TRANSFER_INPUT_INVALID' };
@@ -277,14 +292,35 @@ function validateTransferConservation(previous: State, next: State): { ok: boole
     if (transfer.sourceType === 'Hatchery' && transfer.destinationType === 'Pond') addDelta(larvalDeltas, transfer.sourceId, -transfer.fishCount, -transfer.totalBiomassKg);
     if (transfer.destinationType === 'Pond') addDelta(pondDeltas, transfer.destinationId, transfer.fishCount, transfer.totalBiomassKg);
     if (transfer.destinationType === 'Nursery') addDelta(tankDeltas, transfer.destinationId, transfer.fishCount, transfer.totalBiomassKg);
+
+    const sourcePond = transfer.sourceType === 'Pond' ? workingPonds.get(transfer.sourceId) : undefined;
+    const destinationPond = transfer.destinationType === 'Pond' ? workingPonds.get(transfer.destinationId) : undefined;
+    const stockAware = Boolean(transfer.stockSex) || (Array.isArray(transfer.chipNumbers) && transfer.chipNumbers.length > 0) || explicitStockLedger(sourcePond) || explicitStockLedger(destinationPond);
+    if (stockAware) {
+      const sex = transfer.stockSex || 'Unknown';
+      if (sourcePond) {
+        const consumed = consumePondStock(sourcePond, { speciesId: String(transfer.speciesId || ''), sex, count: Number(transfer.fishCount), biomassKg: Number(transfer.totalBiomassKg), chipNumbers: transfer.chipNumbers });
+        if (!consumed.ok || !consumed.pond) return { ok: false, error: 'TRANSFER_STOCK_CONSERVATION_FAILED' };
+        workingPonds.set(sourcePond.id, consumed.pond); stockAffected.add(sourcePond.id);
+      }
+      if (destinationPond) {
+        const currentDestination = workingPonds.get(destinationPond.id) || destinationPond;
+        const added = addPondStock(currentDestination, { speciesId: String(transfer.speciesId || ''), sex, count: Number(transfer.fishCount), biomassKg: Number(transfer.totalBiomassKg), chipNumbers: transfer.chipNumbers });
+        if (!added.ok || !added.pond) return { ok: false, error: 'TRANSFER_STOCK_CONSERVATION_FAILED' };
+        workingPonds.set(destinationPond.id, added.pond); stockAffected.add(destinationPond.id);
+      }
+    }
   }
   for (const [pondId, delta] of pondDeltas) {
     const before = pondById(previous, pondId); const after = pondById(next, pondId);
     if (!before || !after || after.fishCount - before.fishCount !== delta.count || !nearlyEqual(after.biomassKg - before.biomassKg, delta.biomass)) return { ok: false, error: 'TRANSFER_CONSERVATION_FAILED' };
   }
+  for (const pondId of stockAffected) {
+    const expected = workingPonds.get(pondId); const after = pondById(next, pondId);
+    if (!expected || !after || !sameValue(stockProjection(expected), stockProjection(after))) return { ok: false, error: 'TRANSFER_STOCK_CONSERVATION_FAILED' };
+  }
   for (const [tankId, delta] of tankDeltas) {
-    const before = collection(previous, 'nurseryTanks').find((tank) => tank.id === tankId);
-    const after = collection(next, 'nurseryTanks').find((tank) => tank.id === tankId);
+    const before = collection(previous, 'nurseryTanks').find((tank) => tank.id === tankId); const after = collection(next, 'nurseryTanks').find((tank) => tank.id === tankId);
     if (!before || !after || after.fishCount - before.fishCount !== delta.count || !nearlyEqual((after.totalBiomassGrams - before.totalBiomassGrams) / 1000, delta.biomass)) return { ok: false, error: 'TRANSFER_NURSERY_CONSERVATION_FAILED' };
   }
   for (const [batchId, delta] of larvalDeltas) {
@@ -292,22 +328,18 @@ function validateTransferConservation(previous: State, next: State): { ok: boole
     if (!before || !after || after.larvalCount - before.larvalCount !== delta.count || !finiteNonNegative(before.totalBiomassKg) || !finiteNonNegative(after.totalBiomassKg) || !nearlyEqual((after.totalBiomassKg || 0) - (before.totalBiomassKg || 0), delta.biomass)) return { ok: false, error: 'TRANSFER_HATCHERY_CONSERVATION_FAILED' };
   }
   for (const transfer of transfers.filter((item) => item.sourceType === 'Hatchery' && item.destinationType === 'Nursery')) {
-    const batch = collection(next, 'larvae').find((row) => row.id === transfer.sourceId);
-    const tank = collection(next, 'nurseryTanks').find((row) => row.id === transfer.destinationId);
+    const batch = collection(next, 'larvae').find((row) => row.id === transfer.sourceId); const tank = collection(next, 'nurseryTanks').find((row) => row.id === transfer.destinationId);
     if (!batch || !tank || batch.currentTankId !== tank.id || batch.larvalCount !== transfer.fishCount || !nearlyEqual(batch.totalBiomassKg || 0, transfer.totalBiomassKg) || tank.currentBatchId !== batch.id || tank.fishCount !== transfer.fishCount || !nearlyEqual(tank.totalBiomassGrams / 1000, transfer.totalBiomassKg)) return { ok: false, error: 'TRANSFER_HATCHERY_DESTINATION_LEDGER_REQUIRED' };
   }
   for (const transfer of transfers.filter((item) => item.sourceType === 'Nursery')) {
-    const beforeTank = collection(previous, 'nurseryTanks').find((tank) => tank.id === transfer.sourceId);
-    const afterTank = collection(next, 'nurseryTanks').find((tank) => tank.id === transfer.sourceId);
+    const beforeTank = collection(previous, 'nurseryTanks').find((tank) => tank.id === transfer.sourceId); const afterTank = collection(next, 'nurseryTanks').find((tank) => tank.id === transfer.sourceId);
     if (!beforeTank || !afterTank) return { ok: false, error: 'TRANSFER_NURSERY_SOURCE_LEDGER_REQUIRED' };
     if (beforeTank.currentBatchId) {
-      const beforeBatch = collection(previous, 'larvae').find((batch) => batch.id === beforeTank.currentBatchId);
-      const afterBatch = collection(next, 'larvae').find((batch) => batch.id === beforeTank.currentBatchId);
+      const beforeBatch = collection(previous, 'larvae').find((batch) => batch.id === beforeTank.currentBatchId); const afterBatch = collection(next, 'larvae').find((batch) => batch.id === beforeTank.currentBatchId);
       if (!beforeBatch || !afterBatch) return { ok: false, error: 'TRANSFER_NURSERY_BATCH_LEDGER_REQUIRED' };
       if (beforeBatch.larvalCount !== beforeTank.fishCount || !finiteNonNegative(beforeBatch.totalBiomassKg) || !nearlyEqual(beforeBatch.totalBiomassKg || 0, beforeTank.totalBiomassGrams / 1000)) return { ok: false, error: 'TRANSFER_NURSERY_BATCH_LEDGER_REQUIRED' };
       if (transfer.destinationType === 'Pond') {
-        const expectedCount = beforeBatch.larvalCount - transfer.fishCount;
-        const expectedBiomass = Number(Math.max(0, (beforeBatch.totalBiomassKg || 0) - transfer.totalBiomassKg).toFixed(3));
+        const expectedCount = beforeBatch.larvalCount - transfer.fishCount; const expectedBiomass = Number(Math.max(0, (beforeBatch.totalBiomassKg || 0) - transfer.totalBiomassKg).toFixed(3));
         if (afterBatch.larvalCount !== expectedCount || !finiteNonNegative(afterBatch.totalBiomassKg) || !nearlyEqual(afterBatch.totalBiomassKg || 0, expectedBiomass) || (afterBatch.currentTankId || undefined) !== (expectedCount > 0 ? beforeTank.id : undefined)) return { ok: false, error: 'TRANSFER_NURSERY_BATCH_CONSERVATION_FAILED' };
       } else {
         const destinationTank = collection(next, 'nurseryTanks').find((tank) => tank.id === transfer.destinationId);
@@ -319,56 +351,32 @@ function validateTransferConservation(previous: State, next: State): { ok: boole
 }
 
 function validateInventoryConservation(previous: State, next: State): { ok: boolean; error?: string } {
-  const beforeById = new Map(collection(previous, 'inventory').map((item) => [item.id, item]));
-  const nextById = new Map(collection(next, 'inventory').map((item) => [item.id, item]));
+  const beforeById = new Map(collection(previous, 'inventory').map((item) => [item.id, item])); const nextById = new Map(collection(next, 'inventory').map((item) => [item.id, item]));
   if (collection(next, 'inventory').some((item) => !beforeById.has(item.id)) || collection(previous, 'inventory').some((item) => !nextById.has(item.id))) return { ok: false, error: 'INVENTORY_ITEM_REGISTERED_WORKFLOW_REQUIRED' };
-  const newTransactions = newRows(previous, next, 'inventoryTxs');
-  const transactionTotals = new Map<string, number>();
-  for (const tx of newTransactions) {
-    const item = nextById.get(tx.itemId);
-    if (!item || !Number.isFinite(tx.quantityChange) || tx.quantityChange === 0 || tx.unit !== item.unit || !nearlyEqual(tx.resultingQuantity, item.quantity, 0.0001)) return { ok: false, error: 'INVENTORY_TRANSACTION_INVALID' };
-    transactionTotals.set(tx.itemId, (transactionTotals.get(tx.itemId) || 0) + tx.quantityChange);
-  }
-  for (const [itemId, before] of beforeById) {
-    const after = nextById.get(itemId)!;
-    const delta = Number(after.quantity) - Number(before.quantity);
-    const ledgerDelta = transactionTotals.get(itemId) || 0;
-    if (!nearlyEqual(delta, ledgerDelta, 0.0001)) return { ok: false, error: 'INVENTORY_CONSERVATION_FAILED' };
-  }
+  const newTransactions = newRows(previous, next, 'inventoryTxs'); const transactionTotals = new Map<string, number>();
+  for (const tx of newTransactions) { const item = nextById.get(tx.itemId); if (!item || !Number.isFinite(tx.quantityChange) || tx.quantityChange === 0 || tx.unit !== item.unit || !nearlyEqual(tx.resultingQuantity, item.quantity, 0.0001)) return { ok: false, error: 'INVENTORY_TRANSACTION_INVALID' }; transactionTotals.set(tx.itemId, (transactionTotals.get(tx.itemId) || 0) + tx.quantityChange); }
+  for (const [itemId, before] of beforeById) { const after = nextById.get(itemId)!; if (!nearlyEqual(Number(after.quantity) - Number(before.quantity), transactionTotals.get(itemId) || 0, 0.0001)) return { ok: false, error: 'INVENTORY_CONSERVATION_FAILED' }; }
   return { ok: true };
 }
 
 function validateColdStorageMutation(previous: State, next: State, operation: { module?: string; action?: string }): { ok: boolean; error?: string } {
-  const module = operation.module || '';
-  const beforeById = new Map(collection(previous, 'coldStorage').map((lot) => [lot.id, lot]));
-  const nextById = new Map(collection(next, 'coldStorage').map((lot) => [lot.id, lot]));
+  const module = operation.module || ''; const beforeById = new Map(collection(previous, 'coldStorage').map((lot) => [lot.id, lot])); const nextById = new Map(collection(next, 'coldStorage').map((lot) => [lot.id, lot]));
   if (module === 'processing') {
-    const batches = newRows(previous, next, 'processingBatches');
-    const expected = new Set(batches.flatMap((batch) => Array.isArray(batch.outputLotIds) ? batch.outputLotIds : []));
+    const batches = newRows(previous, next, 'processingBatches'); const expected = new Set(batches.flatMap((batch) => Array.isArray(batch.outputLotIds) ? batch.outputLotIds : []));
     for (const lot of collection(previous, 'coldStorage')) if (!sameValue(lot, nextById.get(lot.id))) return { ok: false, error: 'PROCESSING_EXISTING_STORAGE_MODIFIED' };
     for (const lot of collection(next, 'coldStorage')) if (!beforeById.has(lot.id) && !expected.has(lot.id)) return { ok: false, error: 'PROCESSING_UNRELATED_STORAGE_ADDED' };
     return { ok: true };
   }
   if (module === 'sales') {
     if (collection(next, 'coldStorage').some((lot) => !beforeById.has(lot.id)) || collection(previous, 'coldStorage').some((lot) => !nextById.has(lot.id))) return { ok: false, error: 'SALE_STORAGE_LEDGER_INVALID' };
-    const newlyFulfilled = changedRows(previous, next, 'proformas').filter((proforma) => {
-      const before = collection(previous, 'proformas').find((row) => row.id === proforma.id);
-      return Boolean(proforma.fulfilledAt && proforma.fulfillmentTransactionId && !before?.fulfilledAt && !before?.fulfillmentTransactionId);
-    });
-    const changedLots = changedRows(previous, next, 'coldStorage');
-    if (!changedLots.length) return { ok: true };
-    if (!newlyFulfilled.length) return { ok: false, error: 'SALE_FULFILLMENT_LEDGER_MISSING' };
-    const allowedLots = changedLots.every((lot) => newlyFulfilled.some((proforma) => proforma.items?.some((item: any) => saleLotMatchesSku(lot, item.sku))));
-    if (!allowedLots) return { ok: false, error: 'SALE_UNRELATED_STORAGE_MODIFIED' };
+    const newlyFulfilled = changedRows(previous, next, 'proformas').filter((proforma) => { const before = collection(previous, 'proformas').find((row) => row.id === proforma.id); return Boolean(proforma.fulfilledAt && proforma.fulfillmentTransactionId && !before?.fulfilledAt && !before?.fulfillmentTransactionId); });
+    if (newlyFulfilled.some((proforma) => proforma.stage !== 'Dispatched / Delivery (تحویل)')) return { ok: false, error: 'SALE_FULFILLMENT_REQUIRES_DISPATCH_STAGE' };
+    const changedLots = changedRows(previous, next, 'coldStorage'); if (!changedLots.length) return { ok: true }; if (!newlyFulfilled.length) return { ok: false, error: 'SALE_FULFILLMENT_LEDGER_MISSING' };
+    const allowedLots = changedLots.every((lot) => newlyFulfilled.some((proforma) => proforma.items?.some((item: any) => saleLineMatchesLot(lot, item)))); if (!allowedLots) return { ok: false, error: 'SALE_UNRELATED_STORAGE_MODIFIED' };
     for (const lot of changedLots) {
-      const before = beforeById.get(lot.id);
-      const nextUnits = Number(lot.unitsCount || 0);
-      const nextWeight = Number(lot.weightKg);
-      const beforeUnits = Number(before?.unitsCount || 0);
-      const beforeWeight = Number(before?.weightKg);
+      const before = beforeById.get(lot.id); const nextUnits = Number(lot.unitsCount || 0); const nextWeight = Number(lot.weightKg); const beforeUnits = Number(before?.unitsCount || 0); const beforeWeight = Number(before?.weightKg);
       if (!before || !finiteNonNegative(nextUnits) || !finiteNonNegative(nextWeight) || !finiteNonNegative(beforeUnits) || !finiteNonNegative(beforeWeight) || nextUnits > beforeUnits || nextWeight > beforeWeight) return { ok: false, error: 'SALE_STORAGE_INCREASE_FORBIDDEN' };
-      const immutableBefore = { ...before, unitsCount: undefined, weightKg: undefined, status: undefined };
-      const immutableAfter = { ...lot, unitsCount: undefined, weightKg: undefined, status: undefined };
+      const immutableBefore = { ...before, unitsCount: undefined, weightKg: undefined, status: undefined }; const immutableAfter = { ...lot, unitsCount: undefined, weightKg: undefined, status: undefined };
       if (!sameValue(immutableBefore, immutableAfter)) return { ok: false, error: 'SALE_STORAGE_METADATA_MODIFIED' };
     }
     return { ok: true };
@@ -378,111 +386,69 @@ function validateColdStorageMutation(previous: State, next: State, operation: { 
 }
 
 function validateAccountingConservation(previous: State, next: State): { ok: boolean; error?: string } {
-  const beforeAccounts = new Map(collection(previous, 'accounts').map((account) => [account.id, account]));
-  const nextAccounts = new Map(collection(next, 'accounts').map((account) => [account.id, account]));
+  const beforeAccounts = new Map(collection(previous, 'accounts').map((account) => [account.id, account])); const nextAccounts = new Map(collection(next, 'accounts').map((account) => [account.id, account]));
   if (collection(next, 'accounts').some((account) => !beforeAccounts.has(account.id)) || collection(previous, 'accounts').some((account) => !nextAccounts.has(account.id))) return { ok: false, error: 'ACCOUNT_REGISTERED_WORKFLOW_REQUIRED' };
   const deltas = new Map<string, number>();
   for (const journal of newRows(previous, next, 'journals')) {
-    const allLines = [...collection(journal, 'debits'), ...collection(journal, 'credits')];
-    const currencies = new Set(allLines.map((line) => nextAccounts.get(line.accountId)?.currency).filter(Boolean));
+    const allLines = [...collection(journal, 'debits'), ...collection(journal, 'credits')]; const currencies = new Set(allLines.map((line) => nextAccounts.get(line.accountId)?.currency).filter(Boolean));
     if (currencies.size > 1 || journal.isBalanced !== true || !nearlyEqual(journal.totalDebit, journal.totalCredit, 0.01)) return { ok: false, error: currencies.size > 1 ? 'ACCOUNTING_MIXED_CURRENCY' : 'ACCOUNTING_UNBALANCED' };
-    for (const line of collection(journal, 'debits')) {
-      const account = nextAccounts.get(line.accountId); if (!account) return { ok: false, error: 'ACCOUNTING_ACCOUNT_NOT_FOUND' };
-      deltas.set(line.accountId, (deltas.get(line.accountId) || 0) + Number(line.amount) * (account.type.startsWith('Asset') || account.type.startsWith('Expense') ? 1 : -1));
-    }
-    for (const line of collection(journal, 'credits')) {
-      const account = nextAccounts.get(line.accountId); if (!account) return { ok: false, error: 'ACCOUNTING_ACCOUNT_NOT_FOUND' };
-      deltas.set(line.accountId, (deltas.get(line.accountId) || 0) + Number(line.amount) * (account.type.startsWith('Asset') || account.type.startsWith('Expense') ? -1 : 1));
-    }
+    for (const line of collection(journal, 'debits')) { const account = nextAccounts.get(line.accountId); if (!account) return { ok: false, error: 'ACCOUNTING_ACCOUNT_NOT_FOUND' }; deltas.set(line.accountId, (deltas.get(line.accountId) || 0) + Number(line.amount) * (account.type.startsWith('Asset') || account.type.startsWith('Expense') ? 1 : -1)); }
+    for (const line of collection(journal, 'credits')) { const account = nextAccounts.get(line.accountId); if (!account) return { ok: false, error: 'ACCOUNTING_ACCOUNT_NOT_FOUND' }; deltas.set(line.accountId, (deltas.get(line.accountId) || 0) + Number(line.amount) * (account.type.startsWith('Asset') || account.type.startsWith('Expense') ? -1 : 1)); }
   }
-  for (const [id, before] of beforeAccounts) {
-    const after = nextAccounts.get(id)!;
-    if (!nearlyEqual(Number(after.balance) - Number(before.balance), deltas.get(id) || 0, 0.01)) return { ok: false, error: 'ACCOUNTING_BALANCE_LEDGER_MISMATCH' };
-  }
+  for (const [id, before] of beforeAccounts) { const after = nextAccounts.get(id)!; if (!nearlyEqual(Number(after.balance) - Number(before.balance), deltas.get(id) || 0, 0.01)) return { ok: false, error: 'ACCOUNTING_BALANCE_LEDGER_MISMATCH' }; }
   return { ok: true };
 }
 
+function activeProcessingHold(state: State, batch: any): any | undefined {
+  const processTime = new Date(String(batch?.date || '')).getTime(); if (!Number.isFinite(processTime)) return { invalidDate: true };
+  return collection(state, 'treatments').find((treatment) => { if (treatment?.pondId !== batch?.sourcePondId) return false; if (treatment.status === 'ACTIVE') return true; const withdrawalEnd = new Date(String(treatment.withdrawalEndDate || '')).getTime(); return Number.isFinite(withdrawalEnd) && withdrawalEnd >= processTime; });
+}
+
 export function validateStateMutation(previousRaw: unknown, nextRaw: unknown, operation: { module?: string; action?: string }): { ok: boolean; error?: string } {
-  const nextCheck = validateStateSnapshot(nextRaw);
-  if (!nextCheck.ok) return nextCheck;
-  const feedingStateCheck = validateActiveFeedingState(nextRaw);
-  if (!feedingStateCheck.ok) return feedingStateCheck;
+  const nextCheck = validateStateSnapshot(nextRaw); if (!nextCheck.ok) return nextCheck;
+  const feedingStateCheck = validateActiveFeedingState(nextRaw); if (!feedingStateCheck.ok) return feedingStateCheck;
   if (!previousRaw) return { ok: true };
-  const previous = previousRaw as State;
-  const next = nextRaw as State;
-
-  // A restore is an explicit, administrator-only replacement of the whole
-  // snapshot. It is still schema/checksum validated above, but must not be
-  // rejected as an ordinary append-only mutation.
+  const previous = previousRaw as State; const next = nextRaw as State;
   if (operation.module === 'backup' && operation.action === 'approve') return { ok: true };
+  for (const key of IMMUTABLE_LEDGER_COLLECTIONS) { if (modifiedExistingRows(previous, next, key)) return { ok: false, error: `STATE_IMMUTABLE_RECORD_MODIFIED:${key}` }; if (deletedExistingRows(previous, next, key)) return { ok: false, error: `STATE_IMMUTABLE_RECORD_DELETED:${key}` }; }
+  for (const key of NON_DELETABLE_REGISTERED_COLLECTIONS) if (deletedExistingRows(previous, next, key)) return { ok: false, error: `STATE_REGISTERED_RECORD_DELETED:${key}` };
 
-  // Historical telemetry, stock movements and biological events are
-  // append-only. Authorized clients may add a new event, but cannot rewrite
-  // evidence already accepted by the server.
-  for (const key of IMMUTABLE_LEDGER_COLLECTIONS) {
-    if (modifiedExistingRows(previous, next, key)) return { ok: false, error: `STATE_IMMUTABLE_RECORD_MODIFIED:${key}` };
-    if (deletedExistingRows(previous, next, key)) return { ok: false, error: `STATE_IMMUTABLE_RECORD_DELETED:${key}` };
-  }
-  for (const key of NON_DELETABLE_REGISTERED_COLLECTIONS) {
-    if (deletedExistingRows(previous, next, key)) return { ok: false, error: `STATE_REGISTERED_RECORD_DELETED:${key}` };
-  }
-
-  const pondValidation = validatePondMutation(previous, next, operation);
-  if (!pondValidation.ok) return pondValidation;
-  const inventoryValidation = validateInventoryConservation(previous, next);
-  if (!inventoryValidation.ok) return inventoryValidation;
-  const storageValidation = validateColdStorageMutation(previous, next, operation);
-  if (!storageValidation.ok) return storageValidation;
-  if (operation.module === 'accounting' || newRows(previous, next, 'journals').length > 0) {
-    const accountingValidation = validateAccountingConservation(previous, next);
-    if (!accountingValidation.ok) return accountingValidation;
-  }
-
-  const transferValidation = validateTransferConservation(previous, next);
-  if (!transferValidation.ok) return transferValidation;
+  const pondValidation = validatePondMutation(previous, next, operation); if (!pondValidation.ok) return pondValidation;
+  const inventoryValidation = validateInventoryConservation(previous, next); if (!inventoryValidation.ok) return inventoryValidation;
+  const storageValidation = validateColdStorageMutation(previous, next, operation); if (!storageValidation.ok) return storageValidation;
+  if (operation.module === 'accounting' || newRows(previous, next, 'journals').length > 0) { const accountingValidation = validateAccountingConservation(previous, next); if (!accountingValidation.ok) return accountingValidation; }
+  const transferValidation = validateTransferConservation(previous, next); if (!transferValidation.ok) return transferValidation;
 
   for (const batch of newRows(previous, next, 'processingBatches')) {
-    const before = pondById(previous, batch.sourcePondId);
-    const after = pondById(next, batch.sourcePondId);
-    const outputs = [batch.caviarYieldKg, batch.filletMeatYieldKg, batch.smokedMeatYieldKg, batch.byProductAndWasteKg];
+    const hold = activeProcessingHold(next, batch); if (hold) return { ok: false, error: hold.invalidDate ? 'PROCESSING_DATE_INVALID' : 'PROCESSING_TREATMENT_WITHDRAWAL_HOLD' };
+    const before = pondById(previous, batch.sourcePondId); const after = pondById(next, batch.sourcePondId); const outputs = [batch.caviarYieldKg, batch.filletMeatYieldKg, batch.smokedMeatYieldKg, batch.byProductAndWasteKg];
     if (!before || !after || before.fishCount - after.fishCount !== batch.fishCount || Math.abs((before.biomassKg - after.biomassKg) - batch.liveBiomassKg) > 0.05 || outputs.some((value) => !finiteNonNegative(value)) || Math.abs(outputs.reduce((sum, value) => sum + value, 0) - batch.liveBiomassKg) > 0.05) return { ok: false, error: 'PROCESSING_CONSERVATION_FAILED' };
     if (!Array.isArray(batch.outputLotIds)) return { ok: false, error: 'PROCESSING_OUTPUT_LOTS_MISSING' };
-    const lots = collection(next, 'coldStorage').filter((lot) => batch.outputLotIds.includes(lot.id));
-    const storedOutput = lots.reduce((sum, lot) => sum + Number(lot.weightKg || 0), 0);
-    const storableOutput = Number(batch.caviarYieldKg) + Number(batch.filletMeatYieldKg) + Number(batch.smokedMeatYieldKg);
-    if (lots.length !== batch.outputLotIds.length || Math.abs(storedOutput - storableOutput) > 0.05) return { ok: false, error: 'PROCESSING_OUTPUT_LOTS_INVALID' };
+    const lots = collection(next, 'coldStorage').filter((lot) => batch.outputLotIds.includes(lot.id)); const storedOutput = lots.reduce((sum, lot) => sum + Number(lot.weightKg || 0), 0); const storableOutput = Number(batch.caviarYieldKg) + Number(batch.filletMeatYieldKg) + Number(batch.smokedMeatYieldKg);
+    if (lots.length !== batch.outputLotIds.length || lots.some((lot) => lot.processingBatchId !== batch.id) || Math.abs(storedOutput - storableOutput) > 0.05) return { ok: false, error: 'PROCESSING_OUTPUT_LOTS_INVALID' };
   }
 
   const previousProformas = new Map(collection(previous, 'proformas').map((row) => [row.id, row]));
   for (const proforma of collection(next, 'proformas')) {
-    if (!proforma?.fulfilledAt || !proforma?.fulfillmentTransactionId) continue;
-    const before = previousProformas.get(proforma.id);
-    if (before?.fulfilledAt || before?.fulfillmentTransactionId) continue;
-    const saleValidation = validateSaleFulfillmentConservation(collection(previous, 'coldStorage'), collection(next, 'coldStorage'), proforma);
-    if (!saleValidation.ok) return { ok: false, error: saleValidation.error || 'SALE_CONSERVATION_FAILED' };
+    if (!proforma?.fulfilledAt || !proforma?.fulfillmentTransactionId) continue; const before = previousProformas.get(proforma.id); if (before?.fulfilledAt || before?.fulfillmentTransactionId) continue;
+    if (proforma.stage !== 'Dispatched / Delivery (تحویل)') return { ok: false, error: 'SALE_FULFILLMENT_REQUIRES_DISPATCH_STAGE' };
+    const traceability = validateSaleTraceability(next, proforma); if (!traceability.ok) return traceability;
+    const saleValidation = validateSaleFulfillmentConservation(collection(previous, 'coldStorage'), collection(next, 'coldStorage'), proforma); if (!saleValidation.ok) return { ok: false, error: saleValidation.error || 'SALE_CONSERVATION_FAILED' };
   }
 
   for (const record of newRows(previous, next, 'feedingRecords')) {
-    const pond = pondById(next, record.pondId);
-    const latest = collection(next, 'waterLogs').filter((log) => log.pondId === record.pondId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+    const pond = pondById(next, record.pondId); const latest = collection(next, 'waterLogs').filter((log) => log.pondId === record.pondId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
     if (!pond || pond.feedingStatus === 'STOPPED' || pond.activeTreatmentId || !latest || record.telemetryTimestamp !== latest.timestamp) return { ok: false, error: 'FEEDING_TELEMETRY_NOT_AUTHORITATIVE' };
     if (!['kg', 'g', 'gram', 'cup', 'cup250g', 'ton', 't', 'bag_25kg'].includes(String(record.unit))) return { ok: false, error: 'FEEDING_UNIT_INVALID' };
     const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: latest.dissolvedOxygen, waterTemperature: latest.temperature, ph: latest.ph, ammonia: latest.ammonia, nitrite: latest.nitrite, timestamp: latest.timestamp });
     if (!safety.isSafeForFeeding || latest.sensorStatus !== 'VALID' || !finiteNonNegative(record.actualAmountKg) || record.actualAmountKg <= 0) return { ok: false, error: 'FEEDING_SAFETY_FAILED' };
-    const feedItem = collection(next, 'inventory').find((item) => item.sku === record.feedTypeSku);
-    const actualKg = normalizeFeedAmountToKg(Number(record.actualAmountKg), record.unit);
-    const expectedConsumption = feedItem ? -inventoryQuantityForFeedKg(feedItem, actualKg) : Number.NaN;
-    const matchingConsumption = collection(next, 'inventoryTxs').some((tx) => tx.referenceDoc === record.id && tx.sku === record.feedTypeSku && Number.isFinite(expectedConsumption) && nearlyEqual(tx.quantityChange, expectedConsumption, 0.0001));
-    if (!matchingConsumption) return { ok: false, error: 'FEEDING_STOCK_TRANSACTION_MISSING' };
+    const feedItem = collection(next, 'inventory').find((item) => item.sku === record.feedTypeSku); const actualKg = normalizeFeedAmountToKg(Number(record.actualAmountKg), record.unit); const expectedConsumption = feedItem ? -inventoryQuantityForFeedKg(feedItem, actualKg) : Number.NaN;
+    const matchingConsumption = collection(next, 'inventoryTxs').some((tx) => tx.referenceDoc === record.id && tx.sku === record.feedTypeSku && Number.isFinite(expectedConsumption) && nearlyEqual(tx.quantityChange, expectedConsumption, 0.0001)); if (!matchingConsumption) return { ok: false, error: 'FEEDING_STOCK_TRANSACTION_MISSING' };
   }
 
   if (operation.module === 'accounting' || newRows(previous, next, 'journals').length > 0) {
     const accounts = new Map(collection(next, 'accounts').map((account) => [account.id, account]));
-    for (const journal of newRows(previous, next, 'journals')) {
-      const currencies = new Set([...collection(journal, 'debits'), ...collection(journal, 'credits')].map((line) => accounts.get(line.accountId)?.currency).filter(Boolean));
-      if (currencies.size > 1) return { ok: false, error: 'ACCOUNTING_MIXED_CURRENCY' };
-      if (Math.abs(Number(journal.totalDebit) - Number(journal.totalCredit)) > 0.01) return { ok: false, error: 'ACCOUNTING_UNBALANCED' };
-    }
+    for (const journal of newRows(previous, next, 'journals')) { const currencies = new Set([...collection(journal, 'debits'), ...collection(journal, 'credits')].map((line) => accounts.get(line.accountId)?.currency).filter(Boolean)); if (currencies.size > 1) return { ok: false, error: 'ACCOUNTING_MIXED_CURRENCY' }; if (Math.abs(Number(journal.totalDebit) - Number(journal.totalCredit)) > 0.01) return { ok: false, error: 'ACCOUNTING_UNBALANCED' }; }
   }
   return { ok: true };
 }

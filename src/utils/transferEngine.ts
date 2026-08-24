@@ -1,7 +1,12 @@
 import { FishTransfer, LarvalBatch, NurseryTank, Pond } from '../types';
+import type { OperationalStockSex } from '../types/operationalStock';
+import { addPondStock, consumePondStock, resolvePondStockGroup } from './pondStockLedger';
 import { nextId } from './id';
 
-export interface FishTransferInput extends Omit<FishTransfer, 'id' | 'status'> {}
+export interface FishTransferInput extends Omit<FishTransfer, 'id' | 'status'> {
+  stockSex?: OperationalStockSex;
+  chipNumbers?: string[];
+}
 
 export interface TransferResult {
   success: boolean;
@@ -18,6 +23,7 @@ interface SourceLedger {
   count: number;
   biomassKg: number;
   speciesId?: string;
+  stockSex: OperationalStockSex;
   pond?: Pond;
   tank?: NurseryTank;
   batch?: LarvalBatch;
@@ -36,15 +42,15 @@ function validateTransferNumbers(transferData: FishTransferInput, source: Source
     return { ok: false, error: 'تعداد ماهیان انتقال باید یک عدد صحیح مثبت باشد.' };
   }
   if (transferData.fishCount > source.count) {
-    return { ok: false, error: `تعداد درخواستی (${transferData.fishCount}) بیشتر از موجودی مبدا (${source.count}) است.` };
+    return { ok: false, error: `تعداد درخواستی (${transferData.fishCount}) بیشتر از موجودی گروه مبدا (${source.count}) است.` };
   }
   if (!Number.isFinite(transferData.averageWeightKg) || transferData.averageWeightKg <= 0) {
     return { ok: false, error: 'میانگین وزن انتقال باید عدد مثبت معتبر باشد.' };
   }
 
-  const biomass = Number((transferData.fishCount * transferData.averageWeightKg).toFixed(2));
-  if (!finiteNonNegative(source.biomassKg) || !Number.isFinite(biomass) || biomass <= 0 || biomass > source.biomassKg + 0.01) {
-    return { ok: false, error: 'بیومس انتقالی با موجودی معتبر مبدا سازگار نیست.' };
+  const biomass = Number((transferData.fishCount * transferData.averageWeightKg).toFixed(3));
+  if (!finiteNonNegative(source.biomassKg) || !Number.isFinite(biomass) || biomass <= 0 || biomass > source.biomassKg + 0.05) {
+    return { ok: false, error: 'بیومس انتقالی با موجودی گروه مبدا سازگار نیست.' };
   }
   if (!Number.isFinite(transferData.totalBiomassKg) || transferData.totalBiomassKg <= 0 || !closeEnough(transferData.totalBiomassKg, biomass)) {
     return { ok: false, error: 'بیومس اعلام‌شده با تعداد و میانگین وزن انتقال سازگار نیست.' };
@@ -56,7 +62,17 @@ function resolveSource(input: FishTransferInput, ponds: Pond[], nurseryTanks: Nu
   if (input.sourceType === 'Pond') {
     const pond = ponds.find((item) => item.id === input.sourceId);
     if (!pond) return { error: 'استخر مبدا یافت نشد.' };
-    return { source: { type: 'Pond', id: pond.id, count: pond.fishCount, biomassKg: pond.biomassKg, speciesId: pond.speciesId, pond } };
+    const stock = resolvePondStockGroup(pond, input.speciesId, input.stockSex);
+    if (!stock.ok || !stock.group) {
+      return { error: stock.error === 'STOCK_GROUP_SEX_REQUIRED' ? 'برای استخر مختلط، جنس گروه ماهی مبدا باید مشخص شود.' : 'گروه گونه/جنس مبدا در دفتر موجودی استخر یافت نشد.' };
+    }
+    return {
+      source: {
+        type: 'Pond', id: pond.id, count: stock.group.count,
+        biomassKg: Number((stock.group.count * stock.group.averageWeightKg).toFixed(6)),
+        speciesId: stock.group.speciesId, stockSex: stock.group.sex, pond,
+      },
+    };
   }
 
   if (input.sourceType === 'Nursery') {
@@ -73,7 +89,7 @@ function resolveSource(input: FishTransferInput, ponds: Pond[], nurseryTanks: Nu
     return {
       source: {
         type: 'Nursery', id: tank.id, count: tank.fishCount, biomassKg: tank.totalBiomassGrams / 1000,
-        speciesId: batch?.speciesId || tank.speciesId || input.speciesId, tank, batch,
+        speciesId: batch?.speciesId || tank.speciesId || input.speciesId, stockSex: input.stockSex || 'Unknown', tank, batch,
       },
     };
   }
@@ -84,16 +100,7 @@ function resolveSource(input: FishTransferInput, ponds: Pond[], nurseryTanks: Nu
   if (!Number.isInteger(batch.larvalCount) || batch.larvalCount <= 0 || !finiteNonNegative(batch.totalBiomassKg) || (batch.totalBiomassKg || 0) <= 0) {
     return { error: 'بچ لارو مبدا باید دفترچه تعداد و بیومس معتبر داشته باشد.' };
   }
-  return { source: { type: 'Hatchery', id: batch.id, count: batch.larvalCount, biomassKg: batch.totalBiomassKg || 0, speciesId: batch.speciesId || input.speciesId, batch } };
-}
-
-function validateDestinationSpecies(input: FishTransferInput, source: SourceLedger, destination: Pond): string | undefined {
-  const speciesId = source.speciesId || input.speciesId;
-  if (!speciesId) return 'گونه ماهی انتقالی ثبت نشده است.';
-  if (destination.speciesId !== speciesId && !destination.speciesMix?.some((mix) => mix.speciesId === speciesId)) {
-    return 'گونه ماهی انتقالی با گونه ثبت‌شده استخر مقصد سازگار نیست.';
-  }
-  return undefined;
+  return { source: { type: 'Hatchery', id: batch.id, count: batch.larvalCount, biomassKg: batch.totalBiomassKg || 0, speciesId: batch.speciesId || input.speciesId, stockSex: input.stockSex || 'Unknown', batch } };
 }
 
 function emptyNurseryDestination(tank: NurseryTank, source: SourceLedger): string | undefined {
@@ -106,8 +113,8 @@ function emptyNurseryDestination(tank: NurseryTank, source: SourceLedger): strin
 
 /**
  * Applies a live-stock transfer only when both source and destination ledgers
- * can be changed in the same returned state transition. Unsupported external
- * destinations fail closed instead of silently destroying biomass.
+ * can be changed in the same returned state transition. Pond transfers also
+ * conserve species/sex stock groups and registered chip identities.
  */
 export function executeAtomicFishTransfer(
   transferData: FishTransferInput,
@@ -118,6 +125,7 @@ export function executeAtomicFishTransfer(
   const sourceResult = resolveSource(transferData, ponds, nurseryTanks, larvae);
   if (!sourceResult.source) return { success: false, error: sourceResult.error };
   const source = sourceResult.source;
+  if (!source.speciesId || source.speciesId !== transferData.speciesId) return { success: false, error: 'گونه انتقال با گروه موجودی مبدا سازگار نیست.' };
   const validation = validateTransferNumbers(transferData, source);
   if (!validation.ok || validation.biomass === undefined) return { success: false, error: validation.error };
   const transferBiomass = validation.biomass;
@@ -127,8 +135,6 @@ export function executeAtomicFishTransfer(
   if (transferData.destinationType === 'Pond') {
     if (!destinationPond) return { success: false, error: 'استخر مقصد یافت نشد.' };
     if (source.type === 'Pond' && destinationPond.id === source.id) return { success: false, error: 'استخر مبدا و مقصد نمی‌توانند یکسان باشند.' };
-    const speciesError = validateDestinationSpecies(transferData, source, destinationPond);
-    if (speciesError) return { success: false, error: speciesError };
   } else if (transferData.destinationType === 'Nursery') {
     if (!destinationTank) return { success: false, error: 'مخزن نرسری مقصد یافت نشد.' };
     const destinationError = emptyNurseryDestination(destinationTank, source);
@@ -145,25 +151,29 @@ export function executeAtomicFishTransfer(
     return { success: false, error: 'انتقال جزئی بین مخازن نرسری بدون دفترچه چندمخزنه مجاز نیست.' };
   }
 
-  const newTransfer: FishTransfer = { ...transferData, id: nextId('trf'), totalBiomassKg: transferBiomass, status: 'COMPLETED' };
+  const normalizedTransfer: FishTransferInput = { ...transferData, stockSex: source.stockSex, chipNumbers: transferData.chipNumbers || [] };
+  const newTransfer: FishTransfer = { ...normalizedTransfer, id: nextId('trf'), totalBiomassKg: transferBiomass, status: 'COMPLETED' };
   let updatedPonds = ponds;
   let updatedNurseryTanks = nurseryTanks;
   let updatedLarvae = larvae;
 
   if (source.pond) {
-    const newCount = source.pond.fishCount - transferData.fishCount;
-    const newBiomass = Number(Math.max(0, source.pond.biomassKg - transferBiomass).toFixed(2));
-    updatedPonds = updatedPonds.map((pond) => pond.id === source.pond?.id
-      ? { ...pond, fishCount: newCount, biomassKg: newBiomass, averageWeightKg: newCount > 0 ? Number((newBiomass / newCount).toFixed(3)) : 0, lastTransferDate: transferData.date }
-      : pond);
+    const consumed = consumePondStock(source.pond, {
+      speciesId: source.speciesId!, sex: source.stockSex, count: transferData.fishCount,
+      biomassKg: transferBiomass, chipNumbers: normalizedTransfer.chipNumbers,
+    });
+    if (!consumed.ok || !consumed.pond) return { success: false, error: consumed.error || 'دفتر موجودی گروه مبدا به‌روزرسانی نشد.' };
+    updatedPonds = updatedPonds.map((pond) => pond.id === source.pond?.id ? { ...consumed.pond!, lastTransferDate: transferData.date } : pond);
   }
 
   if (destinationPond) {
-    const newCount = destinationPond.fishCount + transferData.fishCount;
-    const newBiomass = Number((destinationPond.biomassKg + transferBiomass).toFixed(2));
-    updatedPonds = updatedPonds.map((pond) => pond.id === destinationPond?.id
-      ? { ...pond, fishCount: newCount, biomassKg: newBiomass, averageWeightKg: newCount > 0 ? Number((newBiomass / newCount).toFixed(3)) : 0, lastTransferDate: transferData.date }
-      : pond);
+    const currentDestination = updatedPonds.find((pond) => pond.id === destinationPond.id) || destinationPond;
+    const added = addPondStock(currentDestination, {
+      speciesId: source.speciesId!, sex: source.stockSex, count: transferData.fishCount,
+      biomassKg: transferBiomass, chipNumbers: normalizedTransfer.chipNumbers,
+    });
+    if (!added.ok || !added.pond) return { success: false, error: added.error || 'دفتر موجودی گروه مقصد به‌روزرسانی نشد.' };
+    updatedPonds = updatedPonds.map((pond) => pond.id === destinationPond.id ? { ...added.pond!, lastTransferDate: transferData.date } : pond);
   }
 
   if (source.tank) {
@@ -207,9 +217,9 @@ export function executeAtomicFishTransfer(
     }
   }
 
-  if (source.type === 'Pond' && destinationPond) {
-    const initialCount = source.count + destinationPond.fishCount;
-    const initialBiomass = Number((source.biomassKg + destinationPond.biomassKg).toFixed(2));
+  if (source.type === 'Pond' && source.pond && destinationPond) {
+    const initialCount = source.pond.fishCount + destinationPond.fishCount;
+    const initialBiomass = Number((source.pond.biomassKg + destinationPond.biomassKg).toFixed(3));
     const finalSource = updatedPonds.find((pond) => pond.id === source.id)!;
     const finalDestination = updatedPonds.find((pond) => pond.id === destinationPond.id)!;
     if (finalSource.fishCount + finalDestination.fishCount !== initialCount || !closeEnough(finalSource.biomassKg + finalDestination.biomassKg, initialBiomass)) {
