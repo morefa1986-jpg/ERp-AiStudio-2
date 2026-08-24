@@ -65,7 +65,7 @@ export class FeedFactoryFormulaStore {
         actor TEXT NOT NULL,
         data_json TEXT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_feed_factory_formula_events_formula ON feed_factory_formula_events(formula_id, timestamp DESC, rowid DESC);
+      CREATE INDEX IF NOT EXISTS idx_feed_factory_formula_events_formula ON feed_factory_formula_events(formula_id, timestamp DESC);
     `);
   }
 
