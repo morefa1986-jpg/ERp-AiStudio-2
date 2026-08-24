@@ -9,6 +9,7 @@ import { createServer as createViteServer } from 'vite';
 import { DUMMY_PASSWORD_HASH, hashPasswordServer, verifyPasswordServer } from './server/auth';
 import { dahirGatewayStatus, fetchDahirTelemetryServerSide } from './server/dahirGateway';
 import { resolveServerListenConfig } from './server/lanConfig';
+import { registerMasterDataRoutes } from './server/masterDataRoutes';
 import { constantTimeEqual, isSessionExpired, resolveSessionPolicy } from './server/sessionPolicy';
 import {
   filterRowsByUserScope,
@@ -664,6 +665,15 @@ app.put('/api/state', requireAuth, requireStateAction, (req: AuthenticatedReques
     }
     return res.status(500).json({ success: false, error: 'STATE_SAVE_FAILED' });
   }
+});
+
+registerMasterDataRoutes(app, {
+  requireAuth,
+  requireAdmin,
+  store,
+  synchronizeHallAggregates,
+  filterStateForUser,
+  auditFromOperation,
 });
 
 app.get('/api/audit-logs', requireAuth, (req: AuthenticatedRequest, res) => {
