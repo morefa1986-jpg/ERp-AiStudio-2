@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from 'express';
-import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, updateHallMaster, updatePondMetadata } from './masterData';
+import { createHallMaster, createPondMaster, createSpeciesMaster, MasterResult, updateHallMaster, updatePondMetadata, updateSpeciesMaster } from './masterData';
 import { registerModuleSettingsRoutes } from './moduleSettingsRoutes';
 import { StateConflictError, StoredAuditLog } from './storage';
 import { validateStateSnapshot } from '../src/utils/stateIntegrity';
@@ -112,5 +112,10 @@ export function registerMasterDataRoutes(app: Express, deps: Dependencies): void
   app.post('/api/master-data/species', deps.requireAuth, deps.requireAdmin, (req: AuthenticatedRequest, res) => {
     const previous = current(res); if (!previous) return;
     return commit(req, res, previous, createSpeciesMaster(previous.data, req.body), { action: 'create', entity: 'Species' });
+  });
+
+  app.patch('/api/master-data/species/:id', deps.requireAuth, deps.requireAdmin, (req: AuthenticatedRequest, res) => {
+    const previous = current(res); if (!previous) return;
+    return commit(req, res, previous, updateSpeciesMaster(previous.data, req.params.id, req.body), { action: 'edit', entity: 'Species' });
   });
 }
