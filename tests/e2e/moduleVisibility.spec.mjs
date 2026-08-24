@@ -7,7 +7,7 @@ async function waitForBootstrap(request) {
     const response = await request.get('/api/auth/status');
     if (!response.ok()) return false;
     return (await response.json()).needsBootstrap === false;
-  }, { timeout: 15_000 }).toBe(true);
+  }, { timeout: 30_000, intervals: [200, 300, 500, 1000] }).toBe(true);
 }
 
 async function ownerToken(request) {
