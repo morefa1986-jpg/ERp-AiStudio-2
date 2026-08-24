@@ -10,8 +10,12 @@ export interface DahirGatewayPoint {
 
 export const DAHIR_GATEWAY_MAX_DATA_AGE_MINUTES = 15;
 
+function envValue(env: NodeJS.ProcessEnv, primary: string, legacy: string): string {
+  return String(env[primary] || env[legacy] || '').trim();
+}
+
 function baseUrlFromEnv(env: NodeJS.ProcessEnv): string {
-  const raw = String(env.DAHIR_BASE_URL || '').trim().replace(/\/+$/, '');
+  const raw = envValue(env, 'WATER_TELEMETRY_BASE_URL', 'DAHIR_BASE_URL').replace(/\/+$/, '');
   if (!raw) throw new Error('DAHIR_NOT_CONFIGURED');
   let parsed: URL;
   try { parsed = new URL(raw); } catch { throw new Error('DAHIR_BASE_URL_INVALID'); }
@@ -20,8 +24,8 @@ function baseUrlFromEnv(env: NodeJS.ProcessEnv): string {
 }
 
 function authHeaderFromEnv(env: NodeJS.ProcessEnv): string {
-  const apiKey = String(env.DAHIR_API_KEY || '').trim();
-  const bearer = String(env.DAHIR_BEARER_TOKEN || '').trim();
+  const apiKey = envValue(env, 'WATER_TELEMETRY_API_KEY', 'DAHIR_API_KEY');
+  const bearer = envValue(env, 'WATER_TELEMETRY_BEARER_TOKEN', 'DAHIR_BEARER_TOKEN');
   if (apiKey) return `ApiKey ${apiKey}`;
   if (bearer) return `Bearer ${bearer}`;
   throw new Error('DAHIR_SERVER_CREDENTIAL_REQUIRED');
@@ -53,12 +57,14 @@ function normalizePoint(key: string, item: any, now = Date.now()): DahirGatewayP
 }
 
 export function dahirGatewayStatus(env: NodeJS.ProcessEnv = process.env): { configured: boolean; authMode: 'apiKey' | 'bearer' | 'none'; host?: string; maxAgeMinutes: number } {
-  const raw = String(env.DAHIR_BASE_URL || '').trim();
+  const raw = envValue(env, 'WATER_TELEMETRY_BASE_URL', 'DAHIR_BASE_URL');
+  const apiKey = envValue(env, 'WATER_TELEMETRY_API_KEY', 'DAHIR_API_KEY');
+  const bearer = envValue(env, 'WATER_TELEMETRY_BEARER_TOKEN', 'DAHIR_BEARER_TOKEN');
   let host: string | undefined;
   try { host = raw ? new URL(raw).host : undefined; } catch { host = undefined; }
   return {
-    configured: Boolean(raw && (String(env.DAHIR_API_KEY || '').trim() || String(env.DAHIR_BEARER_TOKEN || '').trim())),
-    authMode: String(env.DAHIR_API_KEY || '').trim() ? 'apiKey' : String(env.DAHIR_BEARER_TOKEN || '').trim() ? 'bearer' : 'none',
+    configured: Boolean(raw && (apiKey || bearer)),
+    authMode: apiKey ? 'apiKey' : bearer ? 'bearer' : 'none',
     host,
     maxAgeMinutes: DAHIR_GATEWAY_MAX_DATA_AGE_MINUTES,
   };
