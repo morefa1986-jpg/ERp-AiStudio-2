@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Eye, EyeOff, LockKeyhole, RotateCcw, Search, Settings2, ShieldCheck, ToggleLeft, ToggleRight } from 'lucide-react';
 import { MODULE_CATALOG, ModuleSection, ModuleVisibilityId, useModuleVisibility } from '../../context/ModuleVisibilityContext';
 import { useAuth } from '../../context/AuthContext';
+import { MasterDataAdminPanel } from './MasterDataAdminPanel';
 
 const SECTION_COPY: Record<ModuleSection, { fa: string; en: string }> = {
   breeding: { fa: 'پرورش و عملیات مزرعه', en: 'Farm Operations' },
@@ -54,7 +55,7 @@ export const AdminSettingsView: React.FC = () => {
             تنظیمات ادمین و مرکز کنترل کل ERP
           </h1>
           <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-            همه بخش‌های برنامه در این صفحه فهرست شده‌اند. خاموش‌کردن یک ماژول آن را هم از Sidebar حذف می‌کند و هم دسترسی مستقیم Routing به آن را می‌بندد.
+            Master Data مزرعه روی Server مدیریت می‌شود. کنترل نمایش ماژول‌ها نیز در همین مرکز قرار دارد؛ خاموش‌کردن یک ماژول آن را از Sidebar و Routing حذف می‌کند.
           </p>
         </div>
         <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-3 py-2 rounded-xl text-xs font-bold">
@@ -62,6 +63,8 @@ export const AdminSettingsView: React.FC = () => {
           {currentUser?.fullName || 'Admin'} · {enabledCount}/{MODULE_CATALOG.length} فعال
         </div>
       </div>
+
+      <MasterDataAdminPanel />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><span className="text-[11px] text-slate-400 block">کل ماژول‌ها</span><strong className="text-2xl text-white">{MODULE_CATALOG.length}</strong></div>
