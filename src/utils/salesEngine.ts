@@ -33,14 +33,22 @@ function requirementForItem(item: ProformaInvoice['items'][number]): SaleRequire
   return { sku: item.sku, quantity: item.quantity, packaged };
 }
 
+function legacyLotSku(lot: ColdStoragePallet): string | null {
+  const batch = String(lot.batchCode || '').trim();
+  if (!batch) return null;
+  if (lot.productType === 'Caviar (Cans/Jars)') return `CAV-${batch}`;
+  if (lot.productType === 'Vacuumed Fillet') return `FIL-${batch}`;
+  if (lot.productType === 'Smoked Sturgeon') return `SMK-${batch}`;
+  if (lot.productType === 'Frozen Sturgeon Whole') return `WHOLE-${batch}`;
+  return null;
+}
+
 export function saleLotMatchesSku(lot: ColdStoragePallet, sku: string): boolean {
-  if (lot.sku) return lot.sku === sku;
-  const normalized = sku.trim().toUpperCase();
-  if (normalized.startsWith('CAV')) return lot.productType === 'Caviar (Cans/Jars)';
-  if (normalized.startsWith('FIL')) return lot.productType === 'Vacuumed Fillet';
-  if (normalized.startsWith('SMK')) return lot.productType === 'Smoked Sturgeon';
-  if (normalized.startsWith('WHOLE')) return lot.productType === 'Frozen Sturgeon Whole';
-  return false;
+  const requested = sku.trim().toUpperCase();
+  if (!requested) return false;
+  if (lot.sku?.trim()) return lot.sku.trim().toUpperCase() === requested;
+  const derived = legacyLotSku(lot);
+  return Boolean(derived && derived.toUpperCase() === requested);
 }
 
 function requirementsFor(proforma: ProformaInvoice): SaleRequirement[] | { error: string } {
