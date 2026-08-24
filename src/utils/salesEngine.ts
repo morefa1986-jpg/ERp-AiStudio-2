@@ -1,4 +1,4 @@
-import { ColdStoragePallet, ProformaInvoice } from '../types';
+import { ColdStoragePallet, ProformaInvoice, ProformaItem } from '../types';
 import { nextId } from './id';
 
 export interface SaleFulfillmentResult {
@@ -11,6 +11,7 @@ export interface SaleFulfillmentResult {
 
 interface SaleRequirement {
   sku: string;
+  coldStorageLotId?: string;
   quantity: number;
   packaged: boolean;
   weightKg?: number;
@@ -26,11 +27,12 @@ function requirementForItem(item: ProformaInvoice['items'][number]): SaleRequire
   if (!Number.isFinite(item.quantity) || item.quantity <= 0) return { error: 'مقدار فروش باید مثبت باشد.' };
   const packaged = isPackagedUnit(item.unit);
   if (packaged && (!Number.isInteger(item.quantity) || item.quantity <= 0)) return { error: 'تعداد بسته‌های فروش باید عدد صحیح مثبت باشد.' };
+  const coldStorageLotId = item.coldStorageLotId?.trim() || undefined;
   const normalizedUnit = item.unit.trim().toLowerCase();
-  if (!packaged && normalizedUnit === 'kg') return { sku: item.sku, quantity: item.quantity, packaged, weightKg: item.quantity };
-  if (!packaged && (normalizedUnit === 'g' || normalizedUnit === 'gram' || normalizedUnit === 'گرم')) return { sku: item.sku, quantity: item.quantity, packaged, weightKg: item.quantity / 1000 };
+  if (!packaged && normalizedUnit === 'kg') return { sku: item.sku, coldStorageLotId, quantity: item.quantity, packaged, weightKg: item.quantity };
+  if (!packaged && (normalizedUnit === 'g' || normalizedUnit === 'gram' || normalizedUnit === 'گرم')) return { sku: item.sku, coldStorageLotId, quantity: item.quantity, packaged, weightKg: item.quantity / 1000 };
   if (!packaged) return { error: `واحد فروش برای ${item.sku} پشتیبانی نمی‌شود.` };
-  return { sku: item.sku, quantity: item.quantity, packaged };
+  return { sku: item.sku, coldStorageLotId, quantity: item.quantity, packaged };
 }
 
 function legacyLotSku(lot: ColdStoragePallet): string | null {
@@ -51,13 +53,24 @@ export function saleLotMatchesSku(lot: ColdStoragePallet, sku: string): boolean 
   return Boolean(derived && derived.toUpperCase() === requested);
 }
 
+export function saleLineMatchesLot(lot: ColdStoragePallet, item: Pick<ProformaItem, 'sku' | 'coldStorageLotId'>): boolean {
+  if (item.coldStorageLotId?.trim()) return lot.id === item.coldStorageLotId.trim() && saleLotMatchesSku(lot, item.sku);
+  return saleLotMatchesSku(lot, item.sku);
+}
+
+function requirementMatchesLot(lot: ColdStoragePallet, requirement: SaleRequirement): boolean {
+  if (requirement.coldStorageLotId) return lot.id === requirement.coldStorageLotId && saleLotMatchesSku(lot, requirement.sku);
+  return saleLotMatchesSku(lot, requirement.sku);
+}
+
 function requirementsFor(proforma: ProformaInvoice): SaleRequirement[] | { error: string } {
   const requirements = new Map<string, SaleRequirement>();
   for (const item of proforma.items) {
     if (!item.sku.trim()) return { error: 'شناسه کالای فروش الزامی است.' };
     const requirement = requirementForItem(item);
     if ('error' in requirement) return requirement;
-    const key = `${requirement.sku}\u0000${requirement.packaged ? 'packaged' : 'weight'}`;
+    const identity = requirement.coldStorageLotId ? `lot:${requirement.coldStorageLotId}` : `legacy-sku:${requirement.sku}`;
+    const key = `${identity}\u0000${requirement.packaged ? 'packaged' : 'weight'}`;
     const existing = requirements.get(key);
     if (!existing) requirements.set(key, { ...requirement });
     else {
@@ -74,7 +87,7 @@ function availableAt(lot: ColdStoragePallet, timestamp: number): boolean {
   if (!Number.isFinite(expiry) || !Number.isFinite(entered)) return false;
   if (entered > timestamp || expiry < timestamp) return false;
   if (lot.status === 'Pending Dispatch') return false;
-  if ((lot as ColdStoragePallet & { qualityHold?: boolean }).qualityHold) return false;
+  if (lot.qualityHold) return false;
   return Number(lot.unitsCount || 0) > 0 || Number(lot.weightKg || 0) > 0.001;
 }
 
@@ -91,8 +104,8 @@ export function fulfillProforma(
 
   const updated = coldStorage.map((lot) => ({ ...lot }));
   for (const requirement of requirements) {
-    const matchingLots = updated.filter((lot) => saleLotMatchesSku(lot, requirement.sku));
-    if (!matchingLots.length) return { success: false, error: `کالای فروش ${requirement.sku} در سردخانه یافت نشد.` };
+    const matchingLots = updated.filter((lot) => requirementMatchesLot(lot, requirement));
+    if (!matchingLots.length) return { success: false, error: requirement.coldStorageLotId ? `لات فروش ${requirement.coldStorageLotId} در سردخانه یافت نشد یا SKU آن ناسازگار است.` : `کالای فروش ${requirement.sku} در سردخانه یافت نشد.` };
     const lots = matchingLots.filter((lot) => availableAt(lot, fulfillmentTime));
     if (!lots.length) return { success: false, error: `هیچ لات معتبر و منقضی‌نشده‌ای برای ${requirement.sku} قابل ارسال نیست.` };
 
@@ -135,8 +148,8 @@ export function validateSaleFulfillmentConservation(
   const requirements = requirementsFor(proforma);
   if ('error' in requirements) return { ok: false, error: requirements.error };
   for (const requirement of requirements) {
-    const beforeLots = before.filter((lot) => saleLotMatchesSku(lot, requirement.sku));
-    const afterLots = after.filter((lot) => saleLotMatchesSku(lot, requirement.sku));
+    const beforeLots = before.filter((lot) => requirementMatchesLot(lot, requirement));
+    const afterLots = after.filter((lot) => requirementMatchesLot(lot, requirement));
     if (!beforeLots.length || beforeLots.length !== afterLots.length) return { ok: false, error: 'SALE_STORAGE_REFERENCE_INVALID' };
     const beforeUnits = beforeLots.reduce((sum, lot) => sum + Number(lot.unitsCount || 0), 0);
     const afterUnits = afterLots.reduce((sum, lot) => sum + Number(lot.unitsCount || 0), 0);
