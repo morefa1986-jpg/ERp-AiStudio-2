@@ -20,6 +20,7 @@ import { assessWaterSafetyForFeeding } from '../utils/sensorValidation';
 import { executeAtomicFishTransfer } from '../utils/transferEngine';
 import { executeAtomicProcessing } from '../utils/processingEngine';
 import { fulfillProforma } from '../utils/salesEngine';
+import { applyBiometryToPondStock, applyMortalityToPondStock } from '../utils/pondStockOperations';
 import { nextId } from '../utils/id';
 
 export interface FeedingRecommendationResult {
@@ -259,11 +260,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         conflictRetryCount.current = 0;
         setServerVersion(Number(payload.state.version));
         const remaining = pendingOperations.current.length;
-        setSyncStatus({
-          status: remaining ? 'PENDING_CHANGES' : 'ONLINE',
-          pendingChangesCount: remaining,
-          lastSyncTimestamp: new Date().toISOString(),
-        });
+        setSyncStatus({ status: remaining ? 'PENDING_CHANGES' : 'ONLINE', pendingChangesCount: remaining, lastSyncTimestamp: new Date().toISOString() });
         if (remaining) setRetryNonce((value) => value + 1);
       } catch {
         setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: pendingOperations.current.length }));
@@ -283,10 +280,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     window.addEventListener('online', retry);
     const interval = window.setInterval(retry, 15_000);
-    return () => {
-      window.removeEventListener('online', retry);
-      window.clearInterval(interval);
-    };
+    return () => { window.removeEventListener('online', retry); window.clearInterval(interval); };
   }, [currentUser?.id]);
 
   useEffect(() => {
@@ -371,23 +365,65 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const recordMortality = (record: Omit<MortalityRecord, 'id' | 'timestamp'>) => {
     if (!can('mortality', 'create', record.pondId)) return;
     const pond = ponds.find((item) => item.id === record.pondId);
-    if (!pond || !Number.isInteger(record.count) || record.count <= 0 || record.count > pond.fishCount || !Number.isFinite(record.estimatedWeightKg) || record.estimatedWeightKg < 0 || record.estimatedWeightKg > pond.biomassKg) return;
-    const newRecord: MortalityRecord = { ...record, id: nextId('mort'), timestamp: new Date().toISOString() };
-    const newCount = pond.fishCount - record.count; const newBiomass = Number((pond.biomassKg - record.estimatedWeightKg).toFixed(2));
-    setMortalityRecords((previous) => [newRecord, ...previous]); setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, fishCount: newCount, biomassKg: newBiomass, averageWeightKg: newCount > 0 ? Number((newBiomass / newCount).toFixed(3)) : 0, dailyMortalityCount: item.dailyMortalityCount + record.count } : item));
-    createAuditLog('CREATE', 'MortalityRecord', newRecord.id, `${record.count} mortality recorded in ${pond.name}`); markLocalChange({ module: 'mortality', action: 'create', entity: 'MortalityRecord', entityId: newRecord.id });
+    if (!pond || !Number.isInteger(record.count) || record.count <= 0 || !Number.isFinite(record.estimatedWeightKg) || record.estimatedWeightKg < 0) return;
+    const applied = applyMortalityToPondStock(pond, {
+      speciesId: record.speciesId,
+      stockSex: record.stockSex,
+      count: record.count,
+      biomassKg: record.estimatedWeightKg,
+      chipNumbers: record.chipNumbers,
+    });
+    if (!applied.ok || !applied.pond || !applied.selectedSex) return;
+    const newRecord: MortalityRecord = { ...record, stockSex: applied.selectedSex, id: nextId('mort'), timestamp: new Date().toISOString() };
+    setMortalityRecords((previous) => [newRecord, ...previous]);
+    setPonds((previous) => previous.map((item) => item.id === pond.id ? applied.pond! : item));
+    createAuditLog('CREATE', 'MortalityRecord', newRecord.id, `${record.count} mortality recorded in ${pond.name} / ${record.speciesId} / ${applied.selectedSex}`);
+    markLocalChange({ module: 'mortality', action: 'create', entity: 'MortalityRecord', entityId: newRecord.id });
   };
 
   const recordBiometry = (session: Omit<BiometricSession, 'id' | 'averageWeightKg' | 'minWeightKg' | 'maxWeightKg' | 'estimatedBiomassKg' | 'estimatedCount' | 'growthRateKgPerDay' | 'sgr'>) => {
     if (!can('biometrics', 'create', session.pondId)) return;
-    const pond = ponds.find((item) => item.id === session.pondId); const validSamples = session.samples.filter((sample) => Number.isFinite(sample.weightKg) && sample.weightKg > 0); if (!pond || !validSamples.length) return;
-    const weights = validSamples.map((sample) => sample.weightKg); const average = weights.reduce((sum, value) => sum + value, 0) / weights.length;
-    const previousSession = biometricSessions.filter((item) => item.pondId === pond.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-    const previousAverage = previousSession?.averageWeightKg || pond.averageWeightKg || average; const previousDate = previousSession?.date || pond.lastBiometryDate;
-    const days = Math.max(1, Math.round((new Date(session.date).getTime() - new Date(previousDate).getTime()) / 86_400_000)); const growthRate = (average - previousAverage) / days; const sgr = previousAverage > 0 ? (Math.log(average / previousAverage) / days) * 100 : 0; const estimatedBiomass = Number((pond.fishCount * average).toFixed(2));
-    const newSession: BiometricSession = { ...session, id: nextId('bio'), sampleCount: validSamples.length, samples: validSamples, averageWeightKg: Number(average.toFixed(3)), minWeightKg: Math.min(...weights), maxWeightKg: Math.max(...weights), estimatedBiomassKg: estimatedBiomass, estimatedCount: pond.fishCount, previousAvgWeightKg: previousAverage, daysSinceLastBiometry: days, growthRateKgPerDay: Number(growthRate.toFixed(4)), sgr: Number(sgr.toFixed(3)) };
-    setBiometricSessions((previous) => [newSession, ...previous]); setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, averageWeightKg: newSession.averageWeightKg, biomassKg: estimatedBiomass, lastBiometryDate: session.date } : item));
-    createAuditLog('CREATE', 'BiometricSession', newSession.id, `Biometry recorded for ${pond.name}`); markLocalChange({ module: 'biometrics', action: 'create', entity: 'BiometricSession', entityId: newSession.id });
+    const pond = ponds.find((item) => item.id === session.pondId);
+    const validSamples = session.samples.filter((sample) => Number.isFinite(sample.weightKg) && sample.weightKg > 0);
+    if (!pond || !validSamples.length) return;
+    const weights = validSamples.map((sample) => sample.weightKg);
+    const average = weights.reduce((sum, value) => sum + value, 0) / weights.length;
+    const applied = applyBiometryToPondStock(pond, { speciesId: session.speciesId, stockSex: session.stockSex, averageWeightKg: average, date: session.date });
+    if (!applied.ok || !applied.pond || !applied.selectedSex || !Number.isInteger(applied.selectedCount) || (applied.selectedCount || 0) <= 0) return;
+    const previousSession = biometricSessions
+      .filter((item) => item.pondId === pond.id && item.speciesId === session.speciesId && (item.stockSex || 'Unknown') === applied.selectedSex)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+    const previousAverage = previousSession?.averageWeightKg || applied.previousAverageWeightKg || average;
+    const currentMs = new Date(session.date).getTime();
+    if (!Number.isFinite(currentMs)) return;
+    const previousDate = previousSession?.date || pond.lastBiometryDate;
+    const previousMsRaw = previousDate ? new Date(previousDate).getTime() : Number.NaN;
+    const previousMs = Number.isFinite(previousMsRaw) ? previousMsRaw : currentMs - 86_400_000;
+    const days = Math.max(1, Math.round((currentMs - previousMs) / 86_400_000));
+    const growthRate = (average - previousAverage) / days;
+    const sgr = previousAverage > 0 ? (Math.log(average / previousAverage) / days) * 100 : 0;
+    const selectedCount = Number(applied.selectedCount);
+    const estimatedBiomass = Number((selectedCount * average).toFixed(2));
+    const newSession: BiometricSession = {
+      ...session,
+      stockSex: applied.selectedSex,
+      id: nextId('bio'),
+      sampleCount: validSamples.length,
+      samples: validSamples,
+      averageWeightKg: Number(average.toFixed(3)),
+      minWeightKg: Math.min(...weights),
+      maxWeightKg: Math.max(...weights),
+      estimatedBiomassKg: estimatedBiomass,
+      estimatedCount: selectedCount,
+      previousAvgWeightKg: previousAverage,
+      daysSinceLastBiometry: days,
+      growthRateKgPerDay: Number(growthRate.toFixed(4)),
+      sgr: Number(sgr.toFixed(3)),
+    };
+    setBiometricSessions((previous) => [newSession, ...previous]);
+    setPonds((previous) => previous.map((item) => item.id === pond.id ? applied.pond! : item));
+    createAuditLog('CREATE', 'BiometricSession', newSession.id, `Biometry recorded for ${pond.name} / ${session.speciesId} / ${applied.selectedSex}`);
+    markLocalChange({ module: 'biometrics', action: 'create', entity: 'BiometricSession', entityId: newSession.id });
   };
 
   const recordWaterTest = (test: Omit<WaterQualityLog, 'id' | 'timestamp'>) => {
@@ -400,7 +436,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const severity: WaterQualityLog['severity'] = safety.isCriticalAlert ? 'CRITICAL' : safety.isSafeForFeeding ? 'INFO' : 'HIGH';
     const sensorStatus: WaterQualityLog['sensorStatus'] = manual ? 'MANUAL' : invalid ? 'INVALID' : safety.staleTelemetry ? 'STALE' : 'VALID';
     const authoritativeForAutomation = sensorStatus === 'VALID' && safety.isSafeForFeeding;
-    const newLog: WaterQualityLog = { ...test, id: nextId('water'), timestamp, severity, sensorStatus, alertMessage: manual ? 'اندازه‌گیری دستی ثبت شد؛ برای تصمیم خودکار تغذیه منبع authoritative محسوب نمی‌شود.' : safety.feedingProhibitionReason };
+    const newLog: WaterQualityLog = { ...test, id: nextId('water'), timestamp, severity, sensorStatus, alertMessage: manual ? 'اندازه‌گیری دستی ثبت شد؛ برای تصمیم خوراک‌دهی منبع authoritative محسوب نمی‌شود.' : safety.feedingProhibitionReason };
     setWaterLogs((previous) => [newLog, ...previous]);
     setPonds((previous) => previous.map((item) => item.id !== pond.id ? item : {
       ...item,
@@ -413,10 +449,10 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sensorQuality: sensorStatus,
       feedingStatus: authoritativeForAutomation ? item.feedingStatus : 'STOPPED',
       stopFeedingReason: authoritativeForAutomation ? item.stopFeedingReason : (test.temperature < 4 ? 'Low Temperature' : test.dissolvedOxygen < 4 ? 'Low Oxygen' : 'Manual Decision'),
-      stopFeedingDetails: authoritativeForAutomation ? item.stopFeedingDetails : (manual ? 'اندازه‌گیری دستی جایگزین تله‌متری معتبر برای تغذیه خودکار نیست.' : safety.feedingProhibitionReason),
+      stopFeedingDetails: authoritativeForAutomation ? item.stopFeedingDetails : (manual ? 'اندازه‌گیری دستی جایگزین تله‌متری معتبر برای ایمنی خوراک‌دهی نیست.' : safety.feedingProhibitionReason),
       stopFeedingTimestamp: authoritativeForAutomation ? item.stopFeedingTimestamp : timestamp,
     }));
-    createAuditLog('CREATE', 'WaterQualityLog', newLog.id, manual ? 'Manual water quality recorded; automated feeding remains fail-closed' : safety.isSafeForFeeding ? 'Water quality recorded' : `Water safety alert: ${safety.feedingProhibitionReason}`);
+    createAuditLog('CREATE', 'WaterQualityLog', newLog.id, manual ? 'Manual water quality recorded; feeding remains fail-closed' : safety.isSafeForFeeding ? 'Water quality recorded' : `Water safety alert: ${safety.feedingProhibitionReason}`);
     markLocalChange({ module: 'water_quality', action: 'create', entity: 'WaterQualityLog', entityId: newLog.id });
   };
 
@@ -504,11 +540,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!fulfillment.success || !fulfillment.coldStorage || !fulfillment.fulfilledAt || !fulfillment.transactionId) return;
       setColdStorage(fulfillment.coldStorage);
     }
-    const updatedProforma: ProformaInvoice = {
-      ...existing,
-      stage: newStage,
-      ...(fulfillment ? { fulfilledAt: fulfillment.fulfilledAt, fulfillmentTransactionId: fulfillment.transactionId } : {}),
-    };
+    const updatedProforma: ProformaInvoice = { ...existing, stage: newStage, ...(fulfillment ? { fulfilledAt: fulfillment.fulfilledAt, fulfillmentTransactionId: fulfillment.transactionId } : {}) };
     setProformas((previous) => previous.map((row) => row.id === id ? updatedProforma : row));
     createAuditLog('UPDATE', 'ProformaInvoice', id, `Stage changed to ${newStage}`, undefined, undefined, fulfillment?.transactionId);
     markLocalChange({ module: 'sales', action: 'edit', entity: 'ProformaInvoice', entityId: id, transactionId: fulfillment?.transactionId });
