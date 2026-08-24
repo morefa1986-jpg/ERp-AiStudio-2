@@ -51,7 +51,6 @@ export function rowWithinUserScope(collection: string, row: any, data: Record<st
   if (POND_LINKED_COLLECTIONS.has(collection)) return pondIds.has(String(row?.pondId || ''));
   if (collection === 'processingBatches') return pondIds.has(String(row?.sourcePondId || ''));
   if (collection === 'labSamples') {
-    // Current LabSample schema has sourceName but no stable pondId. Hide it from scoped users until the schema is traceable.
     return false;
   }
   if (collection === 'transfers') {
@@ -98,12 +97,16 @@ export function mergeSubmittedRowsWithinScope(
   return [...submittedValue, ...hidden];
 }
 
+export type RequestedScopeResult =
+  | { ok: true; hallScope: string[]; pondScope: string[]; error?: undefined }
+  | { ok: false; error: string; hallScope?: undefined; pondScope?: undefined };
+
 export function validateRequestedUserScope(
   state: Record<string, unknown> | undefined,
   role: string,
   hallScopeRaw: unknown,
   pondScopeRaw: unknown,
-): { ok: true; hallScope: string[]; pondScope: string[] } | { ok: false; error: string } {
+): RequestedScopeResult {
   const hallScope = Array.isArray(hallScopeRaw) ? [...new Set(hallScopeRaw.map(String).map((id) => id.trim()).filter(Boolean))] : [];
   const pondScope = Array.isArray(pondScopeRaw) ? [...new Set(pondScopeRaw.map(String).map((id) => id.trim()).filter(Boolean))] : [];
   if (role === 'Super Admin' || role === 'Farm Owner') return { ok: true, hallScope: [], pondScope: [] };
