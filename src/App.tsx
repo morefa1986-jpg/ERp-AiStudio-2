@@ -24,6 +24,7 @@ const HatcheryView = lazy(() => import('./components/views/HatcheryOperationsVie
 const NurseryView = lazy(() => import('./components/views/NurseryView').then((module) => ({ default: module.NurseryView })));
 const ProcessingView = lazy(() => import('./components/views/ProcessingView').then((module) => ({ default: module.ProcessingView })));
 const ColdStorageView = lazy(() => import('./components/views/ColdStorageView').then((module) => ({ default: module.ColdStorageView })));
+const LaboratoryView = lazy(() => import('./components/views/LaboratoryView').then((module) => ({ default: module.LaboratoryView })));
 const SalesCrmView = lazy(() => import('./components/views/SalesCrmView').then((module) => ({ default: module.SalesCrmView })));
 const AccountingView = lazy(() => import('./components/views/AccountingView').then((module) => ({ default: module.AccountingView })));
 const HrPayrollView = lazy(() => import('./components/views/HrPayrollView').then((module) => ({ default: module.HrPayrollView })));
@@ -57,7 +58,7 @@ const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
   backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'platformHub', adminSettings: 'adminSettings',
 };
 
-const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'feedFactory', 'laboratory', 'maintenance']);
+const OPERATIONS_VIEWS = new Set<OperationsModuleId>(['farmHalls', 'feedFactory', 'maintenance']);
 
 const MainAppContent: React.FC = () => {
   const { dir, t } = useI18n();
@@ -110,6 +111,7 @@ const MainAppContent: React.FC = () => {
       case 'nursery': return <NurseryView />;
       case 'processing': return <ProcessingView />;
       case 'coldStorage': return <ColdStorageView />;
+      case 'laboratory': return <LaboratoryView />;
       case 'warehouse': return <WarehouseView />;
       case 'crm': case 'sales': return <SalesCrmView />;
       case 'accounting': return <AccountingView />;
