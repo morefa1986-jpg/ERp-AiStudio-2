@@ -164,9 +164,14 @@ export function validateFeedingSubmission(
   if (!feedItem.category.includes('Feed')) {
     return { success: false, error: 'کالای انتخاب‌شده خوراک نیست.', normalizedAmountKg: normalizedKg, feedItem };
   }
-  const expiry = feedItem.expiryDate ? new Date(`${feedItem.expiryDate}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY;
-  if (feedItem.status === 'Expired' || !Number.isFinite(expiry) || expiry < Date.now()) {
+  if (feedItem.status === 'Expired') {
     return { success: false, error: 'مصرف خوراک منقضی‌شده در ERP مجاز نیست.', normalizedAmountKg: normalizedKg, feedItem };
+  }
+  if (feedItem.expiryDate) {
+    const expiry = new Date(`${feedItem.expiryDate}T23:59:59.999`).getTime();
+    if (!Number.isFinite(expiry) || expiry < Date.now()) {
+      return { success: false, error: 'مصرف خوراک منقضی‌شده در ERP مجاز نیست.', normalizedAmountKg: normalizedKg, feedItem };
+    }
   }
   const requiredInventoryQuantity = inventoryQuantityForFeedKg(feedItem, normalizedKg);
   if (requiredInventoryQuantity <= 0) {
