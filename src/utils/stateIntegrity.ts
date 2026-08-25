@@ -10,7 +10,7 @@ export const STATE_COLLECTIONS = [
   'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
   'treatments', 'transfers', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks',
   'inventory', 'inventoryTxs', 'labSamples', 'processingBatches', 'coldStorage', 'customers', 'proformas',
-  'officeDocuments', 'accounts', 'journals', 'employees', 'attendance', 'payrolls', 'equipment', 'socialPosts', 'auditLogs', 'backups',
+  'officeDocuments', 'officeSettings', 'accounts', 'journals', 'employees', 'attendance', 'payrolls', 'equipment', 'socialPosts', 'auditLogs', 'backups',
 ] as const;
 
 type State = Record<string, any>;
@@ -34,7 +34,7 @@ export const MODULE_COLLECTIONS: Record<string, string[]> = {
   laboratory: ['labSamples', 'waterLogs', 'auditLogs'],
   crm: ['customers', 'auditLogs'],
   sales: ['proformas', 'customers', 'coldStorage', 'auditLogs'],
-  documents: ['officeDocuments', 'proformas', 'customers', 'auditLogs'],
+  documents: ['officeDocuments', 'officeSettings', 'proformas', 'customers', 'auditLogs'],
   accounting: ['accounts', 'journals', 'auditLogs'],
   hr: ['employees', 'attendance', 'payrolls', 'auditLogs'],
   media: ['socialPosts', 'auditLogs'],
@@ -75,7 +75,7 @@ export function validateStateSnapshot(raw: unknown): { ok: boolean; error?: stri
   const unknownKeys = Object.keys(state).filter((key) => !(STATE_COLLECTIONS as readonly string[]).includes(key));
   if (unknownKeys.length) return { ok: false, error: `STATE_UNKNOWN_COLLECTION:${unknownKeys[0]}` };
   for (const key of STATE_COLLECTIONS) {
-    if (key === 'officeDocuments' && state[key] === undefined) continue;
+    if ((key === 'officeDocuments' || key === 'officeSettings') && state[key] === undefined) continue;
     if (!Array.isArray(state[key])) return { ok: false, error: `STATE_COLLECTION_REQUIRED:${key}` };
   }
   for (const key of STATE_COLLECTIONS) {

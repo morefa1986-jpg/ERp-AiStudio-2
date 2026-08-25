@@ -228,6 +228,7 @@ const COLLECTION_VIEW_MODULES: Record<string, string[]> = {
   customers: ['crm', 'sales'],
   proformas: ['sales'],
   officeDocuments: ['documents', 'sales', 'accounting'],
+  officeSettings: ['documents', 'sales', 'accounting'],
   accounts: ['accounting'],
   journals: ['accounting'],
   employees: ['hr'],

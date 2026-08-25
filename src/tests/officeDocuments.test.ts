@@ -45,4 +45,12 @@ describe('office document registry', () => {
     const data = { ...baseState(), officeDocuments: [document] };
     expect(validateBackupDocument({ schemaVersion: BACKUP_SCHEMA_VERSION, data, checksum: checksumBackupData(data) }).ok).toBe(true);
   });
+
+  it('allows admin branding settings to be managed through the documents module', () => {
+    const previous = baseState();
+    const officeSettings = [{ id: 'office-branding-default', companyNameFa: 'فتحی', companyNameEn: 'Fathi', registrationLine: '', addressLine: '', phoneLine: '', emailLine: '', websiteLine: '', invoiceFooterNote: '', letterFooterNote: '', logoDataUrl: 'data:image/png;base64,AA==', updatedAt: '2026-08-25T08:00:00.000Z', updatedBy: 'Admin' }];
+    const next = { ...previous, officeSettings, auditLogs: [{ id: 'audit_2' }] };
+    expect(validateMutationScope(previous, next, { module: 'documents', action: 'manage' })).toEqual({ ok: true });
+    expect(validateStateSnapshot(next).ok).toBe(true);
+  });
 });

@@ -4,6 +4,7 @@ import { MODULE_CATALOG, ModuleSection, ModuleVisibilityId, useModuleVisibility 
 import { useAuth } from '../../context/AuthContext';
 import { MasterDataAdminPanel } from './MasterDataAdminPanel';
 import { WaterTelemetryAdminPanel } from './WaterTelemetryAdminPanel';
+import { OfficeBrandingAdminPanel } from './OfficeBrandingAdminPanel';
 
 const SECTION_COPY: Record<ModuleSection, { fa: string; en: string }> = {
   breeding: { fa: 'پرورش و عملیات مزرعه', en: 'Farm Operations' },
@@ -67,6 +68,7 @@ export const AdminSettingsView: React.FC = () => {
 
       <MasterDataAdminPanel />
       <WaterTelemetryAdminPanel />
+      <OfficeBrandingAdminPanel />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><span className="text-[11px] text-slate-400 block">کل ماژول‌ها</span><strong className="text-2xl text-white">{MODULE_CATALOG.length}</strong></div>

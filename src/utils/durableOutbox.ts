@@ -47,6 +47,7 @@ const COLLECTION_HINTS: Array<{ collection: string; module: PermissionModule }> 
   { collection: 'processingBatches', module: 'processing' },
   { collection: 'proformas', module: 'sales' },
   { collection: 'officeDocuments', module: 'documents' },
+  { collection: 'officeSettings', module: 'documents' },
   { collection: 'journals', module: 'accounting' },
   { collection: 'attendance', module: 'hr' },
   { collection: 'payrolls', module: 'hr' },

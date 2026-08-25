@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Archive, FileCheck2, FileText, Plus, Search, UploadCloud } from 'lucide-react';
+import { Archive, FileCheck2, FileText, Plus, Printer, Search, UploadCloud } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useFarm } from '../../context/FarmContext';
 import { OfficeDocument, OfficeDocumentAttachment } from '../../types';
@@ -63,12 +63,14 @@ function sizeLabel(bytes: number): string {
 }
 
 export const DocumentsOfficeView: React.FC = () => {
-  const { officeDocuments, customers, proformas, addOfficeDocument, updateOfficeDocumentStatus } = useFarm();
+  const { officeDocuments, officeSettings, customers, proformas, addOfficeDocument, updateOfficeDocumentStatus } = useFarm();
+  const branding = officeSettings[0];
   const { hasPermission } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [attachments, setAttachments] = useState<OfficeDocumentAttachment[]>([]);
+  const [printDocument, setPrintDocument] = useState<OfficeDocument | null>(null);
   const [error, setError] = useState('');
 
   const filtered = useMemo(() => {
@@ -136,9 +138,9 @@ export const DocumentsOfficeView: React.FC = () => {
               </div>
               <p className="text-xs text-slate-400 mt-3 line-clamp-2">{document.summary || document.notes || '—'}</p>
               <div className="mt-3 space-y-1">{document.attachments.map((file) => <div key={file.id} className="flex justify-between text-[10px] bg-slate-900 rounded-lg px-2 py-1"><span className="text-slate-300">{file.kind}: {file.fileName}</span><span className="text-slate-500">{sizeLabel(file.sizeBytes)}</span></div>)}</div>
-              <select disabled={!hasPermission('documents', 'edit')} value={document.status} onChange={(event) => updateOfficeDocumentStatus(document.id, event.target.value as OfficeDocument['status'])} className="field w-full mt-3 text-xs">
+              <div className="grid grid-cols-[1fr_auto] gap-2 mt-3"><select disabled={!hasPermission('documents', 'edit')} value={document.status} onChange={(event) => updateOfficeDocumentStatus(document.id, event.target.value as OfficeDocument['status'])} className="field text-xs">
                 {['Registered', 'In Review', 'Referred', 'Answered', 'Archived', 'Cancelled'].map((status) => <option key={status} value={status}>{status}</option>)}
-              </select>
+              </select><button disabled={!hasPermission('documents', 'print')} onClick={() => setPrintDocument(document)} className="px-3 rounded-xl bg-slate-800 text-slate-200 disabled:opacity-40"><Printer className="w-4 h-4" /></button></div>
             </div>
           ))}
         </div>
@@ -172,6 +174,14 @@ export const DocumentsOfficeView: React.FC = () => {
           <div className="flex justify-end gap-2"><button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">انصراف</button><button type="submit" className="px-4 py-2 bg-amber-500 text-slate-950 font-bold rounded-xl">ثبت در اندیکاتور</button></div>
         </form>
       </div>}
+      {printDocument && <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"><div className="bg-white text-slate-950 rounded-2xl p-8 w-full max-w-3xl max-h-[90vh] overflow-auto">
+        <div className="flex justify-between border-b pb-4">{branding?.letterheadDataUrl ? <img src={branding.letterheadDataUrl} alt="Letterhead" className="max-h-24 object-contain" /> : <div className="flex gap-3">{branding?.logoDataUrl && <img src={branding.logoDataUrl} alt="Logo" className="w-14 h-14 object-contain" />}<div><h2 className="text-xl font-black">{branding?.companyNameFa || 'مزرعه فتحی'}</h2><div className="text-xs text-slate-500">{branding?.companyNameEn}</div><div className="text-xs text-slate-500">{branding?.registrationLine}</div></div></div>}<button onClick={() => setPrintDocument(null)} className="text-slate-500 print:hidden">×</button></div>
+        <div className="grid grid-cols-2 gap-3 mt-4 text-sm"><div>شماره اندیکاتور: <strong className="font-mono">{printDocument.indicatorNumber}</strong></div><div>تاریخ: {printDocument.documentDate}</div><div>شماره سند: {printDocument.documentNumber || '—'}</div><div>نوع: {printDocument.type}</div><div>از: {printDocument.sender}</div><div>به: {printDocument.receiver}</div><div className="col-span-2 text-lg font-black border-t pt-4">{printDocument.subject}</div></div>
+        <p className="mt-4 text-sm leading-8 whitespace-pre-wrap">{printDocument.summary || printDocument.notes || '—'}</p>
+        <div className="mt-4 text-xs text-slate-600">پیوست‌ها: {printDocument.attachments.map((file) => file.fileName).join('، ') || 'ندارد'}</div>
+        <div className="mt-8 flex justify-between items-end text-xs"><div className="text-slate-500">{branding?.letterFooterNote}</div><div className="flex gap-4 items-end">{branding?.stampDataUrl && <img src={branding.stampDataUrl} alt="Stamp" className="w-20 h-20 object-contain" />}{branding?.signatureDataUrl && <div className="text-center"><img src={branding.signatureDataUrl} alt="Signature" className="w-28 h-16 object-contain" /><div className="border-t pt-1">امضا مجاز</div></div>}</div></div>
+        <div className="mt-6 flex justify-end gap-2 print:hidden"><button onClick={() => window.print()} className="px-4 py-2 bg-slate-900 text-white rounded-lg">چاپ / PDF</button><button onClick={() => setPrintDocument(null)} className="px-4 py-2 bg-slate-200 rounded-lg">بستن</button></div>
+      </div></div>}
     </div>
   );
 };

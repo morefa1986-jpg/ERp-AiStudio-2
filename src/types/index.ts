@@ -638,6 +638,25 @@ export interface OfficeDocument {
   updatedAt?: string;
 }
 
+export interface OfficeBrandingSettings {
+  id: string;
+  companyNameFa: string;
+  companyNameEn: string;
+  registrationLine: string;
+  addressLine: string;
+  phoneLine: string;
+  emailLine: string;
+  websiteLine: string;
+  invoiceFooterNote: string;
+  letterFooterNote: string;
+  logoDataUrl?: string;
+  letterheadDataUrl?: string;
+  signatureDataUrl?: string;
+  stampDataUrl?: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 export interface Account {
   id: string;
   code: string;
