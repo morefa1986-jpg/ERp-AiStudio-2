@@ -33,7 +33,7 @@ const MAX_ENTRIES_PER_USER = 1000;
 
 const MODULE_PRIORITY: PermissionModule[] = [
   'feeding', 'water_quality', 'mortality', 'biometrics', 'treatments', 'transfers',
-  'processing', 'sales', 'accounting', 'hr', 'warehouse', 'feed_factory', 'hatchery',
+  'processing', 'sales', 'documents', 'accounting', 'hr', 'warehouse', 'feed_factory', 'hatchery',
   'nursery', 'laboratory', 'crm', 'media', 'backup', 'settings',
 ];
 
@@ -46,6 +46,7 @@ const COLLECTION_HINTS: Array<{ collection: string; module: PermissionModule }> 
   { collection: 'transfers', module: 'transfers' },
   { collection: 'processingBatches', module: 'processing' },
   { collection: 'proformas', module: 'sales' },
+  { collection: 'officeDocuments', module: 'documents' },
   { collection: 'journals', module: 'accounting' },
   { collection: 'attendance', module: 'hr' },
   { collection: 'payrolls', module: 'hr' },

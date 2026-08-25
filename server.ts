@@ -80,7 +80,7 @@ const VALID_STATE_MODULES = new Set([
   'dashboard', 'farm', 'halls', 'ponds', 'feeding', 'biometrics', 'water_quality', 'mortality',
   'treatments', 'transfers', 'hatchery', 'nursery', 'feed_factory', 'warehouse', 'laboratory',
   'processing', 'cold_storage', 'crm', 'sales', 'accounting', 'hr', 'media', 'ai_assistant',
-  'reports', 'backup', 'users', 'settings',
+  'reports', 'documents', 'backup', 'users', 'settings',
 ]);
 const VALID_STATE_ACTIONS = new Set(['view', 'create', 'edit', 'delete', 'approve', 'export', 'print', 'manage']);
 
@@ -166,9 +166,9 @@ function roleAllowsServer(role: string, module: string, action: string): boolean
     case 'Warehouse Manager': return ['dashboard', 'warehouse', 'reports'].includes(module) && operational;
     case 'Processing Manager': return ['dashboard', 'processing', 'cold_storage', 'warehouse', 'reports'].includes(module) && operational;
     case 'Cold Storage Manager': return ['dashboard', 'cold_storage', 'warehouse', 'sales', 'reports'].includes(module) && operational;
-    case 'Accountant': return ['dashboard', 'accounting', 'sales', 'hr', 'warehouse', 'reports'].includes(module) && operational;
+    case 'Accountant': return ['dashboard', 'accounting', 'sales', 'documents', 'hr', 'warehouse', 'reports'].includes(module) && operational;
     case 'Sales Manager':
-    case 'CRM Operator': return ['dashboard', 'crm', 'sales', 'processing', 'cold_storage', 'media', 'reports'].includes(module) && operational;
+    case 'CRM Operator': return ['dashboard', 'crm', 'sales', 'documents', 'processing', 'cold_storage', 'media', 'reports'].includes(module) && operational;
     case 'HR Manager': return ['dashboard', 'hr', 'reports'].includes(module) && operational;
     case 'Media Manager': return ['dashboard', 'media', 'reports'].includes(module) && operational;
     case 'Viewer/Auditor': return viewLike;
@@ -227,6 +227,7 @@ const COLLECTION_VIEW_MODULES: Record<string, string[]> = {
   coldStorage: ['cold_storage', 'processing', 'sales'],
   customers: ['crm', 'sales'],
   proformas: ['sales'],
+  officeDocuments: ['documents', 'sales', 'accounting'],
   accounts: ['accounting'],
   journals: ['accounting'],
   employees: ['hr'],

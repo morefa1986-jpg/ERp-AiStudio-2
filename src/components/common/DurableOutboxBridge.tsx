@@ -49,6 +49,7 @@ export const DurableOutboxBridge: React.FC = () => {
     coldStorage: farm.coldStorage,
     customers: farm.customers,
     proformas: farm.proformas,
+    officeDocuments: farm.officeDocuments,
     accounts: farm.accounts,
     journals: farm.journals,
     employees: farm.employees,
@@ -62,7 +63,7 @@ export const DurableOutboxBridge: React.FC = () => {
     farm.halls, farm.ponds, farm.species, farm.feedingRecords, farm.biometricSessions, farm.waterLogs,
     farm.mortalityRecords, farm.treatments, farm.transfers, farm.broodstock, farm.fertilizations,
     farm.incubators, farm.larvae, farm.nurseryTanks, farm.inventory, farm.inventoryTxs, farm.labSamples,
-    farm.processingBatches, farm.coldStorage, farm.customers, farm.proformas, farm.accounts, farm.journals,
+    farm.processingBatches, farm.coldStorage, farm.customers, farm.proformas, farm.officeDocuments, farm.accounts, farm.journals,
     farm.employees, farm.attendance, farm.payrolls, farm.equipment, farm.socialPosts, farm.auditLogs, farm.backups,
   ]);
 

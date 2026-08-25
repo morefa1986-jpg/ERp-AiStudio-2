@@ -39,6 +39,7 @@ export const MODULE_CATALOG: ModuleCatalogItem[] = [
   { id: 'coldStorage', titleFa: 'سردخانه', titleEn: 'Cold Storage', descriptionFa: 'لات‌ها، پالت‌ها، دما و موجودی محصول', section: 'hatchery' },
   { id: 'crm', titleFa: 'CRM مشتریان', titleEn: 'CRM', descriptionFa: 'پرونده مشتری و گردش ارتباطات تجاری', section: 'commercial' },
   { id: 'sales', titleFa: 'فروش و پیش‌فاکتور', titleEn: 'Sales', descriptionFa: 'پروفرما، سفارش، تحویل و فروش صادراتی', section: 'commercial' },
+  { id: 'documents', titleFa: 'دبیرخانه و اسناد', titleEn: 'Documents Office', descriptionFa: 'اندیکاتور، نامه‌های وارده/صادره و آرشیو فایل اصل/PDF', section: 'commercial' },
   { id: 'accounting', titleFa: 'حسابداری', titleEn: 'Accounting', descriptionFa: 'دفتر کل، اسناد دوبل و کدینگ حساب‌ها', section: 'commercial' },
   { id: 'hr', titleFa: 'منابع انسانی و حقوق', titleEn: 'HR & Payroll', descriptionFa: 'پرسنل، تردد و حقوق و دستمزد', section: 'commercial' },
   { id: 'aiAssistant', titleFa: 'دستیار هوشمند', titleEn: 'AI Assistant', descriptionFa: 'تحلیل داده و مشاور مزرعه', section: 'system' },

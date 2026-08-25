@@ -30,10 +30,10 @@ export function roleAllows(role: string, module: PermissionModule, action: Permi
     case 'Cold Storage Manager':
       return ['dashboard', 'cold_storage', 'warehouse', 'sales', 'reports'].includes(module) && canOperate;
     case 'Accountant':
-      return ['dashboard', 'accounting', 'sales', 'hr', 'warehouse', 'reports'].includes(module) && canOperate;
+      return ['dashboard', 'accounting', 'sales', 'documents', 'hr', 'warehouse', 'reports'].includes(module) && canOperate;
     case 'Sales Manager':
     case 'CRM Operator':
-      return ['dashboard', 'crm', 'sales', 'processing', 'cold_storage', 'media', 'reports'].includes(module) && canOperate;
+      return ['dashboard', 'crm', 'sales', 'documents', 'processing', 'cold_storage', 'media', 'reports'].includes(module) && canOperate;
     case 'HR Manager':
       return ['dashboard', 'hr', 'reports'].includes(module) && canOperate;
     case 'Media Manager':

@@ -70,6 +70,7 @@ export type PermissionModule =
   | 'accounting'
   | 'hr'
   | 'media'
+  | 'documents'
   | 'ai_assistant'
   | 'reports'
   | 'backup'
@@ -593,6 +594,48 @@ export interface ProformaInvoice {
   status: 'Draft' | 'Sent' | 'Accepted' | 'Converted to Invoice' | 'Cancelled';
   fulfilledAt?: string;
   fulfillmentTransactionId?: string;
+}
+
+export type OfficeDocumentDirection = 'Incoming (وارده)' | 'Outgoing (صادره)' | 'Internal (داخلی)';
+export type OfficeDocumentType = 'Letter (نامه)' | 'Invoice (فاکتور)' | 'Proforma (پیش‌فاکتور)' | 'Contract (قرارداد)' | 'Receipt (رسید)' | 'Other (سایر)';
+export type OfficeDocumentStatus = 'Registered' | 'In Review' | 'Referred' | 'Answered' | 'Archived' | 'Cancelled';
+
+export interface OfficeDocumentAttachment {
+  id: string;
+  kind: 'Original File (اصل فایل)' | 'PDF Copy (نسخه PDF)' | 'Supporting Attachment (پیوست)';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  localPath?: string;
+  checksum?: string;
+  addedAt: string;
+}
+
+export interface OfficeDocument {
+  id: string;
+  indicatorNumber: string;
+  documentNumber: string;
+  documentDate: string;
+  registeredAt: string;
+  direction: OfficeDocumentDirection;
+  type: OfficeDocumentType;
+  subject: string;
+  sender: string;
+  receiver: string;
+  confidentiality: 'Normal' | 'Confidential' | 'Secret';
+  priority: 'Low' | 'Normal' | 'High' | 'Urgent';
+  status: OfficeDocumentStatus;
+  relatedCustomerId?: string;
+  relatedProformaId?: string;
+  relatedFarmId?: string;
+  assignedTo?: string;
+  dueDate?: string;
+  tags: string[];
+  summary: string;
+  notes?: string;
+  attachments: OfficeDocumentAttachment[];
+  createdBy: string;
+  updatedAt?: string;
 }
 
 export interface Account {

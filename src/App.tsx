@@ -30,6 +30,7 @@ const ColdStorageView = lazy(() => import('./components/views/ColdStorageView').
 const LaboratoryView = lazy(() => import('./components/views/LaboratoryView').then((module) => ({ default: module.LaboratoryView })));
 const MaintenanceView = lazy(() => import('./components/views/MaintenanceView').then((module) => ({ default: module.MaintenanceView })));
 const SalesCrmView = lazy(() => import('./components/views/SalesCrmView').then((module) => ({ default: module.SalesCrmView })));
+const DocumentsOfficeView = lazy(() => import('./components/views/DocumentsOfficeView').then((module) => ({ default: module.DocumentsOfficeView })));
 const AccountingView = lazy(() => import('./components/views/AccountingView').then((module) => ({ default: module.AccountingView })));
 const HrPayrollView = lazy(() => import('./components/views/HrPayrollView').then((module) => ({ default: module.HrPayrollView })));
 const WarehouseView = lazy(() => import('./components/views/WarehouseView').then((module) => ({ default: module.WarehouseView })));
@@ -50,7 +51,7 @@ const VIEW_PERMISSIONS: Record<string, PermissionModule> = {
   dashboard: 'dashboard', farmHalls: 'halls', ponds: 'ponds', feeding: 'feeding', biometrics: 'biometrics', waterQuality: 'water_quality', mortality: 'mortality',
   treatments: 'treatments', transfers: 'transfers', hatchery: 'hatchery', nursery: 'nursery', feedFactory: 'feed_factory', warehouse: 'warehouse', laboratory: 'laboratory',
   processing: 'processing', coldStorage: 'cold_storage', crm: 'crm', sales: 'sales', accounting: 'accounting', hr: 'hr', hrPayroll: 'hr', aiAssistant: 'ai_assistant',
-  mediaStudio: 'media', media: 'media', caviarMarketing: 'media', maintenance: 'settings', reports: 'reports', securityAudit: 'users', users: 'users', backup: 'backup',
+  mediaStudio: 'media', media: 'media', caviarMarketing: 'media', documents: 'documents', maintenance: 'settings', reports: 'reports', securityAudit: 'users', users: 'users', backup: 'backup',
   backupRestore: 'backup', platformHub: 'settings', crossPlatform: 'settings', adminSettings: 'settings',
 };
 
@@ -58,7 +59,7 @@ const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
   dashboard: 'dashboard', farmHalls: 'farmHalls', ponds: 'ponds', feeding: 'feeding', biometrics: 'biometrics', waterQuality: 'waterQuality', mortality: 'mortality',
   treatments: 'treatments', transfers: 'transfers', hatchery: 'hatchery', nursery: 'nursery', feedFactory: 'feedFactory', warehouse: 'warehouse', laboratory: 'laboratory',
   processing: 'processing', coldStorage: 'coldStorage', crm: 'crm', sales: 'sales', accounting: 'accounting', hr: 'hr', hrPayroll: 'hr', aiAssistant: 'aiAssistant',
-  mediaStudio: 'mediaStudio', media: 'mediaStudio', caviarMarketing: 'mediaStudio', maintenance: 'maintenance', reports: 'reports', securityAudit: 'securityAudit', users: 'securityAudit',
+  mediaStudio: 'mediaStudio', media: 'mediaStudio', caviarMarketing: 'mediaStudio', documents: 'documents', maintenance: 'maintenance', reports: 'reports', securityAudit: 'securityAudit', users: 'securityAudit',
   backup: 'backup', backupRestore: 'backup', platformHub: 'platformHub', crossPlatform: 'platformHub', adminSettings: 'adminSettings',
 };
 
@@ -140,6 +141,7 @@ const MainAppContent: React.FC = () => {
       case 'maintenance': return <MaintenanceView />;
       case 'warehouse': return <WarehouseView />;
       case 'crm': case 'sales': return <SalesCrmView />;
+      case 'documents': return <DocumentsOfficeView />;
       case 'accounting': return <AccountingView />;
       case 'hr': case 'hrPayroll': return <HrPayrollView />;
       case 'aiAssistant': return <AiAssistantView />;
