@@ -34,11 +34,11 @@ export function validateBackupDocument(input: unknown): { ok: boolean; error?: s
     'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
     'treatments', 'transfers', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks',
     'inventory', 'inventoryTxs', 'labSamples', 'processingBatches', 'coldStorage', 'customers', 'proformas',
-    'officeDocuments', 'officeSettings', 'gatePasses', 'accounts', 'journals', 'employees', 'attendance', 'payrolls', 'equipment', 'socialPosts', 'auditLogs',
+    'officeDocuments', 'officeSettings', 'gatePasses', 'chatThreads', 'chatMessages', 'accounts', 'journals', 'employees', 'attendance', 'payrolls', 'equipment', 'socialPosts', 'auditLogs',
   ];
   for (const key of required) {
     const rows = input.data[key];
-    if ((key === 'officeDocuments' || key === 'officeSettings' || key === 'gatePasses') && rows === undefined) continue;
+    if ((key === 'officeDocuments' || key === 'officeSettings' || key === 'gatePasses' || key === 'chatThreads' || key === 'chatMessages') && rows === undefined) continue;
     if (!Array.isArray(rows) || !validIdRows(rows)) return { ok: false, error: `BACKUP_COLLECTION_INVALID:${key}` };
   }
 

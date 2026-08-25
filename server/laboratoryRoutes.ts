@@ -100,7 +100,8 @@ export function registerLaboratoryRoutes(app: Express, deps: Dependencies): void
     if (parameters.some((row: any) => !row.name || row.value === '' || !row.referenceRange || !PARAMETER_STATUSES.has(row.status))) return res.status(400).json({ success: false, error: 'LAB_PARAMETER_INVALID' });
     const resultSummary = clean(req.body?.resultSummary, 2000);
     if (!resultSummary) return res.status(400).json({ success: false, error: 'LAB_RESULT_SUMMARY_REQUIRED' });
-    const nextSample = { ...found, parametersTested: parameters, resultSummary, attachmentUrl: clean(req.body?.attachmentUrl, 1000) || found.attachmentUrl, resultRecordedAt: new Date().toISOString(), resultRecordedBy: actor(req) };
+    const attachments = Array.isArray(req.body?.attachments) ? req.body.attachments.slice(0, 12).filter((file: any) => file && typeof file.id === 'string' && typeof file.fileName === 'string' && typeof file.mimeType === 'string') : found.attachments || [];
+    const nextSample = { ...found, parametersTested: parameters, resultSummary, attachmentUrl: clean(req.body?.attachmentUrl, 1000) || found.attachmentUrl, attachments, resultRecordedAt: new Date().toISOString(), resultRecordedBy: actor(req) };
     return commit(req, res, previous, nextSample, 'edit', 'RESULTS_RECORDED', resultSummary);
   });
 

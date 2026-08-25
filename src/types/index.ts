@@ -72,6 +72,7 @@ export type PermissionModule =
   | 'accounting'
   | 'hr'
   | 'media'
+  | 'chat'
   | 'documents'
   | 'gatehouse'
   | 'ai_assistant'
@@ -93,6 +94,18 @@ export interface CustomRole {
   description: string;
   isSystem?: boolean;
   permissions: GranularPermission[];
+}
+
+export interface FileAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  storageId?: string;
+  downloadUrl?: string;
+  checksum?: string;
+  addedAt: string;
+  addedBy?: string;
 }
 
 export interface User {
@@ -287,6 +300,7 @@ export interface MortalityRecord {
   treatmentId?: string;
   description: string;
   photoUrl?: string;
+  photos?: FileAttachment[];
   recordedBy: string;
 }
 
@@ -483,6 +497,39 @@ export interface LabSample {
   status: 'Pending' | 'Approved' | 'Rejected';
   approvedBy?: string;
   attachmentUrl?: string;
+  attachments?: FileAttachment[];
+}
+
+export interface InternalChatThread {
+  id: string;
+  title: string;
+  type: 'Direct' | 'Group';
+  participantUserIds: string[];
+  createdAt: string;
+  createdBy: string;
+  lastMessageAt?: string;
+}
+
+export interface InternalChatMessage {
+  id: string;
+  threadId: string;
+  senderUserId: string;
+  senderName: string;
+  text: string;
+  attachments: FileAttachment[];
+  createdAt: string;
+}
+
+export interface InternalChatCall {
+  id: string;
+  threadId: string;
+  callType: 'audio' | 'video';
+  status: 'Ringing' | 'Active' | 'Ended';
+  startedAt: string;
+  endedAt?: string;
+  startedByUserId: string;
+  startedByName: string;
+  participantUserIds: string[];
 }
 
 export interface ProcessingBatch {
@@ -683,6 +730,7 @@ export interface GatePassRecord {
   exitApprovedAt?: string;
   exitedAt?: string;
   vehiclePlateNumber: string;
+  carrierVehicleNumber: string;
   vehicleType: string;
   driverName: string;
   driverNationalId: string;
@@ -700,6 +748,8 @@ export interface GatePassRecord {
   destinationAddress: string;
   relatedDocumentId?: string;
   relatedProformaId?: string;
+  exitSheetIssuedAt?: string;
+  exitSheetIssuedBy?: string;
   registeredBy: string;
   approvedBy?: string;
   notes?: string;

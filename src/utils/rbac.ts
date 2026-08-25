@@ -6,6 +6,7 @@ export function roleAllows(role: string, module: PermissionModule, action: Permi
   const viewLike = action === 'view' || action === 'export' || action === 'print';
   const operationalActions: PermissionAction[] = ['view', 'create', 'edit', 'approve', 'export', 'print'];
   const canOperate = operationalActions.includes(action);
+  if (module === 'chat') return role !== 'Viewer/Auditor' ? ['view', 'create', 'edit'].includes(action) : action === 'view';
 
   switch (role) {
     case 'Farm Manager':
@@ -39,9 +40,9 @@ export function roleAllows(role: string, module: PermissionModule, action: Permi
     case 'Media Manager':
       return ['dashboard', 'media', 'reports'].includes(module) && canOperate;
     case 'Gate Guard':
-      return ['dashboard', 'gatehouse', 'documents'].includes(module) && ['view', 'create', 'edit', 'print'].includes(action);
+      return ['dashboard', 'gatehouse', 'documents', 'chat'].includes(module) && ['view', 'create', 'edit', 'print'].includes(action);
     case 'Office Automation':
-      return ['dashboard', 'documents', 'gatehouse', 'reports'].includes(module) && canOperate;
+      return ['dashboard', 'documents', 'gatehouse', 'chat', 'reports'].includes(module) && canOperate;
     case 'Viewer/Auditor':
       return viewLike;
     default:

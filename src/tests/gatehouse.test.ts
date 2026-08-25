@@ -14,6 +14,7 @@ const gatePass = {
   status: 'Approved for Exit',
   registeredAt: '2026-08-25T09:30:00.000Z',
   vehiclePlateNumber: 'ایران 12 - 345 ع 67',
+  carrierVehicleNumber: 'TRK-TEH-1405-7788',
   vehicleType: 'کامیون یخچال‌دار',
   driverName: 'راننده تست',
   driverNationalId: '0012345678',
@@ -29,6 +30,8 @@ const gatePass = {
   transportPermitNumber: 'TP-3003',
   originAddress: 'دفتر مرکزی / سردخانه',
   destinationAddress: 'مشتری تهران',
+  exitSheetIssuedAt: '2026-08-25T09:35:00.000Z',
+  exitSheetIssuedBy: 'Office Automation',
   registeredBy: 'Gate Guard',
 };
 

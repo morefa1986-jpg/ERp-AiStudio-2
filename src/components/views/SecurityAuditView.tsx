@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, Clock, Key, Plus, Search, ShieldAlert, SlidersHorizontal, UserCheck, UserX, Users } from 'lucide-react';
+import { AlertTriangle, Clock, Download, Key, Plus, Search, ShieldAlert, SlidersHorizontal, UserCheck, UserX, Users } from 'lucide-react';
 import { useI18n } from '../../i18n';
 import { useFarm } from '../../context/FarmContext';
 import { useAuth } from '../../context/AuthContext';
@@ -15,6 +15,11 @@ export const SecurityAuditView: React.FC = () => {
   const { auditLogs, halls, ponds } = useFarm();
   const [tab, setTab] = useState<'users' | 'audit' | 'policy'>('users');
   const [search, setSearch] = useState('');
+  const [auditUser, setAuditUser] = useState('');
+  const [auditAction, setAuditAction] = useState('');
+  const [auditEntity, setAuditEntity] = useState('');
+  const [auditFrom, setAuditFrom] = useState('');
+  const [auditTo, setAuditTo] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [resetUserId, setResetUserId] = useState('');
   const [resetPassword, setResetPassword] = useState('');
@@ -28,8 +33,36 @@ export const SecurityAuditView: React.FC = () => {
   const isAdmin = currentUser?.role === 'Super Admin' || currentUser?.role === 'Farm Owner';
   const filteredLogs = useMemo(() => auditLogs.filter((log) => {
     const needle = search.trim().toLowerCase();
-    return !needle || `${log.action} ${log.entity} ${log.userName} ${log.details} ${log.ipAddress || ''}`.toLowerCase().includes(needle);
-  }), [auditLogs, search]);
+    const ts = new Date(log.timestamp).getTime();
+    if (auditUser && log.userName !== auditUser) return false;
+    if (auditAction && log.action !== auditAction) return false;
+    if (auditEntity && log.entity !== auditEntity) return false;
+    if (auditFrom && ts < new Date(`${auditFrom}T00:00:00`).getTime()) return false;
+    if (auditTo && ts > new Date(`${auditTo}T23:59:59.999`).getTime()) return false;
+    return !needle || `${log.action} ${log.entity} ${log.entityId} ${log.userName} ${log.userRole} ${log.details} ${log.ipAddress || ''} ${log.transactionId || ''}`.toLowerCase().includes(needle);
+  }), [auditLogs, search, auditUser, auditAction, auditEntity, auditFrom, auditTo]);
+
+  const auditUsers = useMemo(() => Array.from(new Set(auditLogs.map((log) => log.userName).filter(Boolean))).sort(), [auditLogs]);
+  const auditActions = useMemo(() => Array.from(new Set(auditLogs.map((log) => log.action).filter(Boolean))).sort(), [auditLogs]);
+  const auditEntities = useMemo(() => Array.from(new Set(auditLogs.map((log) => log.entity).filter(Boolean))).sort(), [auditLogs]);
+  const topAuditUsers = useMemo(() => {
+    const counts = new Map<string, number>();
+    filteredLogs.forEach((log) => counts.set(log.userName || '—', (counts.get(log.userName || '—') || 0) + 1));
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  }, [filteredLogs]);
+
+  const exportAuditCsv = () => {
+    const headers = ['timestamp', 'userName', 'userRole', 'action', 'entity', 'entityId', 'details', 'ipAddress', 'transactionId'];
+    const cell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const csv = [headers.map(cell).join(','), ...filteredLogs.map((log) => headers.map((key) => cell((log as any)[key])).join(','))].join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `fathi-user-activity-archive-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   const availablePondsFor = (hallScope: string[]) => hallScope.length ? ponds.filter((pond) => hallScope.includes(pond.hallId)) : ponds;
   const scopeLabel = (user: { hallScope?: string[]; pondScope?: string[] }) => {
@@ -97,13 +130,35 @@ export const SecurityAuditView: React.FC = () => {
   };
 
   return <div className="space-y-6 pb-12 animate-fadeIn">
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><h1 className="text-xl font-black text-white flex items-center gap-2"><ShieldAlert className="w-6 h-6 text-amber-400" />امنیت، کاربران و Audit Trail</h1><p className="text-xs text-slate-400 mt-1">کاربران، Role و Scope سالن/استخر Server-authoritative هستند. Audit ثبت سروری دارد، اما تا اضافه‌شدن cryptographic hash-chain به‌عنوان «غیرقابل‌دستکاری رمزنگاری‌شده» معرفی نمی‌شود.</p></div><div className="flex gap-2 text-xs"><button onClick={() => setTab('users')} className={`px-3 py-2 rounded-xl ${tab === 'users' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}>کاربران</button><button onClick={() => setTab('audit')} className={`px-3 py-2 rounded-xl ${tab === 'audit' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300'}`}>Audit</button><button onClick={() => setTab('policy')} className={`px-3 py-2 rounded-xl ${tab === 'policy' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-300'}`}>سیاست دسترسی</button></div></div>
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><h1 className="text-xl font-black text-white flex items-center gap-2"><ShieldAlert className="w-6 h-6 text-amber-400" />امنیت، کاربران و آرشیو فعالیت</h1><p className="text-xs text-slate-400 mt-1">کاربران، Role و Scope سالن/استخر Server-authoritative هستند. آرشیو فعالیت نشان می‌دهد هر کاربر چه داده‌ای را ثبت، ویرایش، تأیید یا حذف کرده است.</p></div><div className="flex gap-2 text-xs"><button onClick={() => setTab('users')} className={`px-3 py-2 rounded-xl ${tab === 'users' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300'}`}>کاربران</button><button onClick={() => setTab('audit')} className={`px-3 py-2 rounded-xl ${tab === 'audit' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300'}`}>آرشیو فعالیت کاربران</button><button onClick={() => setTab('policy')} className={`px-3 py-2 rounded-xl ${tab === 'policy' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-300'}`}>سیاست دسترسی</button></div></div>
 
     {message && <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 text-xs text-blue-200">{message}</div>}
 
     {tab === 'users' && <div className="space-y-4">{isAdmin && <div className="flex justify-end"><button onClick={() => setShowNew(true)} className="px-4 py-2 bg-amber-500 text-slate-950 rounded-xl text-xs font-bold"><Plus className="w-4 h-4 inline ml-1" />کاربر Server جدید</button></div>}<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">{usersList.map((user) => <div key={user.id} className={`bg-slate-900 border rounded-2xl p-5 ${user.isActive ? 'border-slate-800' : 'border-rose-500/30'}`}><div className="flex justify-between gap-2 border-b border-slate-800 pb-3"><div><strong className="text-white block">{user.fullName}</strong><span className="font-mono text-amber-400 text-xs">@{user.username}</span></div><span className="text-[10px] text-slate-400">{user.role}</span></div><div className="space-y-2 mt-3 text-xs"><div className="flex justify-between"><span className="text-slate-500">ایمیل</span><span className="text-slate-300">{user.email}</span></div><div className="flex justify-between"><span className="text-slate-500">وضعیت</span><strong className={user.isActive ? 'text-emerald-400' : 'text-rose-400'}>{user.isActive ? 'فعال' : 'غیرفعال'}</strong></div><div className="flex justify-between"><span className="text-slate-500">Scope داده</span><span className="text-cyan-300">{scopeLabel(user)}</span></div><div className="flex justify-between"><span className="text-slate-500">زبان</span><span className="text-slate-300 uppercase">{user.preferredLanguage}</span></div></div>{isAdmin && <div className="grid grid-cols-3 gap-2 mt-4"><button onClick={() => void toggle(user.id)} disabled={user.id === currentUser?.id} className={`action ${user.isActive ? 'text-rose-300' : 'text-emerald-300'} disabled:opacity-30`}>{user.isActive ? <><UserX className="w-4 h-4" />غیرفعال</> : <><UserCheck className="w-4 h-4" />فعال</>}</button><button onClick={() => openAccess(user.id)} className="action text-cyan-300"><SlidersHorizontal className="w-4 h-4" />دسترسی</button><button onClick={() => { setResetUserId(user.id); setResetPassword(''); }} className="action text-amber-300"><Key className="w-4 h-4" />رمز</button></div>}</div>)}</div></div>}
 
-    {tab === 'audit' && <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5"><div className="flex flex-col sm:flex-row justify-between gap-3 mb-4"><div><h2 className="text-sm font-bold text-white flex items-center gap-2"><Clock className="w-4 h-4 text-blue-400" />ردپای عملیات Server</h2><span className="text-[10px] text-slate-500">برای Tamper Evidence کامل، Hash-chain/remote append-only sink هنوز باید در Backend اضافه شود.</span></div><div className="relative"><Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو..." className="bg-slate-800 border border-slate-700 rounded-xl pr-9 pl-3 py-2 text-xs text-white" /></div></div><div className="overflow-x-auto"><table className="w-full text-xs text-right"><thead className="bg-slate-950 text-slate-500"><tr><th className="p-3">زمان</th><th className="p-3">کاربر</th><th className="p-3">عملیات</th><th className="p-3">موجودیت</th><th className="p-3">شرح</th><th className="p-3">IP</th><th className="p-3">Transaction</th></tr></thead><tbody className="divide-y divide-slate-800">{filteredLogs.map((log) => <tr key={log.id} className="text-slate-300"><td className="p-3 whitespace-nowrap">{formatDate(log.timestamp)} {formatTime(log.timestamp)}</td><td className="p-3 text-white">{log.userName}</td><td className="p-3 font-mono text-amber-400">{log.action}</td><td className="p-3">{log.entity}</td><td className="p-3 min-w-64">{log.details}</td><td className="p-3 font-mono text-slate-500">{log.ipAddress || '—'}</td><td className="p-3 font-mono text-[10px] text-slate-500">{log.transactionId || '—'}</td></tr>)}</tbody></table></div></div>}
+    {tab === 'audit' && <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><span className="text-[11px] text-slate-400 block">کل رکوردهای آرشیو</span><strong className="text-2xl text-white">{auditLogs.length}</strong></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><span className="text-[11px] text-slate-400 block">نتیجه فیلتر فعلی</span><strong className="text-2xl text-blue-300">{filteredLogs.length}</strong></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><span className="text-[11px] text-slate-400 block">کاربران ثبت‌کننده</span><strong className="text-2xl text-amber-300">{auditUsers.length}</strong></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4"><span className="text-[11px] text-slate-400 block">بخش‌های درگیر</span><strong className="text-2xl text-cyan-300">{auditEntities.length}</strong></div>
+      </div>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div className="flex flex-col xl:flex-row justify-between gap-3 mb-4">
+          <div><h2 className="text-sm font-bold text-white flex items-center gap-2"><Clock className="w-4 h-4 text-blue-400" />آرشیو فعالیت کاربران برای پیگیری مدیریتی</h2><span className="text-[10px] text-slate-500">مدیر می‌تواند بر اساس کاربر، عملیات، بخش، تاریخ، IP و Transaction جستجو کند و خروجی CSV بگیرد.</span></div>
+          <button disabled={!filteredLogs.length} onClick={exportAuditCsv} className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40"><Download className="w-4 h-4" />خروجی CSV آرشیو</button>
+        </div>
+        <div className="grid md:grid-cols-3 xl:grid-cols-6 gap-2 mb-4 text-xs">
+          <div className="relative md:col-span-2"><Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="جستجو در شرح، شناسه، IP..." className="field pr-9 w-full" /></div>
+          <select value={auditUser} onChange={(e) => setAuditUser(e.target.value)} className="field"><option value="">همه کاربران</option>{auditUsers.map((name) => <option key={name} value={name}>{name}</option>)}</select>
+          <select value={auditAction} onChange={(e) => setAuditAction(e.target.value)} className="field"><option value="">همه عملیات</option>{auditActions.map((action) => <option key={action} value={action}>{action}</option>)}</select>
+          <select value={auditEntity} onChange={(e) => setAuditEntity(e.target.value)} className="field"><option value="">همه موجودیت‌ها</option>{auditEntities.map((entity) => <option key={entity} value={entity}>{entity}</option>)}</select>
+          <div className="grid grid-cols-2 gap-2"><input type="date" value={auditFrom} onChange={(e) => setAuditFrom(e.target.value)} className="field" /><input type="date" value={auditTo} onChange={(e) => setAuditTo(e.target.value)} className="field" /></div>
+        </div>
+        {topAuditUsers.length > 0 && <div className="mb-4 flex flex-wrap gap-2">{topAuditUsers.map(([name, count]) => <button key={name} onClick={() => setAuditUser(name)} className="px-3 py-1.5 rounded-full border border-blue-500/20 bg-blue-500/10 text-blue-200 text-[10px]">{name}: {count} رکورد</button>)}</div>}
+        <div className="overflow-x-auto"><table className="w-full text-xs text-right"><thead className="bg-slate-950 text-slate-500"><tr><th className="p-3">زمان</th><th className="p-3">کاربر مسئول</th><th className="p-3">نقش</th><th className="p-3">عملیات</th><th className="p-3">بخش/موجودیت</th><th className="p-3">شناسه رکورد</th><th className="p-3">شرح قابل پیگیری</th><th className="p-3">IP</th><th className="p-3">Transaction</th></tr></thead><tbody className="divide-y divide-slate-800">{filteredLogs.map((log) => <tr key={log.id} className="text-slate-300"><td className="p-3 whitespace-nowrap">{formatDate(log.timestamp)} {formatTime(log.timestamp)}</td><td className="p-3 text-white">{log.userName}</td><td className="p-3 text-cyan-300">{log.userRole}</td><td className="p-3 font-mono text-amber-400">{log.action}</td><td className="p-3">{log.entity}</td><td className="p-3 font-mono text-[10px] text-slate-400">{log.entityId}</td><td className="p-3 min-w-72">{log.details}</td><td className="p-3 font-mono text-slate-500">{log.ipAddress || '—'}</td><td className="p-3 font-mono text-[10px] text-slate-500">{log.transactionId || '—'}</td></tr>)}{filteredLogs.length === 0 && <tr><td colSpan={9} className="p-8 text-center text-slate-500">رکوردی برای فیلتر فعلی وجود ندارد.</td></tr>}</tbody></table></div>
+      </div>
+    </div>}
 
     {tab === 'policy' && <div className="grid md:grid-cols-2 gap-4"><div className="bg-slate-900 border border-emerald-500/30 rounded-2xl p-5"><h2 className="text-sm font-bold text-emerald-300 mb-2">فعال: RBAC + Data Scope سروری</h2><p className="text-xs text-slate-400 leading-relaxed">Role مجوز ماژول/عملیات را تعیین می‌کند؛ hallScope/pondScope دامنه داده را محدود می‌کند. GET، PUT و حتی Conflict payload روی Server بر اساس Scope فیلتر می‌شوند.</p></div><div className="bg-slate-900 border border-amber-500/30 rounded-2xl p-5"><h2 className="text-sm font-bold text-amber-300 mb-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4" />Custom Role</h2><p className="text-xs text-slate-400 leading-relaxed">Custom Role محلی قبلی غیرفعال است، چون هنوز جدول Role/Permission سروری مستقل ندارد. تا تکمیل آن، سیستم فقط نقش‌های معتبر Backend را قبول می‌کند.</p></div></div>}
 

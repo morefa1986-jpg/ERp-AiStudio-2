@@ -3,7 +3,7 @@ import { getStoredSessionToken, useAuth } from './AuthContext';
 import {
   Account, AttendanceRecord, BackupSnapshot, BiometricSession, BroodstockFish, ColdStoragePallet, Customer,
   Employee, Equipment, FeedingRecord, FertilizationBatch, FishTransfer, FarmAuditLog, GatePassRecord, Hall, IncubatorUnit,
-  InventoryItem, InventoryTransaction, JournalEntry, LabSample, LarvalBatch, MortalityRecord, NurseryTank,
+  InternalChatMessage, InternalChatThread, InventoryItem, InventoryTransaction, JournalEntry, LabSample, LarvalBatch, MortalityRecord, NurseryTank,
   OfficeBrandingSettings, OfficeDocument, PayrollRecord, PermissionAction, PermissionModule, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost,
   SturgeonSpecies, TreatmentRecord, WaterQualityLog,
 } from '../types';
@@ -48,6 +48,7 @@ interface FarmContextType {
   proformas: ProformaInvoice[]; officeDocuments: OfficeDocument[]; gatePasses: GatePassRecord[]; accounts: Account[]; journals: JournalEntry[]; employees: Employee[];
   attendance: AttendanceRecord[]; payrolls: PayrollRecord[]; equipment: Equipment[]; socialPosts: SocialMediaPost[];
   officeSettings: OfficeBrandingSettings[]; auditLogs: FarmAuditLog[]; backups: BackupSnapshot[]; syncStatus: OfflineSyncStatus;
+  chatThreads: InternalChatThread[]; chatMessages: InternalChatMessage[];
   createHallStructure: (input: HallAdminInput) => { success: boolean; error?: string; id?: string };
   updateHallStructure: (hallId: string, patch: HallAdminPatch) => { success: boolean; error?: string };
   createPondStructure: (input: PondStructureAdminInput) => { success: boolean; error?: string; id?: string };
@@ -74,6 +75,8 @@ interface FarmContextType {
   updateOfficeBranding: (patch: Partial<Omit<OfficeBrandingSettings, 'id' | 'updatedAt' | 'updatedBy'>>) => { success: boolean; error?: string };
   addGatePass: (record: Omit<GatePassRecord, 'id' | 'passNumber' | 'registeredAt' | 'registeredBy' | 'status'>) => { success: boolean; error?: string; id?: string };
   updateGatePassStatus: (id: string, status: GatePassRecord['status']) => { success: boolean; error?: string };
+  createChatThread: (thread: Omit<InternalChatThread, 'id' | 'createdAt' | 'createdBy' | 'lastMessageAt'>) => { success: boolean; error?: string; id?: string };
+  sendChatMessage: (message: Omit<InternalChatMessage, 'id' | 'createdAt' | 'senderUserId' | 'senderName'>) => { success: boolean; error?: string; id?: string };
   createJournalEntry: (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>) => { success: boolean; error?: string };
   createFxConversionJournalEntry: (entry: FxConversionInput) => { success: boolean; error?: string };
   clockAttendance: (employeeId: string, type: 'in' | 'out', shift: AttendanceRecord['shift']) => void;
@@ -165,6 +168,8 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [proformas, setProformas] = useState<ProformaInvoice[]>(() => DEMO_MODE ? INITIAL_PROFORMAS : EMPTY_ARRAY<ProformaInvoice>());
   const [officeDocuments, setOfficeDocuments] = useState<OfficeDocument[]>(EMPTY_ARRAY);
   const [gatePasses, setGatePasses] = useState<GatePassRecord[]>(EMPTY_ARRAY);
+  const [chatThreads, setChatThreads] = useState<InternalChatThread[]>(EMPTY_ARRAY);
+  const [chatMessages, setChatMessages] = useState<InternalChatMessage[]>(EMPTY_ARRAY);
   const [officeSettings, setOfficeSettings] = useState<OfficeBrandingSettings[]>(() => [{
     id: 'office-branding-default',
     companyNameFa: 'مزرعه تکثیر و پرورش ماهیان خاویاری فتحی',
@@ -199,9 +204,9 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const stateData = useMemo<Record<string, unknown>>(() => ({
     halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers,
     broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples,
-    processingBatches, coldStorage, customers, proformas, officeDocuments, gatePasses, accounts, journals, employees, attendance, payrolls,
+    processingBatches, coldStorage, customers, proformas, officeDocuments, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls,
     equipment, socialPosts, officeSettings, auditLogs, backups: backups.map(stripBackupData),
-  }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, gatePasses, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, officeSettings, auditLogs, backups]);
+  }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, officeSettings, auditLogs, backups]);
 
   const applyState = (data: Record<string, unknown>, serverAudit: FarmAuditLog[] = []) => {
     const rows = <T,>(key: string): T[] => Array.isArray(data[key]) ? data[key] as T[] : [];
@@ -218,7 +223,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIncubators(rows<IncubatorUnit>('incubators')); setLarvae(rows<LarvalBatch>('larvae')); setNurseryTanks(rows<NurseryTank>('nurseryTanks'));
     setInventory(rows<InventoryItem>('inventory')); setInventoryTxs(rows<InventoryTransaction>('inventoryTxs')); setLabSamples(rows<LabSample>('labSamples'));
     setProcessingBatches(rows<ProcessingBatch>('processingBatches')); setColdStorage(rows<ColdStoragePallet>('coldStorage'));
-    setCustomers(rows<Customer>('customers')); setProformas(rows<ProformaInvoice>('proformas')); setOfficeDocuments(rows<OfficeDocument>('officeDocuments')); setGatePasses(rows<GatePassRecord>('gatePasses')); if (rows<OfficeBrandingSettings>('officeSettings').length) setOfficeSettings(rows<OfficeBrandingSettings>('officeSettings')); setAccounts(rows<Account>('accounts'));
+    setCustomers(rows<Customer>('customers')); setProformas(rows<ProformaInvoice>('proformas')); setOfficeDocuments(rows<OfficeDocument>('officeDocuments')); setGatePasses(rows<GatePassRecord>('gatePasses')); setChatThreads(rows<InternalChatThread>('chatThreads')); setChatMessages(rows<InternalChatMessage>('chatMessages')); if (rows<OfficeBrandingSettings>('officeSettings').length) setOfficeSettings(rows<OfficeBrandingSettings>('officeSettings')); setAccounts(rows<Account>('accounts'));
     setJournals(rows<JournalEntry>('journals')); setEmployees(rows<Employee>('employees')); setAttendance(rows<AttendanceRecord>('attendance'));
     setPayrolls(rows<PayrollRecord>('payrolls')); setEquipment(rows<Equipment>('equipment')); setSocialPosts(rows<SocialMediaPost>('socialPosts'));
     const mappedServerAudit = serverAudit.map((log: any): FarmAuditLog => ({
@@ -893,11 +898,15 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const nextGatePassNumber = (): string => `GP-${new Date().getFullYear()}-${String(gatePasses.length + 1).padStart(5, '0')}`;
+  const validIranNationalId = (value: string): boolean => /^\d{10}$/.test(String(value || '').trim());
+  const validPhone = (value: string): boolean => /^(\+?\d{8,15}|0\d{10})$/.test(String(value || '').replace(/[\s-]/g, ''));
 
   const addGatePass = (record: Omit<GatePassRecord, 'id' | 'passNumber' | 'registeredAt' | 'registeredBy' | 'status'>) => {
     if (!can('gatehouse', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
-    const required = [record.vehiclePlateNumber, record.vehicleType, record.driverName, record.driverNationalId, record.driverPhone, record.cargoOwnerName, record.cargoOwnerNationalId, record.cargoOwnerPhone, record.cargoType, record.cargoVolume, record.cargoQuality, record.originAddress, record.destinationAddress];
+    const required = [record.vehiclePlateNumber, record.carrierVehicleNumber, record.vehicleType, record.driverName, record.driverNationalId, record.driverPhone, record.cargoOwnerName, record.cargoOwnerNationalId, record.cargoOwnerPhone, record.cargoType, record.cargoVolume, record.cargoQuality, record.originAddress, record.destinationAddress];
     if (required.some((value) => !String(value || '').trim())) return { success: false, error: 'GATE_PASS_REQUIRED_FIELDS' };
+    if (!validIranNationalId(record.driverNationalId) || !validIranNationalId(record.cargoOwnerNationalId)) return { success: false, error: 'INVALID_NATIONAL_ID' };
+    if (!validPhone(record.driverPhone) || !validPhone(record.cargoOwnerPhone)) return { success: false, error: 'INVALID_PHONE_NUMBER' };
     const registeredAt = new Date().toISOString();
     const pass: GatePassRecord = {
       ...record,
@@ -908,6 +917,8 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       registeredBy: currentUser?.fullName || currentUser?.username || 'System',
       approvedBy: record.direction === 'Exit (خروج)' ? currentUser?.fullName || currentUser?.username || 'System' : undefined,
       exitApprovedAt: record.direction === 'Exit (خروج)' ? registeredAt : undefined,
+      exitSheetIssuedAt: record.direction === 'Exit (خروج)' ? registeredAt : undefined,
+      exitSheetIssuedBy: record.direction === 'Exit (خروج)' ? currentUser?.fullName || currentUser?.username || 'System' : undefined,
     };
     setGatePasses((previous) => [pass, ...previous]);
     createAuditLog('CREATE', 'GatePassRecord', pass.id, `Gate pass ${pass.passNumber} registered for ${pass.vehiclePlateNumber}`);
@@ -926,10 +937,52 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       exitApprovedAt: status === 'Approved for Exit' ? now : pass.exitApprovedAt,
       exitedAt: status === 'Exited' ? now : pass.exitedAt,
       approvedBy: status === 'Approved for Exit' ? currentUser?.fullName || currentUser?.username || 'System' : pass.approvedBy,
+      exitSheetIssuedAt: status === 'Approved for Exit' && !pass.exitSheetIssuedAt ? now : pass.exitSheetIssuedAt,
+      exitSheetIssuedBy: status === 'Approved for Exit' && !pass.exitSheetIssuedBy ? currentUser?.fullName || currentUser?.username || 'System' : pass.exitSheetIssuedBy,
     } : pass));
     createAuditLog('UPDATE', 'GatePassRecord', id, `Gate pass ${row.passNumber} status changed to ${status}`);
     markLocalChange({ module: 'gatehouse', action: 'edit', entity: 'GatePassRecord', entityId: id, referenceId: row.passNumber });
     return { success: true };
+  };
+
+  const createChatThread = (thread: Omit<InternalChatThread, 'id' | 'createdAt' | 'createdBy' | 'lastMessageAt'>) => {
+    if (!can('chat', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const participants = [...new Set(thread.participantUserIds.map(String).filter(Boolean))];
+    if (!thread.title.trim() || participants.length < 2) return { success: false, error: 'CHAT_THREAD_REQUIRED_FIELDS' };
+    const now = new Date().toISOString();
+    const row: InternalChatThread = {
+      ...thread,
+      participantUserIds: participants,
+      id: nextId('chat_thread'),
+      createdAt: now,
+      createdBy: currentUser?.fullName || currentUser?.username || 'System',
+      lastMessageAt: now,
+    };
+    setChatThreads((previous) => [row, ...previous]);
+    createAuditLog('CREATE', 'InternalChatThread', row.id, `Chat thread ${row.title} created`);
+    markLocalChange({ module: 'chat', action: 'create', entity: 'InternalChatThread', entityId: row.id });
+    return { success: true, id: row.id };
+  };
+
+  const sendChatMessage = (message: Omit<InternalChatMessage, 'id' | 'createdAt' | 'senderUserId' | 'senderName'>) => {
+    if (!can('chat', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const thread = chatThreads.find((row) => row.id === message.threadId);
+    if (!thread) return { success: false, error: 'CHAT_THREAD_NOT_FOUND' };
+    if (!String(message.text || '').trim() && !message.attachments.length) return { success: false, error: 'CHAT_MESSAGE_EMPTY' };
+    const now = new Date().toISOString();
+    const row: InternalChatMessage = {
+      ...message,
+      text: String(message.text || '').trim(),
+      id: nextId('chat_msg'),
+      createdAt: now,
+      senderUserId: currentUser?.id || 'system',
+      senderName: currentUser?.fullName || currentUser?.username || 'System',
+    };
+    setChatMessages((previous) => [...previous, row]);
+    setChatThreads((previous) => previous.map((candidate) => candidate.id === thread.id ? { ...candidate, lastMessageAt: now } : candidate));
+    createAuditLog('CREATE', 'InternalChatMessage', row.id, `Message sent in ${thread.title}`);
+    markLocalChange({ module: 'chat', action: 'create', entity: 'InternalChatMessage', entityId: row.id });
+    return { success: true, id: row.id };
   };
 
   const createJournalEntry = (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>): { success: boolean; error?: string } => {
@@ -960,7 +1013,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPayrolls((previous) => [...generated, ...previous.filter((row) => row.payrollMonth !== monthString)]); createAuditLog('CREATE', 'Payroll', monthString, 'Draft payroll generated from recorded attendance'); markLocalChange({ module: 'hr', action: 'create', entity: 'Payroll', entityId: monthString });
   };
 
-  const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
+  const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
   const createBackupSnapshot = (type: BackupSnapshot['type'] = 'Manual Export'): BackupSnapshot => {
     const isPreRestore = type === 'Pre-Restore Safety Snapshot';
     if (!can('backup', 'export') && !(isPreRestore && can('backup', 'approve'))) throw new Error('ACTION_NOT_ALLOWED');
@@ -1001,7 +1054,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id }); };
   const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { if (!can('media', 'create')) return; const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange({ module: 'media', action: 'create', entity: 'SocialMediaPost', entityId: newPost.id }); };
 
-  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, createHallStructure, updateHallStructure, createPondStructure, updatePondStructure, createSpeciesDefinition, setSpeciesActive, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, addOfficeDocument, updateOfficeDocumentStatus, updateOfficeBranding, addGatePass, updateGatePassStatus, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, createHallStructure, updateHallStructure, createPondStructure, updatePondStructure, createSpeciesDefinition, setSpeciesActive, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, addOfficeDocument, updateOfficeDocumentStatus, updateOfficeBranding, addGatePass, updateGatePassStatus, createChatThread, sendChatMessage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 

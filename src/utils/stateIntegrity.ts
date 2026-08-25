@@ -10,7 +10,7 @@ export const STATE_COLLECTIONS = [
   'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
   'treatments', 'transfers', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks',
   'inventory', 'inventoryTxs', 'labSamples', 'processingBatches', 'coldStorage', 'customers', 'proformas',
-  'officeDocuments', 'officeSettings', 'gatePasses', 'accounts', 'journals', 'employees', 'attendance', 'payrolls', 'equipment', 'socialPosts', 'auditLogs', 'backups',
+  'officeDocuments', 'officeSettings', 'gatePasses', 'chatThreads', 'chatMessages', 'accounts', 'journals', 'employees', 'attendance', 'payrolls', 'equipment', 'socialPosts', 'auditLogs', 'backups',
 ] as const;
 
 type State = Record<string, any>;
@@ -36,6 +36,7 @@ export const MODULE_COLLECTIONS: Record<string, string[]> = {
   sales: ['proformas', 'customers', 'coldStorage', 'auditLogs'],
   documents: ['officeDocuments', 'officeSettings', 'proformas', 'customers', 'auditLogs'],
   gatehouse: ['gatePasses', 'officeDocuments', 'proformas', 'auditLogs'],
+  chat: ['chatThreads', 'chatMessages', 'auditLogs'],
   accounting: ['accounts', 'journals', 'auditLogs'],
   hr: ['employees', 'attendance', 'payrolls', 'auditLogs'],
   media: ['socialPosts', 'auditLogs'],
@@ -76,7 +77,7 @@ export function validateStateSnapshot(raw: unknown): { ok: boolean; error?: stri
   const unknownKeys = Object.keys(state).filter((key) => !(STATE_COLLECTIONS as readonly string[]).includes(key));
   if (unknownKeys.length) return { ok: false, error: `STATE_UNKNOWN_COLLECTION:${unknownKeys[0]}` };
   for (const key of STATE_COLLECTIONS) {
-    if ((key === 'officeDocuments' || key === 'officeSettings' || key === 'gatePasses') && state[key] === undefined) continue;
+    if ((key === 'officeDocuments' || key === 'officeSettings' || key === 'gatePasses' || key === 'chatThreads' || key === 'chatMessages') && state[key] === undefined) continue;
     if (!Array.isArray(state[key])) return { ok: false, error: `STATE_COLLECTION_REQUIRED:${key}` };
   }
   for (const key of STATE_COLLECTIONS) {

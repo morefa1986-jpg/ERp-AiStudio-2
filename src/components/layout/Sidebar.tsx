@@ -35,6 +35,7 @@ import {
   Smartphone,
   Settings2,
   DoorOpen,
+  MessageSquare,
 } from 'lucide-react';
 import { PermissionModule } from '../../types';
 
@@ -131,6 +132,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
         { id: 'documents', customLabel: 'دبیرخانه و اسناد', icon: Archive, module: 'documents' },
         { id: 'gatehouse', customLabel: 'نگهبانی و برگه خروج', icon: DoorOpen, module: 'gatehouse' },
+        { id: 'chat', customLabel: 'چت داخلی', icon: MessageSquare, module: 'chat' },
         { id: 'accounting', labelKey: 'nav.accounting', icon: Calculator, module: 'accounting' },
         { id: 'hr', labelKey: 'nav.hr', icon: UserCheck, module: 'hr' },
       ],

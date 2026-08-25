@@ -19,6 +19,7 @@ import {
 } from './server/stateScope';
 import { defaultDatabasePath, SqliteERPStore, StateConflictError, StoredAuditLog, StoredSocialConnection, StoredSocialDraft, StoredUser } from './server/storage';
 import { MAX_OFFICE_FILE_BYTES, resolveOfficeDocumentFile, storeOfficeDocumentFile } from './server/officeDocumentFiles';
+import { isLocalFileCategory, maxBytesForCategory, resolveLocalFile, storeLocalFile } from './server/localFileStorage';
 import { UserDataScope, UserScopeStore } from './server/userScope';
 import { MODULE_COLLECTIONS, STATE_COLLECTIONS, validateMutationScope, validateStateMutation, validateStateSnapshot } from './src/utils/stateIntegrity';
 
@@ -69,8 +70,25 @@ interface AuthenticatedRequest extends Request {
   user?: ServerUser;
 }
 
+type ChatCall = {
+  id: string;
+  threadId: string;
+  callType: 'audio' | 'video';
+  status: 'Ringing' | 'Active' | 'Ended';
+  startedAt: string;
+  endedAt?: string;
+  startedByUserId: string;
+  startedByName: string;
+  participantUserIds: string[];
+};
+
+type ChatSignal = { id: number; callId: string; fromUserId: string; type: 'offer' | 'answer' | 'ice' | 'hangup'; payload: unknown; createdAt: string };
+
 const SESSIONS = new Map<string, ActiveSession>();
 const aiRateLimits = new Map<string, { windowStart: number; count: number }>();
+const CHAT_CALLS = new Map<string, ChatCall>();
+const CHAT_SIGNALS: ChatSignal[] = [];
+let chatSignalSequence = 0;
 const VALID_SERVER_ROLES = new Set([
   'Super Admin', 'Farm Owner', 'Farm Manager', 'Hall Manager', 'Technician', 'Hatchery Manager',
   'Laboratory', 'Veterinarian', 'Feed Manager', 'Warehouse Manager', 'Processing Manager',
@@ -82,7 +100,7 @@ const VALID_STATE_MODULES = new Set([
   'dashboard', 'farm', 'halls', 'ponds', 'feeding', 'biometrics', 'water_quality', 'mortality',
   'treatments', 'transfers', 'hatchery', 'nursery', 'feed_factory', 'warehouse', 'laboratory',
   'processing', 'cold_storage', 'crm', 'sales', 'accounting', 'hr', 'media', 'ai_assistant',
-  'reports', 'documents', 'gatehouse', 'backup', 'users', 'settings',
+  'reports', 'documents', 'gatehouse', 'chat', 'backup', 'users', 'settings',
 ]);
 const VALID_STATE_ACTIONS = new Set(['view', 'create', 'edit', 'delete', 'approve', 'export', 'print', 'manage']);
 
@@ -157,6 +175,7 @@ function roleAllowsServer(role: string, module: string, action: string): boolean
   if (role === 'Super Admin' || role === 'Farm Owner') return true;
   const viewLike = ['view', 'export', 'print'].includes(action);
   const operational = ['view', 'create', 'edit', 'approve', 'export', 'print'].includes(action);
+  if (module === 'chat') return role !== 'Viewer/Auditor' ? ['view', 'create', 'edit'].includes(action) : action === 'view';
   switch (role) {
     case 'Farm Manager': return module !== 'users' && module !== 'settings' && !(module === 'backup' && action === 'approve') && action !== 'delete';
     case 'Hall Manager': return ['dashboard', 'halls', 'ponds', 'feeding', 'biometrics', 'water_quality', 'mortality', 'treatments', 'transfers', 'reports'].includes(module) && operational;
@@ -173,8 +192,8 @@ function roleAllowsServer(role: string, module: string, action: string): boolean
     case 'CRM Operator': return ['dashboard', 'crm', 'sales', 'documents', 'processing', 'cold_storage', 'media', 'reports'].includes(module) && operational;
     case 'HR Manager': return ['dashboard', 'hr', 'reports'].includes(module) && operational;
     case 'Media Manager': return ['dashboard', 'media', 'reports'].includes(module) && operational;
-    case 'Gate Guard': return ['dashboard', 'gatehouse', 'documents'].includes(module) && ['view', 'create', 'edit', 'print'].includes(action);
-    case 'Office Automation': return ['dashboard', 'documents', 'gatehouse', 'reports'].includes(module) && operational;
+    case 'Gate Guard': return ['dashboard', 'gatehouse', 'documents', 'chat'].includes(module) && ['view', 'create', 'edit', 'print'].includes(action);
+    case 'Office Automation': return ['dashboard', 'documents', 'gatehouse', 'chat', 'reports'].includes(module) && operational;
     case 'Viewer/Auditor': return viewLike;
     default: return false;
   }
@@ -227,6 +246,8 @@ const COLLECTION_VIEW_MODULES: Record<string, string[]> = {
   inventory: ['warehouse', 'feeding', 'feed_factory', 'processing'],
   inventoryTxs: ['warehouse', 'feeding', 'feed_factory'],
   labSamples: ['laboratory'],
+  chatThreads: ['chat'],
+  chatMessages: ['chat'],
   processingBatches: ['processing'],
   coldStorage: ['cold_storage', 'processing', 'sales'],
   customers: ['crm', 'sales'],
@@ -704,6 +725,107 @@ app.post('/api/documents/files', requireAuth, requireModuleAction('documents', '
 app.get('/api/documents/files/:storageId', requireAuth, requireModuleAction('documents', 'view'), (req: AuthenticatedRequest, res) => {
   const target = resolveOfficeDocumentFile(req.params.storageId);
   if (!target) return res.status(404).json({ success: false, error: 'DOCUMENT_FILE_NOT_FOUND' });
+  return res.download(target);
+});
+
+app.get('/api/chat/users', requireAuth, requireModuleAction('chat', 'view'), (_req: AuthenticatedRequest, res) => {
+  return res.json({ success: true, users: store.listUsers().filter((user) => user.isActive).map((user) => sanitizeUser(withUserScope(user))) });
+});
+
+function stateArray(key: string): any[] {
+  const data = store.getState()?.data;
+  return Array.isArray(data?.[key]) ? data[key] as any[] : [];
+}
+
+function canAccessChatThread(user: ServerUser | undefined, threadId: string): boolean {
+  if (!user || !roleAllowsServer(user.role, 'chat', 'view')) return false;
+  const thread = stateArray('chatThreads').find((row) => row?.id === threadId);
+  if (!thread) return false;
+  return isAdmin(user) || Array.isArray(thread.participantUserIds) && thread.participantUserIds.includes(user.id);
+}
+
+app.get('/api/chat/calls', requireAuth, requireModuleAction('chat', 'view'), (req: AuthenticatedRequest, res) => {
+  const threadId = String(req.query.threadId || '');
+  if (!threadId || !canAccessChatThread(req.user, threadId)) return res.status(403).json({ success: false, error: 'CHAT_THREAD_ACCESS_DENIED' });
+  const calls = [...CHAT_CALLS.values()].filter((call) => call.threadId === threadId && call.status !== 'Ended');
+  return res.json({ success: true, calls });
+});
+
+app.post('/api/chat/calls', requireAuth, requireModuleAction('chat', 'create'), (req: AuthenticatedRequest, res) => {
+  const threadId = String(req.body?.threadId || '');
+  const callType = req.body?.callType === 'audio' ? 'audio' : req.body?.callType === 'video' ? 'video' : '';
+  if (!threadId || !callType || !canAccessChatThread(req.user, threadId)) return res.status(403).json({ success: false, error: 'CHAT_CALL_ACCESS_DENIED' });
+  const thread = stateArray('chatThreads').find((row) => row?.id === threadId);
+  const call: ChatCall = {
+    id: `call_${crypto.randomUUID()}`,
+    threadId,
+    callType,
+    status: 'Ringing',
+    startedAt: new Date().toISOString(),
+    startedByUserId: req.user?.id || '',
+    startedByName: req.user?.fullName || req.user?.username || 'User',
+    participantUserIds: Array.isArray(thread?.participantUserIds) ? thread.participantUserIds : [],
+  };
+  CHAT_CALLS.set(call.id, call);
+  store.appendAuditLog({ id: `audit_${crypto.randomUUID()}`, timestamp: call.startedAt, userId: req.user?.id || '', userRole: req.user?.role || '', action: 'CALL_START', entity: 'InternalChatCall', entityId: call.id, afterState: JSON.stringify({ threadId, callType }), transactionId: `txn_${crypto.randomUUID()}`, ipAddress: req.ip, deviceId: clientDeviceId(req) });
+  return res.status(201).json({ success: true, call });
+});
+
+app.post('/api/chat/calls/:id/signals', requireAuth, requireModuleAction('chat', 'create'), (req: AuthenticatedRequest, res) => {
+  const call = CHAT_CALLS.get(req.params.id);
+  if (!call || call.status === 'Ended' || !canAccessChatThread(req.user, call.threadId)) return res.status(404).json({ success: false, error: 'CHAT_CALL_NOT_FOUND' });
+  const type = req.body?.type;
+  if (!['offer', 'answer', 'ice', 'hangup'].includes(type)) return res.status(400).json({ success: false, error: 'CHAT_SIGNAL_INVALID' });
+  if (type === 'answer') call.status = 'Active';
+  if (type === 'hangup') { call.status = 'Ended'; call.endedAt = new Date().toISOString(); }
+  const signal: ChatSignal = { id: ++chatSignalSequence, callId: call.id, fromUserId: req.user?.id || '', type, payload: req.body?.payload || null, createdAt: new Date().toISOString() };
+  CHAT_SIGNALS.push(signal);
+  return res.status(201).json({ success: true, signal });
+});
+
+app.get('/api/chat/calls/:id/signals', requireAuth, requireModuleAction('chat', 'view'), (req: AuthenticatedRequest, res) => {
+  const call = CHAT_CALLS.get(req.params.id);
+  if (!call || !canAccessChatThread(req.user, call.threadId)) return res.status(404).json({ success: false, error: 'CHAT_CALL_NOT_FOUND' });
+  const after = Number(req.query.after || 0);
+  return res.json({ success: true, call, signals: CHAT_SIGNALS.filter((signal) => signal.callId === call.id && signal.id > after && signal.fromUserId !== req.user?.id) });
+});
+
+app.post('/api/chat/calls/:id/end', requireAuth, requireModuleAction('chat', 'create'), (req: AuthenticatedRequest, res) => {
+  const call = CHAT_CALLS.get(req.params.id);
+  if (!call || !canAccessChatThread(req.user, call.threadId)) return res.status(404).json({ success: false, error: 'CHAT_CALL_NOT_FOUND' });
+  call.status = 'Ended';
+  call.endedAt = new Date().toISOString();
+  CHAT_SIGNALS.push({ id: ++chatSignalSequence, callId: call.id, fromUserId: req.user?.id || '', type: 'hangup', payload: null, createdAt: call.endedAt });
+  store.appendAuditLog({ id: `audit_${crypto.randomUUID()}`, timestamp: call.endedAt, userId: req.user?.id || '', userRole: req.user?.role || '', action: 'CALL_END', entity: 'InternalChatCall', entityId: call.id, afterState: JSON.stringify({ durationMs: new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime() }), transactionId: `txn_${crypto.randomUUID()}`, ipAddress: req.ip, deviceId: clientDeviceId(req) });
+  return res.json({ success: true, call });
+});
+
+const FILE_CATEGORY_MODULES: Record<string, string> = { chat: 'chat', mortality: 'mortality', laboratory: 'laboratory' };
+
+app.post('/api/files/:category', requireAuth, (req: AuthenticatedRequest, res) => {
+  try {
+    const category = String(req.params.category || '');
+    if (!isLocalFileCategory(category)) return res.status(404).json({ success: false, error: 'FILE_CATEGORY_NOT_FOUND' });
+    const module = FILE_CATEGORY_MODULES[category];
+    if (!roleAllowsServer(req.user?.role || '', module, 'create')) return res.status(403).json({ success: false, error: 'ACTION_NOT_ALLOWED' });
+    const fileName = String(req.body?.fileName || '').trim();
+    const base64 = String(req.body?.base64 || '');
+    if (!fileName || !base64) return res.status(400).json({ success: false, error: 'LOCAL_FILE_REQUIRED' });
+    const stored = storeLocalFile(category, { fileName, mimeType: String(req.body?.mimeType || ''), base64 });
+    store.appendAuditLog({ id: `audit_${crypto.randomUUID()}`, timestamp: new Date().toISOString(), userId: req.user?.id || '', userRole: req.user?.role || '', action: 'UPLOAD', entity: `${category}File`, entityId: stored.storageId, afterState: JSON.stringify({ fileName: stored.originalName, sizeBytes: stored.sizeBytes, sha256: stored.sha256 }), transactionId: `txn_${crypto.randomUUID()}`, ipAddress: req.ip, deviceId: clientDeviceId(req) });
+    return res.json({ success: true, file: { ...stored, maxBytes: maxBytesForCategory(category), downloadUrl: `/api/files/${category}/${encodeURIComponent(stored.storageId)}` } });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'LOCAL_FILE_UPLOAD_FAILED' });
+  }
+});
+
+app.get('/api/files/:category/:storageId', requireAuth, (req: AuthenticatedRequest, res) => {
+  const category = String(req.params.category || '');
+  if (!isLocalFileCategory(category)) return res.status(404).json({ success: false, error: 'FILE_CATEGORY_NOT_FOUND' });
+  const module = FILE_CATEGORY_MODULES[category];
+  if (!roleAllowsServer(req.user?.role || '', module, 'view')) return res.status(403).json({ success: false, error: 'ACTION_NOT_ALLOWED' });
+  const target = resolveLocalFile(category, req.params.storageId);
+  if (!target) return res.status(404).json({ success: false, error: 'LOCAL_FILE_NOT_FOUND' });
   return res.download(target);
 });
 

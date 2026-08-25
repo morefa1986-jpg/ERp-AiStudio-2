@@ -11,7 +11,8 @@ import {
   recordLaboratoryResults,
   rejectLaboratorySample,
 } from '../../services/laboratoryService';
-import type { LabSample } from '../../types';
+import { sizeLabel, uploadLocalAttachment } from '../../services/localFileService';
+import type { FileAttachment, LabSample } from '../../types';
 
 type OperationalLabSample = LabSample & { sourceId?: string; createdAt?: string; createdBy?: string; resultRecordedAt?: string; resultRecordedBy?: string; approvedAt?: string; rejectedAt?: string; rejectionReason?: string };
 type ParameterDraft = { name: string; value: string; unit: string; referenceRange: string; status: 'Normal' | 'Abnormal' | 'Critical' };
@@ -40,6 +41,7 @@ export const LaboratoryView: React.FC = () => {
   const [parameters, setParameters] = useState<ParameterDraft[]>([emptyParameter()]);
   const [resultSummary, setResultSummary] = useState('');
   const [attachmentUrl, setAttachmentUrl] = useState('');
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [decisionReason, setDecisionReason] = useState('');
 
   const canCreate = hasPermission('laboratory', 'create');
@@ -53,6 +55,7 @@ export const LaboratoryView: React.FC = () => {
     setParameters(selected.parametersTested?.length ? selected.parametersTested.map((row) => ({ name: row.name, value: String(row.value), unit: row.unit || '', referenceRange: row.referenceRange, status: row.status })) : [emptyParameter()]);
     setResultSummary(selected.resultSummary || '');
     setAttachmentUrl(selected.attachmentUrl || '');
+    setAttachments(selected.attachments || []);
   }, [selectedId]);
   useEffect(() => { void refreshEvents(); }, [selectedId]);
 
@@ -83,8 +86,18 @@ export const LaboratoryView: React.FC = () => {
     collectionDate, collectorName: currentUser?.fullName || '', testType,
   }), 'نمونه با وضعیت Pending ثبت شد.');
 
+  const attachSampleFiles = async (files?: FileList | null) => {
+    if (!files?.length) return;
+    setBusy(true); setMessage(''); setError('');
+    try {
+      const uploaded = await Promise.all([...files].slice(0, 6).map((file) => uploadLocalAttachment('laboratory', file, currentUser?.fullName || currentUser?.username)));
+      setAttachments((previous) => [...previous, ...uploaded]);
+    } catch (e) { setError(e instanceof Error ? e.message : 'LAB_ATTACHMENT_UPLOAD_FAILED'); }
+    finally { setBusy(false); }
+  };
+
   const saveResults = () => selected && execute(() => recordLaboratoryResults(selected.id, {
-    parametersTested: parameters.map((row) => ({ ...row, value: row.value.trim() })), resultSummary, attachmentUrl: attachmentUrl || undefined,
+    parametersTested: parameters.map((row) => ({ ...row, value: row.value.trim() })), resultSummary, attachmentUrl: attachmentUrl || undefined, attachments,
   }), 'نتایج ثبت شدند و برای تأیید آماده‌اند.');
 
   return <div className="space-y-5 pb-12">
@@ -106,7 +119,7 @@ export const LaboratoryView: React.FC = () => {
           <button disabled={!canCreate || busy} onClick={() => void createSample()} className="w-full px-3 py-2 rounded-lg bg-[#D4AF37] text-black text-xs font-bold disabled:opacity-40">ثبت نمونه Pending</button>
         </div>
 
-        <div className="bg-[#121214] border border-[#27272A] rounded-2xl overflow-hidden"><div className="p-4 border-b border-[#27272A] text-sm font-bold text-white">نمونه‌ها</div><div className="max-h-[520px] overflow-auto divide-y divide-[#27272A]">{samples.map((row) => <button key={row.id} onClick={() => setSelectedId(row.id)} className={`w-full text-start p-3 text-xs ${selectedId === row.id ? 'bg-[#D4AF37]/10' : 'hover:bg-[#18181B]'}`}><div className="flex justify-between gap-2"><span className="font-bold text-white">{row.sampleCode}</span><span className={row.status === 'Approved' ? 'text-emerald-300' : row.status === 'Rejected' ? 'text-red-300' : 'text-amber-300'}>{row.status}</span></div><div className="text-[#71717A] mt-1">{row.sourceName} · {row.testType}</div>{row.parametersTested?.some((p) => p.status === 'Critical') && <div className="text-red-300 mt-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />Critical finding</div>}</button>)}</div></div>
+        <div className="bg-[#121214] border border-[#27272A] rounded-2xl overflow-hidden"><div className="p-4 border-b border-[#27272A] text-sm font-bold text-white">نمونه‌ها</div><div className="max-h-[520px] overflow-auto divide-y divide-[#27272A]">{samples.map((row) => <button key={row.id} onClick={() => setSelectedId(row.id)} className={`w-full text-start p-3 text-xs ${selectedId === row.id ? 'bg-[#D4AF37]/10' : 'hover:bg-[#18181B]'}`}><div className="flex justify-between gap-2"><span className="font-bold text-white">{row.sampleCode}</span><span className={row.status === 'Approved' ? 'text-emerald-300' : row.status === 'Rejected' ? 'text-red-300' : 'text-amber-300'}>{row.status}</span></div><div className="text-[#71717A] mt-1">{row.sourceName} · {row.testType}</div>{row.attachments?.length ? <div className="text-cyan-300 mt-1">{row.attachments.length} عکس/پیوست نمونه</div> : null}{row.parametersTested?.some((p) => p.status === 'Critical') && <div className="text-red-300 mt-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />Critical finding</div>}</button>)}</div></div>
       </div>
 
       <div className="space-y-5">
@@ -118,6 +131,8 @@ export const LaboratoryView: React.FC = () => {
             {selected.status === 'Pending' && <button type="button" onClick={() => setParameters((prev) => [...prev, emptyParameter()])} className="text-xs text-[#D4AF37]">+ افزودن پارامتر</button>}
             <textarea value={resultSummary} disabled={selected.status !== 'Pending'} onChange={(e) => setResultSummary(e.target.value)} placeholder="خلاصه نتیجه آزمایش" className="w-full min-h-24 bg-[#09090B] border border-[#3F3F46] rounded-lg px-3 py-2 text-xs" />
             <input value={attachmentUrl} disabled={selected.status !== 'Pending'} onChange={(e) => setAttachmentUrl(e.target.value)} placeholder="مرجع/URL فایل پیوست (اختیاری)" className="w-full bg-[#09090B] border border-[#3F3F46] rounded-lg px-3 py-2 text-xs" />
+            <input type="file" multiple accept="image/*,application/pdf" disabled={selected.status !== 'Pending'} onChange={(e) => void attachSampleFiles(e.target.files)} className="w-full text-xs text-[#A1A1AA] disabled:opacity-50" />
+            {attachments.length ? <div className="grid sm:grid-cols-2 gap-2">{attachments.map((file) => <a key={file.id} href={file.downloadUrl} target="_blank" rel="noreferrer" className="rounded-xl border border-[#3F3F46] bg-[#09090B] p-2 text-xs text-[#A1A1AA]">{file.mimeType.startsWith('image/') && file.downloadUrl ? <img src={file.downloadUrl} alt={file.fileName} className="h-24 w-full object-cover rounded-lg mb-2" /> : null}<div className="font-bold text-white truncate">{file.fileName}</div><div>{sizeLabel(file.sizeBytes)}</div></a>)}</div> : null}
             {selected.status === 'Pending' && <button disabled={!canEdit || busy} onClick={() => void saveResults()} className="w-full px-3 py-2 rounded-lg border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold disabled:opacity-40">ثبت نتایج</button>}
             {selected.status === 'Pending' && <div className="grid grid-cols-2 gap-2"><button disabled={!canApprove || busy || !selected.parametersTested?.length} onClick={() => void execute(() => approveLaboratorySample(selected.id, decisionReason), 'نتیجه به‌عنوان نتیجه بررسی‌شده تأیید شد.' )} className="px-3 py-2 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-1"><CheckCircle2 className="w-4 h-4" />Approve</button><button disabled={!canApprove || busy || !decisionReason.trim()} onClick={() => void execute(() => rejectLaboratorySample(selected.id, decisionReason), 'نتیجه رد و دلیل آن ثبت شد.')} className="px-3 py-2 rounded-lg bg-red-500/15 border border-red-500/40 text-red-200 text-xs font-bold disabled:opacity-40 flex items-center justify-center gap-1"><XCircle className="w-4 h-4" />Reject</button></div>}
             {selected.status === 'Pending' && <input value={decisionReason} onChange={(e) => setDecisionReason(e.target.value)} placeholder="یادداشت تأیید یا دلیل رد" className="w-full bg-[#09090B] border border-[#3F3F46] rounded-lg px-3 py-2 text-xs" />}

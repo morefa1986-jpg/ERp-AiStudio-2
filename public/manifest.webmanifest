@@ -1,0 +1,23 @@
+{
+  "name": "Fathi Aqua SuperERP",
+  "short_name": "Fathi ERP",
+  "description": "Offline-first ERP, CRM and office automation for Fathi Sturgeon Farm.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "window-controls-overlay"],
+  "orientation": "any",
+  "background_color": "#09090B",
+  "theme_color": "#D4AF37",
+  "dir": "rtl",
+  "lang": "fa",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/fathi-erp-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

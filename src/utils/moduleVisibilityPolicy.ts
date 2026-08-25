@@ -1,7 +1,7 @@
 export const MODULE_VISIBILITY_IDS = [
   'dashboard', 'farmHalls', 'ponds', 'feeding', 'biometrics', 'waterQuality', 'mortality', 'treatments',
   'transfers', 'hatchery', 'nursery', 'feedFactory', 'warehouse', 'laboratory', 'processing', 'coldStorage',
-  'crm', 'sales', 'accounting', 'hr', 'documents', 'gatehouse', 'aiAssistant', 'mediaStudio', 'maintenance', 'reports', 'securityAudit',
+  'crm', 'sales', 'accounting', 'hr', 'documents', 'gatehouse', 'chat', 'aiAssistant', 'mediaStudio', 'maintenance', 'reports', 'securityAudit',
   'backup', 'platformHub', 'adminSettings',
 ] as const;
 

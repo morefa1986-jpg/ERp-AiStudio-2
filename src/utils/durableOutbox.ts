@@ -34,7 +34,7 @@ const MAX_ENTRIES_PER_USER = 1000;
 const MODULE_PRIORITY: PermissionModule[] = [
   'feeding', 'water_quality', 'mortality', 'biometrics', 'treatments', 'transfers',
   'processing', 'sales', 'documents', 'gatehouse', 'accounting', 'hr', 'warehouse', 'feed_factory', 'hatchery',
-  'nursery', 'laboratory', 'crm', 'media', 'backup', 'settings',
+  'nursery', 'laboratory', 'crm', 'media', 'chat', 'backup', 'settings',
 ];
 
 const COLLECTION_HINTS: Array<{ collection: string; module: PermissionModule }> = [
@@ -49,6 +49,8 @@ const COLLECTION_HINTS: Array<{ collection: string; module: PermissionModule }> 
   { collection: 'officeDocuments', module: 'documents' },
   { collection: 'officeSettings', module: 'documents' },
   { collection: 'gatePasses', module: 'gatehouse' },
+  { collection: 'chatThreads', module: 'chat' },
+  { collection: 'chatMessages', module: 'chat' },
   { collection: 'journals', module: 'accounting' },
   { collection: 'attendance', module: 'hr' },
   { collection: 'payrolls', module: 'hr' },

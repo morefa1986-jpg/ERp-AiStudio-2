@@ -3,8 +3,9 @@ import { ArrowLeftRight, Camera, CheckCircle2, Plus, Skull, Stethoscope } from '
 import { useFarm } from '../../context/FarmContext';
 import { useAuth } from '../../context/AuthContext';
 import { useI18n } from '../../i18n';
-import { TreatmentRecord } from '../../types';
+import { FileAttachment, TreatmentRecord } from '../../types';
 import { pondStockGroups } from '../../utils/pondStockLedger';
+import { sizeLabel, uploadLocalAttachment } from '../../services/localFileService';
 
 type Mode = 'mortality' | 'treatments' | 'transfers';
 
@@ -30,6 +31,8 @@ export const LivestockOperationsView: React.FC<{ mode: Mode }> = ({ mode }) => {
   const [reason, setReason] = useState('');
   const [description, setDescription] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
+  const [mortalityPhotos, setMortalityPhotos] = useState<FileAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   const [diagnosis, setDiagnosis] = useState('');
   const [drugName, setDrugName] = useState('');
@@ -73,14 +76,17 @@ export const LivestockOperationsView: React.FC<{ mode: Mode }> = ({ mode }) => {
     return { ok: true, chips };
   };
 
-  const loadPhoto = (file?: File) => {
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { setMessage('فایل تلفات باید تصویر باشد.'); return; }
-    if (file.size > 2_000_000) { setMessage('حجم عکس برای ثبت داخل رکورد باید کمتر از ۲ مگابایت باشد.'); return; }
-    const reader = new FileReader();
-    reader.onload = () => setPhotoUrl(typeof reader.result === 'string' ? reader.result : '');
-    reader.onerror = () => setMessage('خواندن عکس انجام نشد.');
-    reader.readAsDataURL(file);
+  const loadPhoto = async (files?: FileList | null) => {
+    if (!files?.length) return;
+    const selected = [...files].filter((file) => file.type.startsWith('image/')).slice(0, 6);
+    if (!selected.length) { setMessage('فایل تلفات باید تصویر باشد.'); return; }
+    setUploading(true); setMessage('');
+    try {
+      const uploaded = await Promise.all(selected.map((file) => uploadLocalAttachment('mortality', file, currentUser?.fullName || currentUser?.username)));
+      setMortalityPhotos((previous) => [...previous, ...uploaded]);
+      setPhotoUrl(uploaded[0]?.downloadUrl || photoUrl);
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'آپلود عکس تلفات انجام نشد.'); }
+    finally { setUploading(false); }
   };
 
   const submitMortality = (event: React.FormEvent) => {
@@ -105,9 +111,10 @@ export const LivestockOperationsView: React.FC<{ mode: Mode }> = ({ mode }) => {
       reason: reason.trim(),
       description: description.trim(),
       photoUrl: photoUrl || undefined,
+      photos: mortalityPhotos,
       recordedBy: currentUser?.fullName || 'Operator',
     });
-    setShowForm(false); setCount('1'); setMortalityWeight(''); setReason(''); setDescription(''); setPhotoUrl(''); setChipSelection('');
+    setShowForm(false); setCount('1'); setMortalityWeight(''); setReason(''); setDescription(''); setPhotoUrl(''); setMortalityPhotos([]); setChipSelection('');
     setMessage('تلفات روی گروه دقیق گونه/جنس ثبت شد و Ledger استخر به‌روزرسانی شد.');
   };
 
@@ -207,7 +214,7 @@ export const LivestockOperationsView: React.FC<{ mode: Mode }> = ({ mode }) => {
 
     {message && <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3 text-xs text-blue-200">{message}</div>}
 
-    {mode === 'mortality' && <div className="space-y-3">{mortalityRecords.map((record) => <div key={record.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row gap-4"><div className="w-20 h-20 bg-slate-950 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">{record.photoUrl ? <img src={record.photoUrl} alt="mortality" className="w-full h-full object-cover" /> : <Camera className="w-6 h-6 text-slate-700" />}</div><div className="flex-1"><div className="flex flex-wrap justify-between gap-2"><strong className="text-white">{record.pondName} · {formatNumber(record.count)} قطعه</strong><span className="text-xs text-slate-500">{formatDate(record.timestamp)}</span></div><div className="text-[10px] text-cyan-300 mt-1">{record.speciesName} · {record.stockSex || 'Unknown'}{record.chipNumbers?.length ? ` · Chip: ${record.chipNumbers.join(', ')}` : ''}</div><p className="text-xs text-rose-300 mt-2">{record.reason}</p><p className="text-xs text-slate-400 mt-1">{record.description}</p><span className="text-[10px] text-slate-500">وزن {record.estimatedWeightKg} kg · ثبت: {record.recordedBy}</span></div></div>)}</div>}
+    {mode === 'mortality' && <div className="space-y-3">{mortalityRecords.map((record) => { const mainPhoto = record.photos?.[0]?.downloadUrl || record.photoUrl; return <div key={record.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row gap-4"><div className="w-20 h-20 bg-slate-950 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">{mainPhoto ? <img src={mainPhoto} alt="mortality" className="w-full h-full object-cover" /> : <Camera className="w-6 h-6 text-slate-700" />}</div><div className="flex-1"><div className="flex flex-wrap justify-between gap-2"><strong className="text-white">{record.pondName} · {formatNumber(record.count)} قطعه</strong><span className="text-xs text-slate-500">{formatDate(record.timestamp)}</span></div><div className="text-[10px] text-cyan-300 mt-1">{record.speciesName} · {record.stockSex || 'Unknown'}{record.chipNumbers?.length ? ` · Chip: ${record.chipNumbers.join(', ')}` : ''}</div><p className="text-xs text-rose-300 mt-2">{record.reason}</p><p className="text-xs text-slate-400 mt-1">{record.description}</p>{record.photos?.length ? <div className="flex flex-wrap gap-2 mt-2">{record.photos.map((file) => <a key={file.id} href={file.downloadUrl} target="_blank" rel="noreferrer" className="text-[10px] px-2 py-1 rounded-lg border border-slate-700 text-amber-300">{file.fileName} · {sizeLabel(file.sizeBytes)}</a>)}</div> : null}<span className="text-[10px] text-slate-500">وزن {record.estimatedWeightKg} kg · ثبت: {record.recordedBy}</span></div></div>; })}</div>}
 
     {mode === 'treatments' && <div className="space-y-3">{treatments.map((treatment) => <div key={treatment.id} className={`bg-slate-900 border rounded-2xl p-5 ${treatment.status === 'ACTIVE' ? 'border-rose-500/40' : 'border-slate-800'}`}><div className="flex flex-wrap justify-between gap-3"><div><strong className="text-white">{treatment.pondName} · {treatment.drugName}</strong><p className="text-xs text-slate-400 mt-1">{treatment.diagnosis}</p></div><div className="flex items-center gap-2"><span className={treatment.status === 'ACTIVE' ? 'text-rose-400 text-xs font-bold' : 'text-emerald-400 text-xs font-bold'}>{treatment.status}</span>{treatment.status === 'ACTIVE' && <button type="button" onClick={() => finishTreatment(treatment.id)} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-bold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" />تکمیل درمان</button>}</div></div><div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-3"><Info label="مقدار ثبت‌شده" value={`${treatment.dose} ${treatment.doseUnit}`} /><Info label="پایان درمان" value={treatment.endDate} /><Info label="پایان دوره منع مصرف" value={treatment.withdrawalEndDate} accent /><Info label="ثبت بعدی" value={treatment.nextDoseDate || '—'} /></div><div className="mt-3 text-[10px] text-slate-500">این بخش فقط ثبت و انطباق اداری است و توصیه درمانی یا محاسبه مقدار مصرف ارائه نمی‌کند.</div></div>)}</div>}
 
@@ -217,7 +224,7 @@ export const LivestockOperationsView: React.FC<{ mode: Mode }> = ({ mode }) => {
       {(mode === 'mortality' || mode === 'transfers') && <div className="grid md:grid-cols-2 gap-3 text-xs mb-4"><label className="text-slate-400">استخر مبدا<select value={pondId} onChange={(event) => { setPondId(event.target.value); setDestinationId(''); }} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white">{ponds.map((pond) => <option key={pond.id} value={pond.id}>{pond.number} — {pond.name}</option>)}</select></label>{stockSelector}</div>}
       {mode === 'treatments' && <div className="grid md:grid-cols-2 gap-3 text-xs mb-4"><label className="text-slate-400">استخر<select value={pondId} onChange={(event) => setPondId(event.target.value)} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white">{ponds.map((pond) => <option key={pond.id} value={pond.id}>{pond.number} — {pond.name}</option>)}</select></label><div className="rounded-xl border border-slate-800 bg-slate-900 p-3 text-[10px] text-slate-400">ثبت درمان در سطح استخر انجام می‌شود؛ محاسبه یا پیشنهاد مقدار مصرف توسط ERP انجام نمی‌شود.</div></div>}
 
-      {mode === 'mortality' && <form onSubmit={submitMortality} className="space-y-3 text-xs"><div className="grid md:grid-cols-2 gap-3"><label className="text-slate-400">تعداد<input type="number" min="1" max={selectedStock?.count || 1} value={count} onChange={(event) => setCount(event.target.value)} required className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></label><label className="text-slate-400">وزن تخمینی کل تلفات kg<input type="number" min="0" step="0.001" value={mortalityWeight} onChange={(event) => setMortalityWeight(event.target.value)} required className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></label></div><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="علت" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="شرح" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /><input type="file" accept="image/*" onChange={(event) => loadPhoto(event.target.files?.[0])} className="w-full text-slate-400" /><Actions onCancel={() => setShowForm(false)} submit="ثبت تلفات" /></form>}
+      {mode === 'mortality' && <form onSubmit={submitMortality} className="space-y-3 text-xs"><div className="grid md:grid-cols-2 gap-3"><label className="text-slate-400">تعداد<input type="number" min="1" max={selectedStock?.count || 1} value={count} onChange={(event) => setCount(event.target.value)} required className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></label><label className="text-slate-400">وزن تخمینی کل تلفات kg<input type="number" min="0" step="0.001" value={mortalityWeight} onChange={(event) => setMortalityWeight(event.target.value)} required className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></label></div><input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="علت" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="شرح" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /><input type="file" multiple accept="image/*" onChange={(event) => void loadPhoto(event.target.files)} className="w-full text-slate-400" />{mortalityPhotos.length ? <div className="flex flex-wrap gap-2">{mortalityPhotos.map((file) => <span key={file.id} className="px-2 py-1 rounded-lg bg-slate-800 text-[10px] text-slate-300">{file.fileName} · {sizeLabel(file.sizeBytes)}</span>)}</div> : null}<Actions onCancel={() => setShowForm(false)} submit={uploading ? 'در حال آپلود...' : 'ثبت تلفات'} /></form>}
 
       {mode === 'transfers' && <form onSubmit={submitTransfer} className="space-y-3 text-xs"><div className="grid md:grid-cols-2 gap-3"><label className="text-slate-400">نوع مقصد<select value={destinationType} onChange={(event) => { setDestinationType(event.target.value as 'Pond' | 'Nursery'); setDestinationId(''); }} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"><option value="Pond">استخر</option><option value="Nursery">نرسری</option></select></label><label className="text-slate-400">مقصد<select value={destinationId} onChange={(event) => setDestinationId(event.target.value)} required className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"><option value="">انتخاب...</option>{destinationType === 'Pond' ? ponds.filter((pond) => pond.id !== selectedPond?.id).map((pond) => <option key={pond.id} value={pond.id}>{pond.number} — {pond.name}</option>) : nurseryTanks.map((tank) => <option key={tank.id} value={tank.id}>{tank.code} · {tank.status}</option>)}</select></label></div><label className="text-slate-400">تعداد<input type="number" min="1" max={selectedStock?.count || 1} value={transferCount} onChange={(event) => setTransferCount(event.target.value)} required className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></label><textarea value={transferReason} onChange={(event) => setTransferReason(event.target.value)} placeholder="علت انتقال" required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /><Actions onCancel={() => setShowForm(false)} submit="ثبت انتقال اتمیک" /></form>}
 
