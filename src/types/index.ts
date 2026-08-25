@@ -179,7 +179,7 @@ export interface Pond {
   isActive?: boolean;
   fishCount: number;
   speciesId: string;
-  speciesMix?: { speciesId: string; count: number; avgWeightKg: number }[];
+  speciesMix?: { speciesId: string; count: number; avgWeightKg: number; maleCount?: number; femaleCount?: number; unknownSexCount?: number; chipNumbers?: string[] }[];
   stockGroups?: PondStockGroup[];
   biomassKg: number;
   averageWeightKg: number;
