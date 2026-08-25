@@ -28,6 +28,14 @@ describe('pond stock operational mutations', () => {
     expect(result.pond).toMatchObject({ fishCount: 29, biomassKg: 86, dailyMortalityCount: 1 });
     expect(result.pond?.stockGroups?.find((group) => group.sex === 'Female')).toMatchObject({ count: 9, averageWeightKg: 4, chipNumbers: ['F-002'] });
     expect(result.pond?.stockGroups?.find((group) => group.sex === 'Male')).toMatchObject({ count: 20, averageWeightKg: 2.5, chipNumbers: ['M-001'] });
+    expect(result.pond?.speciesMix?.[0]).toMatchObject({
+      speciesId: 'sp-a',
+      count: 29,
+      maleCount: 20,
+      femaleCount: 9,
+      unknownSexCount: 0,
+      chipNumbers: ['F-002', 'M-001'],
+    });
   });
 
   it('updates only the selected biometry group then recomputes pond aggregates', () => {

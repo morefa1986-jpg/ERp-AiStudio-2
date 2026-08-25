@@ -68,17 +68,25 @@ export function summarizePondStock(pond: Pond, groupsRaw: PondStockGroup[]): Pon
   const fishCount = groups.reduce((sum, group) => sum + group.count, 0);
   const biomassKg = Number(groups.reduce((sum, group) => sum + groupBiomass(group), 0).toFixed(3));
   const averageWeightKg = fishCount > 0 ? Number((biomassKg / fishCount).toFixed(4)) : 0;
-  const species = new Map<string, { count: number; biomass: number }>();
+  const species = new Map<string, { count: number; biomass: number; maleCount: number; femaleCount: number; unknownSexCount: number; chipNumbers: string[] }>();
   for (const group of groups) {
-    const current = species.get(group.speciesId) || { count: 0, biomass: 0 };
+    const current = species.get(group.speciesId) || { count: 0, biomass: 0, maleCount: 0, femaleCount: 0, unknownSexCount: 0, chipNumbers: [] };
     current.count += group.count;
     current.biomass += groupBiomass(group);
+    if (group.sex === 'Male') current.maleCount += group.count;
+    else if (group.sex === 'Female') current.femaleCount += group.count;
+    else current.unknownSexCount += group.count;
+    current.chipNumbers = [...current.chipNumbers, ...cleanChips(group.chipNumbers)];
     species.set(group.speciesId, current);
   }
   const speciesMix = [...species.entries()].map(([speciesId, value]) => ({
     speciesId,
     count: value.count,
     avgWeightKg: value.count > 0 ? Number((value.biomass / value.count).toFixed(4)) : 0,
+    maleCount: value.maleCount,
+    femaleCount: value.femaleCount,
+    unknownSexCount: value.unknownSexCount,
+    chipNumbers: [...new Set(value.chipNumbers)],
   }));
   return {
     ...pond,
