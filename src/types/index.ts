@@ -608,7 +608,20 @@ export interface OfficeDocumentAttachment {
   sizeBytes: number;
   localPath?: string;
   checksum?: string;
+  storageId?: string;
+  downloadUrl?: string;
   addedAt: string;
+}
+
+export interface OfficeDocumentWorkflowEvent {
+  id: string;
+  timestamp: string;
+  action: 'REGISTERED' | 'STATUS_CHANGED' | 'REFERRED' | 'ANSWERED' | 'ARCHIVED' | 'COMMENT';
+  fromStatus?: OfficeDocumentStatus;
+  toStatus?: OfficeDocumentStatus;
+  assignedTo?: string;
+  note?: string;
+  userName: string;
 }
 
 export interface OfficeDocument {
@@ -634,6 +647,7 @@ export interface OfficeDocument {
   summary: string;
   notes?: string;
   attachments: OfficeDocumentAttachment[];
+  workflowEvents: OfficeDocumentWorkflowEvent[];
   createdBy: string;
   updatedAt?: string;
 }

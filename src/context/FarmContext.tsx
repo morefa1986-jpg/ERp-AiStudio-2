@@ -822,6 +822,15 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatedAt: registeredAt,
       tags: document.tags.map((tag) => tag.trim()).filter(Boolean),
       attachments: document.attachments.map((attachment) => ({ ...attachment, id: attachment.id || nextId('att'), addedAt: attachment.addedAt || registeredAt })),
+      workflowEvents: [{
+        id: nextId('flow'),
+        timestamp: registeredAt,
+        action: 'REGISTERED',
+        toStatus: document.status,
+        assignedTo: document.assignedTo,
+        note: document.summary,
+        userName: currentUser?.fullName || currentUser?.username || 'System',
+      }],
     };
     setOfficeDocuments((previous) => [newDocument, ...previous]);
     createAuditLog('CREATE', 'OfficeDocument', newDocument.id, `Document ${newDocument.indicatorNumber} registered`);
@@ -834,7 +843,22 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const document = officeDocuments.find((row) => row.id === id);
     if (!document) return { success: false, error: 'DOCUMENT_NOT_FOUND' };
     const updatedAt = new Date().toISOString();
-    setOfficeDocuments((previous) => previous.map((row) => row.id === id ? { ...row, status, notes: notes ?? row.notes, updatedAt } : row));
+    setOfficeDocuments((previous) => previous.map((row) => row.id === id ? {
+      ...row,
+      status,
+      notes: notes ?? row.notes,
+      updatedAt,
+      workflowEvents: [...(row.workflowEvents || []), {
+        id: nextId('flow'),
+        timestamp: updatedAt,
+        action: status === 'Referred' ? 'REFERRED' : status === 'Answered' ? 'ANSWERED' : status === 'Archived' ? 'ARCHIVED' : 'STATUS_CHANGED',
+        fromStatus: row.status,
+        toStatus: status,
+        assignedTo: row.assignedTo,
+        note: notes,
+        userName: currentUser?.fullName || currentUser?.username || 'System',
+      }],
+    } : row));
     createAuditLog('UPDATE', 'OfficeDocument', id, `Document status changed to ${status}`);
     markLocalChange({ module: 'documents', action: 'edit', entity: 'OfficeDocument', entityId: id, referenceId: document.indicatorNumber });
     return { success: true };

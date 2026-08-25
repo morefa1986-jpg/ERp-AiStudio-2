@@ -30,6 +30,7 @@ const document = {
     { id: 'att_1', kind: 'Original File (اصل فایل)', fileName: 'invoice.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', sizeBytes: 1200, addedAt: '2026-08-25T08:00:00.000Z' },
     { id: 'att_2', kind: 'PDF Copy (نسخه PDF)', fileName: 'invoice.pdf', mimeType: 'application/pdf', sizeBytes: 2400, addedAt: '2026-08-25T08:00:00.000Z' },
   ],
+  workflowEvents: [],
   createdBy: 'Admin',
 };
 

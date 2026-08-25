@@ -18,6 +18,7 @@ import {
   validateSubmittedUserScope,
 } from './server/stateScope';
 import { defaultDatabasePath, SqliteERPStore, StateConflictError, StoredAuditLog, StoredSocialConnection, StoredSocialDraft, StoredUser } from './server/storage';
+import { MAX_OFFICE_FILE_BYTES, resolveOfficeDocumentFile, storeOfficeDocumentFile } from './server/officeDocumentFiles';
 import { UserDataScope, UserScopeStore } from './server/userScope';
 import { MODULE_COLLECTIONS, STATE_COLLECTIONS, validateMutationScope, validateStateMutation, validateStateSnapshot } from './src/utils/stateIntegrity';
 
@@ -681,6 +682,25 @@ registerMasterDataRoutes(app, {
 app.get('/api/audit-logs', requireAuth, (req: AuthenticatedRequest, res) => {
   if (!isAdmin(req.user)) return res.status(403).json({ success: false, error: 'ADMIN_REQUIRED' });
   return res.json({ success: true, logs: store.listAuditLogs() });
+});
+
+app.post('/api/documents/files', requireAuth, requireModuleAction('documents', 'create'), (req: AuthenticatedRequest, res) => {
+  try {
+    const fileName = String(req.body?.fileName || '').trim();
+    const base64 = String(req.body?.base64 || '');
+    if (!fileName || !base64) return res.status(400).json({ success: false, error: 'DOCUMENT_FILE_REQUIRED' });
+    const stored = storeOfficeDocumentFile({ fileName, mimeType: String(req.body?.mimeType || ''), base64 });
+    store.appendAuditLog({ id: `audit_${crypto.randomUUID()}`, timestamp: new Date().toISOString(), userId: req.user?.id || '', userRole: req.user?.role || '', action: 'UPLOAD', entity: 'OfficeDocumentFile', entityId: stored.storageId, afterState: JSON.stringify({ fileName: stored.originalName, sizeBytes: stored.sizeBytes, sha256: stored.sha256 }), transactionId: `txn_${crypto.randomUUID()}`, ipAddress: req.ip, deviceId: clientDeviceId(req) });
+    return res.json({ success: true, file: { ...stored, maxBytes: MAX_OFFICE_FILE_BYTES } });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'DOCUMENT_FILE_UPLOAD_FAILED' });
+  }
+});
+
+app.get('/api/documents/files/:storageId', requireAuth, requireModuleAction('documents', 'view'), (req: AuthenticatedRequest, res) => {
+  const target = resolveOfficeDocumentFile(req.params.storageId);
+  if (!target) return res.status(404).json({ success: false, error: 'DOCUMENT_FILE_NOT_FOUND' });
+  return res.download(target);
 });
 
 const handleAiAssistant = async (req: AuthenticatedRequest, res: Response) => {
