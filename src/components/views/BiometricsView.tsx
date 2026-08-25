@@ -1,241 +1,112 @@
-import React, { useState } from 'react';
-import { useI18n } from '../../i18n';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Plus, Scale, Trash2, TrendingUp } from 'lucide-react';
 import { useFarm } from '../../context/FarmContext';
-import {
-  TrendingUp,
-  Scale,
-  Plus,
-  Calendar,
-  Sparkles,
-  Layers,
-  ArrowUpRight,
-  Fish,
-} from 'lucide-react';
+import { useI18n } from '../../i18n';
+import { pondStockGroups } from '../../utils/pondStockLedger';
+
+interface SampleDraft { weightKg: string; lengthCm: string; }
 
 export const BiometricsView: React.FC = () => {
-  const { t, formatNumber, formatDate } = useI18n();
-  const {
-    ponds,
-    biometricSessions,
-    recordBiometry,
-  } = useFarm();
+  const { formatNumber } = useI18n();
+  const { ponds, species, biometricSessions, recordBiometry } = useFarm();
+  const [selectedPondId, setSelectedPondId] = useState(ponds[0]?.id || '');
+  const [stockKey, setStockKey] = useState('');
+  const [operator, setOperator] = useState('');
+  const [notes, setNotes] = useState('');
+  const [samples, setSamples] = useState<SampleDraft[]>([{ weightKg: '', lengthCm: '' }, { weightKg: '', lengthCm: '' }, { weightKg: '', lengthCm: '' }]);
+  const [showForm, setShowForm] = useState(false);
 
-  const [selectedPondId, setSelectedPondId] = useState<string>(ponds[0]?.id || '');
-  const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const validSamples = useMemo(() => samples
+    .map((sample) => ({ weightKg: Number(sample.weightKg), lengthCm: sample.lengthCm.trim() ? Number(sample.lengthCm) : undefined }))
+    .filter((sample) => Number.isFinite(sample.weightKg) && sample.weightKg > 0 && (sample.lengthCm === undefined || (Number.isFinite(sample.lengthCm) && sample.lengthCm > 0))), [samples]);
 
-  // Form state
-  const [sampleSize, setSampleSize] = useState<number>(1);
-  const [avgWeightKg, setAvgWeightKg] = useState<number>(0);
-  const [operator, setOperator] = useState<string>('');
+  const stats = useMemo(() => {
+    if (!validSamples.length) return null;
+    const weights = validSamples.map((sample) => sample.weightKg);
+    const mean = weights.reduce((sum, value) => sum + value, 0) / weights.length;
+    const variance = weights.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / weights.length;
+    const cv = mean > 0 ? Math.sqrt(variance) / mean * 100 : 0;
+    return { mean, cv, min: Math.min(...weights), max: Math.max(...weights) };
+  }, [validSamples]);
 
-  const selectedPond = ponds.find((p) => p.id === selectedPondId);
-  const observedSessions = biometricSessions.filter((session) => Number.isFinite(session.sgr));
-  const averageSgr = observedSessions.length ? observedSessions.reduce((sum, session) => sum + session.sgr, 0) / observedSessions.length : null;
-  const latestSamples = biometricSessions[0]?.samples || [];
-  const sampleMean = latestSamples.length ? latestSamples.reduce((sum, sample) => sum + sample.weightKg, 0) / latestSamples.length : 0;
-  const sampleVariance = latestSamples.length ? latestSamples.reduce((sum, sample) => sum + ((sample.weightKg - sampleMean) ** 2), 0) / latestSamples.length : 0;
-  const coefficientOfVariation = sampleMean > 0 ? (Math.sqrt(sampleVariance) / sampleMean) * 100 : null;
+  const selectedPond = ponds.find((pond) => pond.id === selectedPondId);
+  const stockGroups = useMemo(() => selectedPond ? pondStockGroups(selectedPond).filter((group) => group.count > 0) : [], [selectedPond]);
+  const selectedStock = stockGroups.find((group) => `${group.speciesId}|${group.sex}` === stockKey) || stockGroups[0];
 
-  const handleAddBiometry = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPond) return;
+  useEffect(() => {
+    if (!stockGroups.length) { setStockKey(''); return; }
+    if (!stockGroups.some((group) => `${group.speciesId}|${group.sex}` === stockKey)) {
+      setStockKey(`${stockGroups[0].speciesId}|${stockGroups[0].sex}`);
+    }
+  }, [selectedPondId, stockGroups, stockKey]);
 
-    if (!Number.isFinite(avgWeightKg) || avgWeightKg <= 0 || !operator.trim()) return;
-    const samples = [{ weightKg: Number(avgWeightKg.toFixed(3)), lengthCm: Math.round(avgWeightKg * 14) }];
+  const speciesLabel = (speciesId: string) => {
+    const item = species.find((row) => row.id === speciesId);
+    return item?.faName || item?.scientificName || speciesId;
+  };
 
+  const updateSample = (index: number, field: keyof SampleDraft, value: string) => {
+    setSamples((previous) => previous.map((sample, sampleIndex) => sampleIndex === index ? { ...sample, [field]: value } : sample));
+  };
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedPond || !selectedStock || validSamples.length < 1 || !operator.trim()) return;
     recordBiometry({
       pondId: selectedPond.id,
       pondName: selectedPond.name,
-      speciesId: selectedPond.speciesId,
+      speciesId: selectedStock.speciesId,
+      stockSex: selectedStock.sex,
       date: new Date().toISOString().split('T')[0],
-      sampleCount: 1,
-      samples,
-      previousAvgWeightKg: selectedPond.averageWeightKg,
+      sampleCount: validSamples.length,
+      samples: validSamples,
+      previousAvgWeightKg: selectedStock.averageWeightKg,
       daysSinceLastBiometry: 0,
-      operatorName: operator,
-      notes: 'ثبت یک اندازه‌گیری دستی؛ برای تحلیل نمونه‌های متعدد، هر اندازه‌گیری جداگانه ثبت شود.',
+      operatorName: operator.trim(),
+      notes: notes.trim() || `نمونه‌گیری واقعی گروه ${speciesLabel(selectedStock.speciesId)} / ${selectedStock.sex} شامل ${validSamples.length} قطعه؛ طول فقط در صورت اندازه‌گیری مستقیم ثبت شده است.`,
     });
-
-    setShowAddModal(false);
+    setSamples([{ weightKg: '', lengthCm: '' }, { weightKg: '', lengthCm: '' }, { weightKg: '', lengthCm: '' }]);
+    setNotes('');
+    setShowForm(false);
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn pb-12">
-      {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-black text-white flex items-center gap-2.5">
-            <Scale className="w-6 h-6 text-amber-400" />
-            بیومتری، نمونه‌گیری اوزان و محاسبه شاخص رشد SGR
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            پایش نرخ رشد ویژه (Specific Growth Rate)، ضریب تبدیل خوراک (FCR)، توزیع یکنواختی گله و سورتینگ
-          </p>
-        </div>
-
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20"
-        >
-          <Plus className="w-4 h-4" />
-          ثبت نمونه‌گیری بیومتری جدید
-        </button>
+    <div className="space-y-6 pb-12 animate-fadeIn">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div><h1 className="text-xl font-black text-white flex items-center gap-2"><Scale className="w-6 h-6 text-amber-400" />بیومتری واقعی چندنمونه‌ای</h1><p className="text-xs text-slate-400 mt-1">هر وزن یک نمونه مستقل است؛ در استخرهای مختلط، بیومتری روی گروه دقیق گونه/جنس ثبت می‌شود و جمع استخر از Ledger دوباره محاسبه می‌شود.</p></div>
+        <button onClick={() => setShowForm(true)} className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold flex items-center gap-2"><Plus className="w-4 h-4" />ثبت بیومتری</button>
       </div>
 
-      {/* SGR Formula Card */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="font-bold text-white text-sm">فرمول استاندارد SGR:</h4>
-            <span className="font-mono text-slate-400 text-[11px]">
-              SGR (%/day) = [(ln(W₂ - Final) - ln(W₁ - Initial)) / Days] × 100
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 text-xs font-mono">
-          <div>میانگین رشد گله: <strong className="text-emerald-400 font-bold">{averageSgr === null ? '—' : `+${averageSgr.toFixed(2)}% / روز`}</strong></div>
-          <div>شاخص یکنواختی CV: <strong className="text-cyan-400 font-bold">{coefficientOfVariation === null ? '—' : `${coefficientOfVariation.toFixed(2)}%`}</strong></div>
-        </div>
-      </div>
-
-      {/* Biometry Records List */}
-      <div className="space-y-4">
-        {biometricSessions.map((rec) => (
-          <div
-            key={rec.id}
-            className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3"
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-2.5 gap-2">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-sm text-white">{rec.pondName}</span>
-                <span className="text-xs text-slate-400">تاریخ: {rec.date}</span>
-                <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-                  {rec.sampleCount} عدد نمونه
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-slate-400">کارشناس: {rec.operatorName}</span>
-              </div>
+      <div className="space-y-3">
+        {biometricSessions.map((session) => {
+          const weights = session.samples.map((sample) => sample.weightKg).filter((value) => Number.isFinite(value) && value > 0);
+          const mean = weights.length ? weights.reduce((sum, value) => sum + value, 0) / weights.length : 0;
+          const variance = weights.length ? weights.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / weights.length : 0;
+          const cv = mean > 0 ? Math.sqrt(variance) / mean * 100 : null;
+          return <div key={session.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3"><div><strong className="text-white">{session.pondName}</strong><span className="text-xs text-slate-500 mr-2">{session.date}</span><span className="text-[10px] text-cyan-300 mr-2">{speciesLabel(session.speciesId)} · {session.stockSex || 'Unknown'}</span></div><span className="text-xs text-slate-400">{session.sampleCount} نمونه · {session.operatorName}</span></div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+              <div className="bg-slate-950 rounded-xl p-3"><span className="text-slate-500 block">میانگین وزن</span><strong className="text-amber-400">{formatNumber(session.averageWeightKg)} kg</strong></div>
+              <div className="bg-slate-950 rounded-xl p-3"><span className="text-slate-500 block">کمینه</span><strong className="text-white">{formatNumber(session.minWeightKg)} kg</strong></div>
+              <div className="bg-slate-950 rounded-xl p-3"><span className="text-slate-500 block">بیشینه</span><strong className="text-white">{formatNumber(session.maxWeightKg)} kg</strong></div>
+              <div className="bg-slate-950 rounded-xl p-3"><span className="text-slate-500 block">CV واقعی</span><strong className="text-cyan-400">{cv === null ? '—' : `${cv.toFixed(2)}%`}</strong></div>
+              <div className="bg-slate-950 rounded-xl p-3"><span className="text-slate-500 block">SGR</span><strong className="text-emerald-400">{Number.isFinite(session.sgr) ? `${session.sgr}%/day` : '—'}</strong></div>
             </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-              <div>
-                <span className="text-[11px] text-slate-400 block">میانگین وزن</span>
-                <span className="text-base font-black text-amber-400">
-                  {rec.averageWeightKg} kg
-                </span>
-              </div>
-
-              <div>
-                <span className="text-[11px] text-slate-400 block">بیومس تخمینی استخر</span>
-                <span className="text-base font-bold text-white">{formatNumber(rec.estimatedBiomassKg)} kg</span>
-              </div>
-
-              <div>
-                <span className="text-[11px] text-slate-400 block">نرخ رشد ویژه SGR</span>
-                <span className="text-base font-black text-emerald-400">+{rec.sgr}% / روز</span>
-              </div>
-
-              <div>
-                <span className="text-[11px] text-slate-400 block">دامنه اوزان</span>
-                <span className="text-xs font-mono text-slate-300">
-                  {rec.minWeightKg}kg - {rec.maxWeightKg}kg
-                </span>
-              </div>
-            </div>
-
-            {rec.notes && (
-              <p className="text-[11px] text-slate-400">{rec.notes}</p>
-            )}
-          </div>
-        ))}
+          </div>;
+        })}
       </div>
 
-      {/* Modal: New Biometry */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <h3 className="font-bold text-base text-white flex items-center gap-2">
-              <Scale className="w-5 h-5 text-amber-400" />
-              ثبت داده‌های بیومتری و نمونه‌گیری وزن
-            </h3>
-
-            <form onSubmit={handleAddBiometry} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">استخر پرورشی:</label>
-                <select
-                  value={selectedPondId}
-                  onChange={(e) => setSelectedPondId(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"
-                >
-                  {ponds.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.number} — {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">تعداد نمونه (قطعه):</label>
-                  <input
-                    type="number"
-                    value={sampleSize}
-                    onChange={(e) => setSampleSize(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">میانگین وزن (kg):</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={avgWeightKg}
-                    onChange={(e) => setAvgWeightKg(Number(e.target.value))}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold text-amber-400"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-bold mb-1">کارشناس ثبت‌کننده:</label>
-                <input
-                  type="text"
-                  value={operator}
-                  onChange={(e) => setOperator(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"
-                  required
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl"
-                >
-                  انصراف
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl"
-                >
-                  محاسبه SGR و ثبت
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {showForm && <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-slate-900 border border-amber-500/30 rounded-2xl p-6 w-full max-w-3xl max-h-[90vh] overflow-auto">
+        <h2 className="font-bold text-white mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-amber-400" />ثبت نمونه‌های واقعی</h2>
+        <form onSubmit={submit} className="space-y-4 text-xs">
+          <div className="grid md:grid-cols-3 gap-3"><div><label className="text-slate-400 block mb-1">استخر</label><select value={selectedPondId} onChange={(event) => setSelectedPondId(event.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white">{ponds.map((pond) => <option key={pond.id} value={pond.id}>{pond.number} — {pond.name}</option>)}</select></div><div><label className="text-slate-400 block mb-1">گروه زیستی</label><select value={selectedStock ? `${selectedStock.speciesId}|${selectedStock.sex}` : ''} onChange={(event) => setStockKey(event.target.value)} required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white"><option value="">انتخاب...</option>{stockGroups.map((group) => <option key={`${group.speciesId}|${group.sex}`} value={`${group.speciesId}|${group.sex}`}>{speciesLabel(group.speciesId)} · {group.sex} · {group.count} قطعه · {group.averageWeightKg} kg</option>)}</select></div><div><label className="text-slate-400 block mb-1">کارشناس</label><input value={operator} onChange={(event) => setOperator(event.target.value)} required className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" /></div></div>
+          <div className="space-y-2"><div className="grid grid-cols-[40px_1fr_1fr_40px] gap-2 text-[10px] text-slate-500 px-1"><span>#</span><span>وزن واقعی (kg)</span><span>طول واقعی (cm، اختیاری)</span><span /></div>{samples.map((sample, index) => <div key={index} className="grid grid-cols-[40px_1fr_1fr_40px] gap-2 items-center"><span className="text-slate-500 text-center">{index + 1}</span><input type="number" min="0.001" step="0.001" value={sample.weightKg} onChange={(event) => updateSample(index, 'weightKg', event.target.value)} className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-white" /><input type="number" min="0.1" step="0.1" value={sample.lengthCm} onChange={(event) => updateSample(index, 'lengthCm', event.target.value)} className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-white" /><button type="button" disabled={samples.length <= 1} onClick={() => setSamples((previous) => previous.filter((_, i) => i !== index))} className="text-rose-400 disabled:opacity-30"><Trash2 className="w-4 h-4" /></button></div>)}</div>
+          <button type="button" onClick={() => setSamples((previous) => [...previous, { weightKg: '', lengthCm: '' }])} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200">+ افزودن نمونه</button>
+          {stats && <div className="grid grid-cols-4 gap-2 bg-slate-950 rounded-xl p-3"><div><span className="text-slate-500 block">تعداد معتبر</span><strong className="text-white">{validSamples.length}</strong></div><div><span className="text-slate-500 block">میانگین</span><strong className="text-amber-400">{stats.mean.toFixed(3)}</strong></div><div><span className="text-slate-500 block">دامنه</span><strong className="text-white">{stats.min.toFixed(3)}–{stats.max.toFixed(3)}</strong></div><div><span className="text-slate-500 block">CV</span><strong className="text-cyan-400">{stats.cv.toFixed(2)}%</strong></div></div>}
+          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="یادداشت نمونه‌گیری..." className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white" />
+          <div className="flex justify-end gap-2"><button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">انصراف</button><button type="submit" disabled={!selectedPond || !selectedStock || validSamples.length < 1 || !operator.trim()} className="px-4 py-2 bg-amber-500 text-slate-950 font-bold rounded-xl disabled:opacity-40">ثبت {validSamples.length} نمونه</button></div>
+        </form>
+      </div></div>}
     </div>
   );
 };

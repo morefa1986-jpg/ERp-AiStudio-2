@@ -6,6 +6,8 @@ export function roleAllows(role: string, module: PermissionModule, action: Permi
   const viewLike = action === 'view' || action === 'export' || action === 'print';
   const operationalActions: PermissionAction[] = ['view', 'create', 'edit', 'approve', 'export', 'print'];
   const canOperate = operationalActions.includes(action);
+  if (module === 'workbench') return action === 'view';
+  if (module === 'chat') return role !== 'Viewer/Auditor' ? ['view', 'create', 'edit'].includes(action) : action === 'view';
 
   switch (role) {
     case 'Farm Manager':
@@ -30,14 +32,18 @@ export function roleAllows(role: string, module: PermissionModule, action: Permi
     case 'Cold Storage Manager':
       return ['dashboard', 'cold_storage', 'warehouse', 'sales', 'reports'].includes(module) && canOperate;
     case 'Accountant':
-      return ['dashboard', 'accounting', 'sales', 'hr', 'warehouse', 'reports'].includes(module) && canOperate;
+      return ['dashboard', 'accounting', 'sales', 'documents', 'hr', 'warehouse', 'reports'].includes(module) && canOperate;
     case 'Sales Manager':
     case 'CRM Operator':
-      return ['dashboard', 'crm', 'sales', 'processing', 'cold_storage', 'media', 'reports'].includes(module) && canOperate;
+      return ['dashboard', 'crm', 'sales', 'documents', 'processing', 'cold_storage', 'media', 'reports'].includes(module) && canOperate;
     case 'HR Manager':
       return ['dashboard', 'hr', 'reports'].includes(module) && canOperate;
     case 'Media Manager':
       return ['dashboard', 'media', 'reports'].includes(module) && canOperate;
+    case 'Gate Guard':
+      return ['dashboard', 'gatehouse', 'documents', 'chat'].includes(module) && ['view', 'create', 'edit', 'print'].includes(action);
+    case 'Office Automation':
+      return ['dashboard', 'documents', 'gatehouse', 'chat', 'reports'].includes(module) && canOperate;
     case 'Viewer/Auditor':
       return viewLike;
     default:

@@ -130,6 +130,7 @@ export const es = {
     sectionSystem: 'IA, Seguridad y Plataforma',
     stoppedBadge: '{count} Alimentaciones Detenidas',
     dashboard: 'Panel Central de KPI',
+    workbench: 'Bandeja Diaria',
     farmHalls: 'Naves y Estalaciones',
     ponds: 'Estanques Gemelos Digitales',
     feeding: 'Motor de Ración y Alimentación',

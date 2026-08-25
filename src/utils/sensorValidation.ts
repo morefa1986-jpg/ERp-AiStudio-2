@@ -41,13 +41,15 @@ export interface WaterSafetyAssessment {
   staleTelemetry: boolean;
 }
 
+export const SENSOR_MAX_AGE_MINUTES = 15;
+
 export const SENSOR_BOUNDS = {
   DISSOLVED_OXYGEN: { ABSOLUTE_MIN: 0.1, CRITICAL_FEEDING_MIN: 4.0, WARNING_MIN: 5.5, OPTIMAL_MIN: 6.5, OPTIMAL_MAX: 12.0, PHYSICAL_MAX: 25.0 },
   TEMPERATURE: { LETHAL_MIN: 3.0, FEEDING_MIN: 4.0, OPTIMAL_MIN: 14.0, OPTIMAL_MAX: 19.5, FEEDING_MAX: 25.0, LETHAL_MAX: 29.0 },
   PH: { MIN: 6.0, OPTIMAL_MIN: 6.8, OPTIMAL_MAX: 8.2, MAX: 9.0 },
   AMMONIA_NH3: { SAFE_MAX: 0.02, CRITICAL_MAX: 0.05 },
   NITRITE_NO2: { SAFE_MAX: 0.2, CRITICAL_MAX: 0.5 },
-  MAX_SENSOR_AGE_HOURS: 6,
+  MAX_SENSOR_AGE_HOURS: SENSOR_MAX_AGE_MINUTES / 60,
 };
 
 function staleResult(value: number, timestamp: string | undefined, code: string, label: string): SensorValidationResult | null {
@@ -58,12 +60,12 @@ function staleResult(value: number, timestamp: string | undefined, code: string,
   if (!Number.isFinite(ts)) {
     return { isValid: false, status: 'SENSOR_FAULT', sanitizedValue: value, message: `زمان ثبت ${label} نامعتبر است.`, errors: [`${code}_TIMESTAMP_INVALID`] };
   }
-  const ageHours = (Date.now() - ts) / 3_600_000;
-  if (ageHours < -0.25) {
+  const ageMinutes = (Date.now() - ts) / 60_000;
+  if (ageMinutes < -15) {
     return { isValid: false, status: 'SENSOR_FAULT', sanitizedValue: value, message: `زمان ثبت ${label} در آینده است.`, errors: [`${code}_TIMESTAMP_FUTURE`] };
   }
-  if (ageHours > SENSOR_BOUNDS.MAX_SENSOR_AGE_HOURS) {
-    return { isValid: false, status: 'STALE', sanitizedValue: value, message: `داده ${label} قدیمی است (${Math.round(ageHours)} ساعت قبل).`, errors: [`${code}_DATA_STALE`] };
+  if (ageMinutes > SENSOR_MAX_AGE_MINUTES) {
+    return { isValid: false, status: 'STALE', sanitizedValue: value, message: `داده ${label} قدیمی است (${Math.round(ageMinutes)} دقیقه قبل)؛ حداکثر سن مجاز ${SENSOR_MAX_AGE_MINUTES} دقیقه است.`, errors: [`${code}_DATA_STALE`] };
   }
   return null;
 }

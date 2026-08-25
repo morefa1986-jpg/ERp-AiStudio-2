@@ -2,12 +2,13 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { getStoredSessionToken, useAuth } from './AuthContext';
 import {
   Account, AttendanceRecord, BackupSnapshot, BiometricSession, BroodstockFish, ColdStoragePallet, Customer,
-  Employee, Equipment, FeedingRecord, FertilizationBatch, FishTransfer, FarmAuditLog, Hall, IncubatorUnit,
-  InventoryItem, InventoryTransaction, JournalEntry, LabSample, LarvalBatch, MortalityRecord, NurseryTank,
-  PayrollRecord, PermissionAction, PermissionModule, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost,
+  CrmActivity, CrmReminder, Employee, Equipment, FeedingRecord, FertilizationBatch, FishTransfer, FarmAuditLog, GatePassRecord, Hall, IncubatorUnit,
+  InternalChatMessage, InternalChatThread, InventoryItem, InventoryTransaction, JournalEntry, LabSample, LarvalBatch, MortalityRecord, NurseryTank,
+  OfficeBrandingSettings, OfficeDocument, PayrollRecord, PermissionAction, PermissionModule, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost,
   SturgeonSpecies, TreatmentRecord, WaterQualityLog,
 } from '../types';
 import { manualSnapshotCapacityCubicMeters, PondManualSnapshotInput, PondSpeciesManualGroup } from '../types/pondSnapshot';
+import { FarmSpeciesWithStatus, HallAdminInput, HallAdminPatch, PondAdminPatch, PondStructureAdminInput, SpeciesAdminInput } from '../types/farmStructure';
 import {
   INITIAL_ACCOUNTS, INITIAL_BROODSTOCK, INITIAL_COLD_STORAGE, INITIAL_CUSTOMERS, INITIAL_EQUIPMENT,
   INITIAL_FERTILIZATIONS, INITIAL_HALLS, INITIAL_INCUBATORS, INITIAL_INVENTORY, INITIAL_INVENTORY_TXS,
@@ -21,6 +22,7 @@ import { assessWaterSafetyForFeeding } from '../utils/sensorValidation';
 import { executeAtomicFishTransfer } from '../utils/transferEngine';
 import { executeAtomicProcessing } from '../utils/processingEngine';
 import { fulfillProforma } from '../utils/salesEngine';
+import { applyBiometryToPondStock, applyMortalityToPondStock } from '../utils/pondStockOperations';
 import { nextId } from '../utils/id';
 
 export interface FeedingRecommendationResult {
@@ -42,10 +44,17 @@ interface FarmContextType {
   treatments: TreatmentRecord[]; transfers: FishTransfer[]; broodstock: BroodstockFish[];
   fertilizations: FertilizationBatch[]; incubators: IncubatorUnit[]; larvae: LarvalBatch[]; nurseryTanks: NurseryTank[];
   inventory: InventoryItem[]; inventoryTxs: InventoryTransaction[]; labSamples: LabSample[];
-  processingBatches: ProcessingBatch[]; coldStorage: ColdStoragePallet[]; customers: Customer[];
-  proformas: ProformaInvoice[]; accounts: Account[]; journals: JournalEntry[]; employees: Employee[];
+  processingBatches: ProcessingBatch[]; coldStorage: ColdStoragePallet[]; customers: Customer[]; crmActivities: CrmActivity[]; crmReminders: CrmReminder[];
+  proformas: ProformaInvoice[]; officeDocuments: OfficeDocument[]; gatePasses: GatePassRecord[]; accounts: Account[]; journals: JournalEntry[]; employees: Employee[];
   attendance: AttendanceRecord[]; payrolls: PayrollRecord[]; equipment: Equipment[]; socialPosts: SocialMediaPost[];
-  auditLogs: FarmAuditLog[]; backups: BackupSnapshot[]; syncStatus: OfflineSyncStatus;
+  officeSettings: OfficeBrandingSettings[]; auditLogs: FarmAuditLog[]; backups: BackupSnapshot[]; syncStatus: OfflineSyncStatus;
+  chatThreads: InternalChatThread[]; chatMessages: InternalChatMessage[];
+  createHallStructure: (input: HallAdminInput) => { success: boolean; error?: string; id?: string };
+  updateHallStructure: (hallId: string, patch: HallAdminPatch) => { success: boolean; error?: string };
+  createPondStructure: (input: PondStructureAdminInput) => { success: boolean; error?: string; id?: string };
+  updatePondStructure: (pondId: string, patch: PondAdminPatch) => { success: boolean; error?: string };
+  createSpeciesDefinition: (input: SpeciesAdminInput) => { success: boolean; error?: string; id?: string };
+  setSpeciesActive: (speciesId: string, isActive: boolean) => { success: boolean; error?: string };
   calculateRecommendedFeed: (pondId: string) => FeedingRecommendationResult;
   recordFeeding: (record: Omit<FeedingRecord, 'id' | 'timestamp'>) => { success: boolean; error?: string };
   stopPondFeeding: (pondId: string, reason: Pond['stopFeedingReason'], details: string, operator: string) => void;
@@ -55,11 +64,19 @@ interface FarmContextType {
   recordBiometry: (session: Omit<BiometricSession, 'id' | 'averageWeightKg' | 'minWeightKg' | 'maxWeightKg' | 'estimatedBiomassKg' | 'estimatedCount' | 'growthRateKgPerDay' | 'sgr'>) => void;
   recordWaterTest: (test: Omit<WaterQualityLog, 'id' | 'timestamp'>) => void;
   recordTreatment: (treatment: Omit<TreatmentRecord, 'id'>) => void;
+  completeTreatment: (treatmentId: string) => { success: boolean; error?: string };
   executeAtomicTransfer: (transferData: Omit<FishTransfer, 'id' | 'status'>) => { success: boolean; error?: string };
   addInventoryTransaction: (tx: Omit<InventoryTransaction, 'id' | 'timestamp' | 'resultingQuantity'>) => void;
   createProcessingBatch: (batch: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>) => { success: boolean; error?: string };
   createProformaInvoice: (proforma: Omit<ProformaInvoice, 'id' | 'subtotal' | 'grandTotal'>) => void;
   updateProformaStage: (id: string, newStage: ProformaInvoice['stage']) => void;
+  addOfficeDocument: (document: Omit<OfficeDocument, 'id' | 'indicatorNumber' | 'registeredAt' | 'createdBy' | 'updatedAt'>) => { success: boolean; error?: string; id?: string };
+  updateOfficeDocumentStatus: (id: string, status: OfficeDocument['status'], notes?: string) => { success: boolean; error?: string };
+  updateOfficeBranding: (patch: Partial<Omit<OfficeBrandingSettings, 'id' | 'updatedAt' | 'updatedBy'>>) => { success: boolean; error?: string };
+  addGatePass: (record: Omit<GatePassRecord, 'id' | 'passNumber' | 'registeredAt' | 'registeredBy' | 'status'>) => { success: boolean; error?: string; id?: string };
+  updateGatePassStatus: (id: string, status: GatePassRecord['status']) => { success: boolean; error?: string };
+  createChatThread: (thread: Omit<InternalChatThread, 'id' | 'createdAt' | 'createdBy' | 'lastMessageAt'>) => { success: boolean; error?: string; id?: string };
+  sendChatMessage: (message: Omit<InternalChatMessage, 'id' | 'createdAt' | 'senderUserId' | 'senderName'>) => { success: boolean; error?: string; id?: string };
   createJournalEntry: (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>) => { success: boolean; error?: string };
   createFxConversionJournalEntry: (entry: FxConversionInput) => { success: boolean; error?: string };
   clockAttendance: (employeeId: string, type: 'in' | 'out', shift: AttendanceRecord['shift']) => void;
@@ -71,6 +88,9 @@ interface FarmContextType {
   addBroodstock: (fish: Omit<BroodstockFish, 'id'>) => void;
   recordFertilization: (fert: Omit<FertilizationBatch, 'id' | 'fertilizationTimestamp' | 'status'>) => void;
   addCustomer: (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => void;
+  updateCustomerProfile: (id: string, patch: Partial<Omit<Customer, 'id' | 'createdAt'>>) => { success: boolean; error?: string };
+  addCrmActivity: (activity: Omit<CrmActivity, 'id' | 'customerName' | 'createdAt' | 'createdBy'>) => { success: boolean; error?: string; id?: string };
+  updateCrmReminderStatus: (id: string, status: CrmReminder['status']) => { success: boolean; error?: string };
   addSocialPost: (post: Omit<SocialMediaPost, 'id' | 'status'>) => void;
 }
 
@@ -94,6 +114,34 @@ function inventoryStatus(item: InventoryItem, quantity: number): InventoryItem['
 function stripBackupData(snapshot: BackupSnapshot): BackupSnapshot {
   const { data: _data, ...metadata } = snapshot;
   return metadata;
+}
+
+function withHallTotals(currentHalls: Hall[], currentPonds: Pond[]): Hall[] {
+  return currentHalls.map((hall) => {
+    const hallPonds = currentPonds.filter((pond) => pond.hallId === hall.id);
+    return {
+      ...hall,
+      pondCount: hallPonds.length,
+      totalBiomassKg: Number(hallPonds.reduce((sum, pond) => sum + pond.biomassKg, 0).toFixed(2)),
+      totalFishCount: hallPonds.reduce((sum, pond) => sum + pond.fishCount, 0),
+    };
+  });
+}
+
+function structureCapacity(input: PondStructureAdminInput | PondAdminPatch, fallback = 0): number {
+  if (input.pondShape === 'Circular') {
+    const diameter = Number(input.diameterMeters);
+    const depth = Number(input.depthMeters);
+    if (Number.isFinite(diameter) && diameter > 0 && Number.isFinite(depth) && depth > 0) return Number((Math.PI * Math.pow(diameter / 2, 2) * depth).toFixed(2));
+  }
+  if (input.pondShape === 'Rectangular' || input.pondShape === 'Raceway') {
+    const length = Number(input.lengthMeters);
+    const width = Number(input.widthMeters);
+    const depth = Number(input.depthMeters);
+    if (Number.isFinite(length) && length > 0 && Number.isFinite(width) && width > 0 && Number.isFinite(depth) && depth > 0) return Number((length * width * depth).toFixed(2));
+  }
+  const explicit = Number(input.capacityCubicMeters);
+  return Number.isFinite(explicit) && explicit > 0 ? Number(explicit.toFixed(2)) : fallback;
 }
 
 type StateOperation = { module: PermissionModule; action: PermissionAction; entity?: string; entityId?: string; referenceId?: string; transactionId?: string };
@@ -120,7 +168,27 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [processingBatches, setProcessingBatches] = useState<ProcessingBatch[]>(() => DEMO_MODE ? INITIAL_PROCESSING_BATCHES : EMPTY_ARRAY<ProcessingBatch>());
   const [coldStorage, setColdStorage] = useState<ColdStoragePallet[]>(() => DEMO_MODE ? INITIAL_COLD_STORAGE : EMPTY_ARRAY<ColdStoragePallet>());
   const [customers, setCustomers] = useState<Customer[]>(() => DEMO_MODE ? INITIAL_CUSTOMERS : EMPTY_ARRAY<Customer>());
+  const [crmActivities, setCrmActivities] = useState<CrmActivity[]>(EMPTY_ARRAY);
+  const [crmReminders, setCrmReminders] = useState<CrmReminder[]>(EMPTY_ARRAY);
   const [proformas, setProformas] = useState<ProformaInvoice[]>(() => DEMO_MODE ? INITIAL_PROFORMAS : EMPTY_ARRAY<ProformaInvoice>());
+  const [officeDocuments, setOfficeDocuments] = useState<OfficeDocument[]>(EMPTY_ARRAY);
+  const [gatePasses, setGatePasses] = useState<GatePassRecord[]>(EMPTY_ARRAY);
+  const [chatThreads, setChatThreads] = useState<InternalChatThread[]>(EMPTY_ARRAY);
+  const [chatMessages, setChatMessages] = useState<InternalChatMessage[]>(EMPTY_ARRAY);
+  const [officeSettings, setOfficeSettings] = useState<OfficeBrandingSettings[]>(() => [{
+    id: 'office-branding-default',
+    companyNameFa: 'مزرعه تکثیر و پرورش ماهیان خاویاری فتحی',
+    companyNameEn: 'Fathi Sturgeon Production & Breeding Farm',
+    registrationLine: 'From Breeding to Caviar / از تکثیر تا خاویار',
+    addressLine: '',
+    phoneLine: '',
+    emailLine: '',
+    websiteLine: '',
+    invoiceFooterNote: 'این سند بر اساس اطلاعات ثبت‌شده در ERP صادر شده است.',
+    letterFooterNote: 'این نامه بدون مهر و امضای مجاز فاقد اعتبار اداری است.',
+    updatedAt: new Date().toISOString(),
+    updatedBy: 'System',
+  }]);
   const [accounts, setAccounts] = useState<Account[]>(() => DEMO_MODE ? INITIAL_ACCOUNTS : EMPTY_ARRAY<Account>());
   const [journals, setJournals] = useState<JournalEntry[]>(() => DEMO_MODE ? INITIAL_JOURNALS : EMPTY_ARRAY<JournalEntry>());
   const [employees, setEmployees] = useState<Employee[]>(() => DEMO_MODE ? INITIAL_EMPLOYEES : EMPTY_ARRAY<Employee>());
@@ -133,18 +201,17 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [syncStatus, setSyncStatus] = useState<OfflineSyncStatus>({ status: 'OFFLINE', pendingChangesCount: 0, lastSyncTimestamp: '' });
   const [stateReady, setStateReady] = useState(false);
   const [serverVersion, setServerVersion] = useState<number | null>(null);
-  const pendingOperation = useRef<StateOperation | null>(null);
+  const pendingOperations = useRef<StateOperation[]>([]);
   const persistenceInFlight = useRef(false);
-  const failedRevision = useRef<number | null>(null);
-  const revision = useRef(0);
+  const conflictRetryCount = useRef(0);
   const [retryNonce, setRetryNonce] = useState(0);
 
   const stateData = useMemo<Record<string, unknown>>(() => ({
     halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers,
     broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples,
-    processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls,
-    equipment, socialPosts, auditLogs, backups: backups.map(stripBackupData),
-  }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups]);
+    processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls,
+    equipment, socialPosts, officeSettings, auditLogs, backups: backups.map(stripBackupData),
+  }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, officeSettings, auditLogs, backups]);
 
   const applyState = (data: Record<string, unknown>, serverAudit: FarmAuditLog[] = []) => {
     const rows = <T,>(key: string): T[] => Array.isArray(data[key]) ? data[key] as T[] : [];
@@ -161,7 +228,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIncubators(rows<IncubatorUnit>('incubators')); setLarvae(rows<LarvalBatch>('larvae')); setNurseryTanks(rows<NurseryTank>('nurseryTanks'));
     setInventory(rows<InventoryItem>('inventory')); setInventoryTxs(rows<InventoryTransaction>('inventoryTxs')); setLabSamples(rows<LabSample>('labSamples'));
     setProcessingBatches(rows<ProcessingBatch>('processingBatches')); setColdStorage(rows<ColdStoragePallet>('coldStorage'));
-    setCustomers(rows<Customer>('customers')); setProformas(rows<ProformaInvoice>('proformas')); setAccounts(rows<Account>('accounts'));
+    setCustomers(rows<Customer>('customers')); setCrmActivities(rows<CrmActivity>('crmActivities')); setCrmReminders(rows<CrmReminder>('crmReminders')); setProformas(rows<ProformaInvoice>('proformas')); setOfficeDocuments(rows<OfficeDocument>('officeDocuments')); setGatePasses(rows<GatePassRecord>('gatePasses')); setChatThreads(rows<InternalChatThread>('chatThreads')); setChatMessages(rows<InternalChatMessage>('chatMessages')); if (rows<OfficeBrandingSettings>('officeSettings').length) setOfficeSettings(rows<OfficeBrandingSettings>('officeSettings')); setAccounts(rows<Account>('accounts'));
     setJournals(rows<JournalEntry>('journals')); setEmployees(rows<Employee>('employees')); setAttendance(rows<AttendanceRecord>('attendance'));
     setPayrolls(rows<PayrollRecord>('payrolls')); setEquipment(rows<Equipment>('equipment')); setSocialPosts(rows<SocialMediaPost>('socialPosts'));
     const mappedServerAudit = serverAudit.map((log: any): FarmAuditLog => ({
@@ -178,8 +245,8 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setStateReady(false);
     if (!currentUser) {
       setServerVersion(null);
-      pendingOperation.current = null;
-      revision.current += 1;
+      pendingOperations.current = [];
+      conflictRetryCount.current = 0;
       setSyncStatus({ status: 'OFFLINE', pendingChangesCount: 0, lastSyncTimestamp: '' });
       return () => { cancelled = true; };
     }
@@ -195,14 +262,13 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (payload.state?.data) {
           applyState(payload.state.data, Array.isArray(payload.auditLogs) ? payload.auditLogs : []);
           setServerVersion(Number(payload.state.version));
+          setSyncStatus({ status: 'ONLINE', pendingChangesCount: pendingOperations.current.length, lastSyncTimestamp: new Date().toISOString() });
         } else {
           setServerVersion(null);
-          pendingOperation.current = { module: 'settings', action: 'manage', entity: 'StateInitialization', entityId: 'state' };
-          revision.current += 1;
-          setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: previous.pendingChangesCount + 1 }));
+          pendingOperations.current.push({ module: 'settings', action: 'manage', entity: 'StateInitialization', entityId: 'state' });
+          setSyncStatus({ status: 'PENDING_CHANGES', pendingChangesCount: pendingOperations.current.length, lastSyncTimestamp: '' });
         }
         setStateReady(true);
-        setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', lastSyncTimestamp: new Date().toISOString() }));
       } catch {
         if (!cancelled) {
           setStateReady(true);
@@ -215,81 +281,233 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [currentUser?.id]);
 
   useEffect(() => {
-    if (!stateReady || !currentUser || !pendingOperation.current || persistenceInFlight.current) return;
-    const operation = pendingOperation.current;
-    pendingOperation.current = null;
+    if (!stateReady || !currentUser || pendingOperations.current.length === 0 || persistenceInFlight.current) return;
+    const operation = pendingOperations.current[0];
     const token = getStoredSessionToken();
     if (!token) {
-      pendingOperation.current = operation;
-      setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
+      setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: pendingOperations.current.length }));
       return;
     }
-    const requestRevision = revision.current;
-    if (failedRevision.current === requestRevision) return;
     persistenceInFlight.current = true;
-    setSyncStatus((previous) => ({ ...previous, status: 'SYNCING' }));
-    fetch('/api/state', { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: stateData, version: serverVersion, operation }) })
-      .then(async (response) => ({ response, payload: await response.json().catch(() => ({})) }))
-      .then(({ response, payload }) => {
-        if (!response.ok || !payload.success) {
-          if (response.status === 409 || (response.status >= 400 && response.status < 500 && response.status !== 429)) {
-            failedRevision.current = requestRevision;
-            setSyncStatus((previous) => ({ ...previous, status: 'ERROR' }));
+    setSyncStatus((previous) => ({ ...previous, status: 'SYNCING', pendingChangesCount: pendingOperations.current.length }));
+
+    const persist = async () => {
+      try {
+        const response = await fetch('/api/state', {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: stateData, version: serverVersion, operation }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (response.status === 409) {
+          conflictRetryCount.current += 1;
+          if (conflictRetryCount.current > 3) {
+            setSyncStatus((previous) => ({ ...previous, status: 'ERROR', pendingChangesCount: pendingOperations.current.length }));
             return;
           }
-          pendingOperation.current = operation;
-          failedRevision.current = requestRevision;
-          setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
+          const latestResponse = await fetch('/api/state', { headers: { Authorization: `Bearer ${token}` } });
+          const latestPayload = await latestResponse.json().catch(() => ({}));
+          if (!latestResponse.ok || !latestPayload.success || !latestPayload.state) {
+            setSyncStatus((previous) => ({ ...previous, status: 'ERROR', pendingChangesCount: pendingOperations.current.length }));
+            return;
+          }
+          setServerVersion(Number(latestPayload.state.version));
+          setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: pendingOperations.current.length }));
+          setRetryNonce((value) => value + 1);
           return;
         }
+        if (!response.ok || !payload.success) {
+          if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+            setSyncStatus((previous) => ({ ...previous, status: 'ERROR', pendingChangesCount: pendingOperations.current.length }));
+            return;
+          }
+          setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: pendingOperations.current.length }));
+          return;
+        }
+        pendingOperations.current.shift();
+        conflictRetryCount.current = 0;
         setServerVersion(Number(payload.state.version));
-        failedRevision.current = null;
-        setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', pendingChangesCount: 0, lastSyncTimestamp: new Date().toISOString() }));
-      })
-      .catch(() => {
-        pendingOperation.current = operation;
-        failedRevision.current = requestRevision;
-        setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
-      })
-      .finally(() => { persistenceInFlight.current = false; });
-  }, [stateData, stateReady, currentUser?.id, serverVersion, syncStatus.pendingChangesCount, retryNonce]);
+        const remaining = pendingOperations.current.length;
+        setSyncStatus({ status: remaining ? 'PENDING_CHANGES' : 'ONLINE', pendingChangesCount: remaining, lastSyncTimestamp: new Date().toISOString() });
+        if (remaining) setRetryNonce((value) => value + 1);
+      } catch {
+        setSyncStatus((previous) => ({ ...previous, status: 'OFFLINE', pendingChangesCount: pendingOperations.current.length }));
+      } finally {
+        persistenceInFlight.current = false;
+      }
+    };
+    void persist();
+  }, [stateData, stateReady, currentUser?.id, serverVersion, retryNonce]);
 
   useEffect(() => {
     if (!currentUser) return;
     const retry = () => {
-      if (!pendingOperation.current) return;
-      failedRevision.current = null;
+      if (!pendingOperations.current.length || persistenceInFlight.current) return;
       setRetryNonce((value) => value + 1);
-      setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: Math.max(1, previous.pendingChangesCount) }));
+      setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: pendingOperations.current.length }));
     };
     window.addEventListener('online', retry);
     const interval = window.setInterval(retry, 15_000);
-    return () => {
-      window.removeEventListener('online', retry);
-      window.clearInterval(interval);
-    };
+    return () => { window.removeEventListener('online', retry); window.clearInterval(interval); };
   }, [currentUser?.id]);
 
   useEffect(() => {
-    setHalls((previous) => previous.map((hall) => {
-      const hallPonds = ponds.filter((pond) => pond.hallId === hall.id);
-      const next = { ...hall, pondCount: hallPonds.length, totalBiomassKg: Number(hallPonds.reduce((sum, pond) => sum + pond.biomassKg, 0).toFixed(2)), totalFishCount: hallPonds.reduce((sum, pond) => sum + pond.fishCount, 0) };
-      return hall.pondCount === next.pondCount && hall.totalBiomassKg === next.totalBiomassKg && hall.totalFishCount === next.totalFishCount ? hall : next;
-    }));
+    setHalls((previous) => withHallTotals(previous, ponds));
   }, [ponds]);
 
-  const can = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean =>
-    stateReady && hasPermission(module, action, scopeId);
+  const can = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean => stateReady && hasPermission(module, action, scopeId);
   const markLocalChange = (operation: StateOperation) => {
-    pendingOperation.current = operation;
-    revision.current += 1;
-    failedRevision.current = null;
-    setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: previous.pendingChangesCount + 1 }));
+    pendingOperations.current.push(operation);
+    if (pendingOperations.current.length > 1000) pendingOperations.current.splice(0, pendingOperations.current.length - 1000);
+    conflictRetryCount.current = 0;
+    setSyncStatus((previous) => ({ ...previous, status: 'PENDING_CHANGES', pendingChangesCount: pendingOperations.current.length }));
+    setRetryNonce((value) => value + 1);
   };
   const createAuditLog = (action: string, entity: string, entityId: string, details: string, beforeState?: string, afterState?: string, transactionId?: string) => {
     if (!currentUser) return;
     const log: FarmAuditLog = { id: nextId('audit'), timestamp: new Date().toISOString(), userId: currentUser.id, userName: currentUser.fullName, userRole: currentUser.role, action, entity, entityId, details, beforeState, afterState, transactionId };
     setAuditLogs((previous) => [log, ...previous].slice(0, 1000));
+  };
+
+  const createHallStructure = (input: HallAdminInput): { success: boolean; error?: string; id?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const number = input.number.trim();
+    const name = input.name.trim();
+    const description = input.description.trim();
+    if (!number || !name) return { success: false, error: 'HALL_IDENTITY_REQUIRED' };
+    if (halls.some((hall) => hall.number.trim().toLowerCase() === number.toLowerCase())) return { success: false, error: 'HALL_NUMBER_DUPLICATE' };
+    const hall: Hall = { id: nextId('hall'), number, name, description, pondCount: 0, totalBiomassKg: 0, totalFishCount: 0, isActive: true };
+    setHalls((previous) => [...previous, hall]);
+    createAuditLog('CREATE', 'Hall', hall.id, `Farm hall ${hall.number} created`, undefined, JSON.stringify(hall));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Hall', entityId: hall.id, referenceId: hall.number });
+    return { success: true, id: hall.id };
+  };
+
+  const updateHallStructure = (hallId: string, patch: HallAdminPatch): { success: boolean; error?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const hall = halls.find((item) => item.id === hallId);
+    if (!hall) return { success: false, error: 'HALL_NOT_FOUND' };
+    if (patch.isActive === false && ponds.some((pond) => pond.hallId === hallId && pond.fishCount > 0)) return { success: false, error: 'HALL_WITH_FISH_CANNOT_BE_DEACTIVATED' };
+    const number = patch.number?.trim();
+    if (number && halls.some((item) => item.id !== hallId && item.number.trim().toLowerCase() === number.toLowerCase())) return { success: false, error: 'HALL_NUMBER_DUPLICATE' };
+    const updated: Hall = {
+      ...hall,
+      ...(number !== undefined ? { number } : {}),
+      ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+      ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
+      ...(patch.managerId !== undefined ? { managerId: patch.managerId || undefined } : {}),
+      ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
+    };
+    if (!updated.number || !updated.name) return { success: false, error: 'HALL_IDENTITY_REQUIRED' };
+    setHalls((previous) => previous.map((item) => item.id === hallId ? updated : item));
+    createAuditLog('UPDATE', 'Hall', hallId, `Farm hall ${hall.number} updated`, JSON.stringify(hall), JSON.stringify(updated));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Hall', entityId: hallId, referenceId: updated.number });
+    return { success: true };
+  };
+
+  const createPondStructure = (input: PondStructureAdminInput): { success: boolean; error?: string; id?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const hall = halls.find((item) => item.id === input.hallId && item.isActive);
+    const speciesDefinition = species.find((item) => item.id === input.speciesId) as FarmSpeciesWithStatus | undefined;
+    if (!hall) return { success: false, error: 'ACTIVE_HALL_REQUIRED' };
+    if (!speciesDefinition || speciesDefinition.isActive === false) return { success: false, error: 'ACTIVE_SPECIES_REQUIRED' };
+    const number = input.number.trim();
+    const name = input.name.trim();
+    if (!number || !name) return { success: false, error: 'POND_IDENTITY_REQUIRED' };
+    if (ponds.some((pond) => pond.number.trim().toLowerCase() === number.toLowerCase())) return { success: false, error: 'POND_NUMBER_DUPLICATE' };
+    const capacityCubicMeters = structureCapacity(input);
+    if (!Number.isFinite(capacityCubicMeters) || capacityCubicMeters <= 0) return { success: false, error: 'POND_DIMENSIONS_OR_CAPACITY_REQUIRED' };
+    const timestamp = new Date().toISOString();
+    const pond = {
+      id: nextId('pond'), number, name, hallId: hall.id, capacityCubicMeters, fishCount: 0, speciesId: speciesDefinition.id,
+      biomassKg: 0, averageWeightKg: 0, lastFeedingKg: 0, lastFeedingTime: '', feedingStatus: 'STOPPED' as const,
+      stopFeedingReason: 'Manual Decision' as const, stopFeedingDetails: 'New pond awaiting initial stock snapshot and validated telemetry',
+      stopFeedingTimestamp: timestamp, stopFeedingUser: currentUser?.fullName || 'Admin', fcr: speciesDefinition.standardFCR,
+      dailyMortalityCount: 0, waterTemperature: 0, dissolvedOxygen: 0, ph: 7, sensorQuality: 'OFFLINE' as const,
+      lastBiometryDate: '', criticalAlerts: ['Initial stock snapshot required'], notes: input.notes?.trim(),
+      pondShape: input.pondShape, lengthMeters: input.lengthMeters, widthMeters: input.widthMeters,
+      depthMeters: input.depthMeters, diameterMeters: input.diameterMeters,
+    } as Pond;
+    const nextPonds = [...ponds, pond];
+    setPonds(nextPonds);
+    setHalls((previous) => withHallTotals(previous, nextPonds));
+    createAuditLog('CREATE', 'Pond', pond.id, `Pond ${pond.number} created in hall ${hall.number}`, undefined, JSON.stringify(pond));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Pond', entityId: pond.id, referenceId: pond.number });
+    return { success: true, id: pond.id };
+  };
+
+  const updatePondStructure = (pondId: string, patch: PondAdminPatch): { success: boolean; error?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const pond = ponds.find((item) => item.id === pondId);
+    if (!pond) return { success: false, error: 'POND_NOT_FOUND' };
+    const nextHallId = patch.hallId ?? pond.hallId;
+    const nextSpeciesId = patch.speciesId ?? pond.speciesId;
+    if (pond.fishCount > 0 && (nextHallId !== pond.hallId || nextSpeciesId !== pond.speciesId)) return { success: false, error: 'STOCKED_POND_REASSIGNMENT_FORBIDDEN' };
+    const hall = halls.find((item) => item.id === nextHallId && item.isActive);
+    const speciesDefinition = species.find((item) => item.id === nextSpeciesId) as FarmSpeciesWithStatus | undefined;
+    if (!hall) return { success: false, error: 'ACTIVE_HALL_REQUIRED' };
+    if (!speciesDefinition || speciesDefinition.isActive === false) return { success: false, error: 'ACTIVE_SPECIES_REQUIRED' };
+    const number = patch.number?.trim() ?? pond.number;
+    const name = patch.name?.trim() ?? pond.name;
+    if (!number || !name) return { success: false, error: 'POND_IDENTITY_REQUIRED' };
+    if (ponds.some((item) => item.id !== pondId && item.number.trim().toLowerCase() === number.toLowerCase())) return { success: false, error: 'POND_NUMBER_DUPLICATE' };
+    const current = pond as Pond & PondAdminPatch;
+    const mergedStructure: PondAdminPatch = {
+      pondShape: patch.pondShape ?? current.pondShape ?? 'Other',
+      capacityCubicMeters: patch.capacityCubicMeters ?? pond.capacityCubicMeters,
+      lengthMeters: patch.lengthMeters ?? current.lengthMeters,
+      widthMeters: patch.widthMeters ?? current.widthMeters,
+      depthMeters: patch.depthMeters ?? current.depthMeters,
+      diameterMeters: patch.diameterMeters ?? current.diameterMeters,
+    };
+    const capacityCubicMeters = structureCapacity(mergedStructure, pond.capacityCubicMeters);
+    if (!Number.isFinite(capacityCubicMeters) || capacityCubicMeters <= 0) return { success: false, error: 'POND_DIMENSIONS_OR_CAPACITY_REQUIRED' };
+    const updated = {
+      ...pond, number, name, hallId: nextHallId, speciesId: nextSpeciesId, capacityCubicMeters,
+      notes: patch.notes !== undefined ? patch.notes.trim() : pond.notes,
+      pondShape: mergedStructure.pondShape,
+      lengthMeters: mergedStructure.lengthMeters,
+      widthMeters: mergedStructure.widthMeters,
+      depthMeters: mergedStructure.depthMeters,
+      diameterMeters: mergedStructure.diameterMeters,
+    } as Pond;
+    const nextPonds = ponds.map((item) => item.id === pondId ? updated : item);
+    setPonds(nextPonds);
+    setHalls((previous) => withHallTotals(previous, nextPonds));
+    createAuditLog('UPDATE', 'Pond', pondId, `Pond structure ${pond.number} updated`, JSON.stringify(pond), JSON.stringify(updated));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Pond', entityId: pondId, referenceId: updated.number });
+    return { success: true };
+  };
+
+  const createSpeciesDefinition = (input: SpeciesAdminInput): { success: boolean; error?: string; id?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const faName = input.faName.trim();
+    const enName = input.enName.trim();
+    const scientificName = input.scientificName.trim();
+    if (!faName || !enName || !scientificName) return { success: false, error: 'SPECIES_IDENTITY_REQUIRED' };
+    if (species.some((item) => item.scientificName.trim().toLowerCase() === scientificName.toLowerCase())) return { success: false, error: 'SPECIES_SCIENTIFIC_NAME_DUPLICATE' };
+    const numeric = [input.optimumTempMin, input.optimumTempMax, input.optimumDOMin, input.optimumpHMin, input.optimumpHMax, input.standardFCR, input.feedingProfileCoeff, input.caviarMaturityYears];
+    if (numeric.some((value) => !Number.isFinite(value) || value < 0) || input.optimumTempMin >= input.optimumTempMax || input.optimumpHMin >= input.optimumpHMax || input.optimumDOMin <= 0 || input.standardFCR <= 0 || input.feedingProfileCoeff <= 0) return { success: false, error: 'SPECIES_LIMITS_INVALID' };
+    const definition: FarmSpeciesWithStatus = {
+      ...input, id: nextId('species'), faName, enName, scientificName,
+      origin: input.origin.trim(), geneticLine: input.geneticLine.trim(), description: input.description.trim(), isActive: input.isActive !== false,
+    };
+    setSpecies((previous) => [...previous, definition]);
+    createAuditLog('CREATE', 'Species', definition.id, `Species ${definition.scientificName} created`, undefined, JSON.stringify(definition));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Species', entityId: definition.id, referenceId: definition.scientificName });
+    return { success: true, id: definition.id };
+  };
+
+  const setSpeciesActive = (speciesId: string, isActive: boolean): { success: boolean; error?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const definition = species.find((item) => item.id === speciesId) as FarmSpeciesWithStatus | undefined;
+    if (!definition) return { success: false, error: 'SPECIES_NOT_FOUND' };
+    if (!isActive && ponds.some((pond) => pond.speciesId === speciesId && pond.fishCount > 0)) return { success: false, error: 'SPECIES_IN_USE_CANNOT_BE_DEACTIVATED' };
+    const updated = { ...definition, isActive } as SturgeonSpecies;
+    setSpecies((previous) => previous.map((item) => item.id === speciesId ? updated : item));
+    createAuditLog('UPDATE', 'Species', speciesId, `Species ${definition.scientificName} ${isActive ? 'activated' : 'deactivated'}`, JSON.stringify(definition), JSON.stringify(updated));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Species', entityId: speciesId, referenceId: definition.scientificName });
+    return { success: true };
   };
 
   const latestWaterLog = (pondId: string): WaterQualityLog | undefined => waterLogs.filter((log) => log.pondId === pondId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
@@ -343,9 +561,6 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!can('feeding', 'approve', pondId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const pond = ponds.find((item) => item.id === pondId); if (!pond) return { success: false, error: 'POND_NOT_FOUND' };
     if (pond.activeTreatmentId && treatments.some((treatment) => treatment.id === pond.activeTreatmentId && treatment.status === 'ACTIVE')) return { success: false, error: 'ACTIVE_TREATMENT' };
-    // The recommendation engine correctly refuses a STOPPED pond. For a resume
-    // decision, evaluate only the water/treatment gates with a temporary active
-    // status, then apply the explicit approval below.
     const safety = calculateFeedingRecommendation({ ...authoritativePond(pond), feedingStatus: 'ACTIVE' }, species, undefined);
     if (safety.isLocked) return { success: false, error: safety.lockReason || 'WATER_UNSAFE' };
     setPonds((previous) => previous.map((item) => item.id === pondId ? { ...item, feedingStatus: 'ACTIVE', stopFeedingReason: undefined, stopFeedingDetails: undefined, stopFeedingTimestamp: undefined, stopFeedingUser: currentUser?.fullName || operator } : item));
@@ -393,7 +608,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       speciesId: normalizedGroups[0]?.speciesId || pond.speciesId,
       speciesMix: normalizedGroups,
       capacityCubicMeters,
-      ...(input as any).pondShape !== undefined ? { pondShape: input.pondShape } : {},
+      ...((input as any).pondShape !== undefined ? { pondShape: input.pondShape } : {}),
       ...(input.lengthMeters !== undefined ? { lengthMeters: input.lengthMeters } : {}),
       ...(input.widthMeters !== undefined ? { widthMeters: input.widthMeters } : {}),
       ...(input.depthMeters !== undefined ? { depthMeters: input.depthMeters } : {}),
@@ -420,33 +635,95 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const recordMortality = (record: Omit<MortalityRecord, 'id' | 'timestamp'>) => {
     if (!can('mortality', 'create', record.pondId)) return;
     const pond = ponds.find((item) => item.id === record.pondId);
-    if (!pond || !Number.isInteger(record.count) || record.count <= 0 || record.count > pond.fishCount || !Number.isFinite(record.estimatedWeightKg) || record.estimatedWeightKg < 0 || record.estimatedWeightKg > pond.biomassKg) return;
-    const newRecord: MortalityRecord = { ...record, id: nextId('mort'), timestamp: new Date().toISOString() };
-    const newCount = pond.fishCount - record.count; const newBiomass = Number((pond.biomassKg - record.estimatedWeightKg).toFixed(2));
-    setMortalityRecords((previous) => [newRecord, ...previous]); setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, fishCount: newCount, biomassKg: newBiomass, averageWeightKg: newCount > 0 ? Number((newBiomass / newCount).toFixed(3)) : 0, dailyMortalityCount: item.dailyMortalityCount + record.count } : item));
-    createAuditLog('CREATE', 'MortalityRecord', newRecord.id, `${record.count} mortality recorded in ${pond.name}`); markLocalChange({ module: 'mortality', action: 'create', entity: 'MortalityRecord', entityId: newRecord.id });
+    if (!pond || !Number.isInteger(record.count) || record.count <= 0 || !Number.isFinite(record.estimatedWeightKg) || record.estimatedWeightKg < 0) return;
+    const applied = applyMortalityToPondStock(pond, {
+      speciesId: record.speciesId,
+      stockSex: record.stockSex,
+      count: record.count,
+      biomassKg: record.estimatedWeightKg,
+      chipNumbers: record.chipNumbers,
+    });
+    if (!applied.ok || !applied.pond || !applied.selectedSex) return;
+    const newRecord: MortalityRecord = { ...record, stockSex: applied.selectedSex, id: nextId('mort'), timestamp: new Date().toISOString() };
+    setMortalityRecords((previous) => [newRecord, ...previous]);
+    setPonds((previous) => previous.map((item) => item.id === pond.id ? applied.pond! : item));
+    createAuditLog('CREATE', 'MortalityRecord', newRecord.id, `${record.count} mortality recorded in ${pond.name} / ${record.speciesId} / ${applied.selectedSex}`);
+    markLocalChange({ module: 'mortality', action: 'create', entity: 'MortalityRecord', entityId: newRecord.id });
   };
 
   const recordBiometry = (session: Omit<BiometricSession, 'id' | 'averageWeightKg' | 'minWeightKg' | 'maxWeightKg' | 'estimatedBiomassKg' | 'estimatedCount' | 'growthRateKgPerDay' | 'sgr'>) => {
     if (!can('biometrics', 'create', session.pondId)) return;
-    const pond = ponds.find((item) => item.id === session.pondId); const validSamples = session.samples.filter((sample) => Number.isFinite(sample.weightKg) && sample.weightKg > 0); if (!pond || !validSamples.length) return;
-    const weights = validSamples.map((sample) => sample.weightKg); const average = weights.reduce((sum, value) => sum + value, 0) / weights.length;
-    const previousSession = biometricSessions.filter((item) => item.pondId === pond.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-    const previousAverage = previousSession?.averageWeightKg || pond.averageWeightKg || average; const previousDate = previousSession?.date || pond.lastBiometryDate;
-    const days = Math.max(1, Math.round((new Date(session.date).getTime() - new Date(previousDate).getTime()) / 86_400_000)); const growthRate = (average - previousAverage) / days; const sgr = previousAverage > 0 ? (Math.log(average / previousAverage) / days) * 100 : 0; const estimatedBiomass = Number((pond.fishCount * average).toFixed(2));
-    const newSession: BiometricSession = { ...session, id: nextId('bio'), sampleCount: validSamples.length, samples: validSamples, averageWeightKg: Number(average.toFixed(3)), minWeightKg: Math.min(...weights), maxWeightKg: Math.max(...weights), estimatedBiomassKg: estimatedBiomass, estimatedCount: pond.fishCount, previousAvgWeightKg: previousAverage, daysSinceLastBiometry: days, growthRateKgPerDay: Number(growthRate.toFixed(4)), sgr: Number(sgr.toFixed(3)) };
-    setBiometricSessions((previous) => [newSession, ...previous]); setPonds((previous) => previous.map((item) => item.id === pond.id ? { ...item, averageWeightKg: newSession.averageWeightKg, biomassKg: estimatedBiomass, lastBiometryDate: session.date } : item));
-    createAuditLog('CREATE', 'BiometricSession', newSession.id, `Biometry recorded for ${pond.name}`); markLocalChange({ module: 'biometrics', action: 'create', entity: 'BiometricSession', entityId: newSession.id });
+    const pond = ponds.find((item) => item.id === session.pondId);
+    const validSamples = session.samples.filter((sample) => Number.isFinite(sample.weightKg) && sample.weightKg > 0);
+    if (!pond || !validSamples.length) return;
+    const weights = validSamples.map((sample) => sample.weightKg);
+    const average = weights.reduce((sum, value) => sum + value, 0) / weights.length;
+    const applied = applyBiometryToPondStock(pond, { speciesId: session.speciesId, stockSex: session.stockSex, averageWeightKg: average, date: session.date });
+    if (!applied.ok || !applied.pond || !applied.selectedSex || !Number.isInteger(applied.selectedCount) || (applied.selectedCount || 0) <= 0) return;
+    const previousSession = biometricSessions
+      .filter((item) => item.pondId === pond.id && item.speciesId === session.speciesId && (item.stockSex || 'Unknown') === applied.selectedSex)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+    const previousAverage = previousSession?.averageWeightKg || applied.previousAverageWeightKg || average;
+    const currentMs = new Date(session.date).getTime();
+    if (!Number.isFinite(currentMs)) return;
+    const previousDate = previousSession?.date || pond.lastBiometryDate;
+    const previousMsRaw = previousDate ? new Date(previousDate).getTime() : Number.NaN;
+    const previousMs = Number.isFinite(previousMsRaw) ? previousMsRaw : currentMs - 86_400_000;
+    const days = Math.max(1, Math.round((currentMs - previousMs) / 86_400_000));
+    const growthRate = (average - previousAverage) / days;
+    const sgr = previousAverage > 0 ? (Math.log(average / previousAverage) / days) * 100 : 0;
+    const selectedCount = Number(applied.selectedCount);
+    const estimatedBiomass = Number((selectedCount * average).toFixed(2));
+    const newSession: BiometricSession = {
+      ...session,
+      stockSex: applied.selectedSex,
+      id: nextId('bio'),
+      sampleCount: validSamples.length,
+      samples: validSamples,
+      averageWeightKg: Number(average.toFixed(3)),
+      minWeightKg: Math.min(...weights),
+      maxWeightKg: Math.max(...weights),
+      estimatedBiomassKg: estimatedBiomass,
+      estimatedCount: selectedCount,
+      previousAvgWeightKg: previousAverage,
+      daysSinceLastBiometry: days,
+      growthRateKgPerDay: Number(growthRate.toFixed(4)),
+      sgr: Number(sgr.toFixed(3)),
+    };
+    setBiometricSessions((previous) => [newSession, ...previous]);
+    setPonds((previous) => previous.map((item) => item.id === pond.id ? applied.pond! : item));
+    createAuditLog('CREATE', 'BiometricSession', newSession.id, `Biometry recorded for ${pond.name} / ${session.speciesId} / ${applied.selectedSex}`);
+    markLocalChange({ module: 'biometrics', action: 'create', entity: 'BiometricSession', entityId: newSession.id });
   };
 
   const recordWaterTest = (test: Omit<WaterQualityLog, 'id' | 'timestamp'>) => {
     if (!can('water_quality', 'create', test.pondId)) return;
-    const pond = ponds.find((item) => item.id === test.pondId); if (!pond) return; const timestamp = new Date().toISOString();
-    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, ammonia: test.ammonia, nitrite: test.nitrite, timestamp });
-    const invalid = [safety.doStatus, safety.tempStatus, safety.phStatus, safety.ammoniaStatus, safety.nitriteStatus].some((status) => !status?.isValid); const severity: WaterQualityLog['severity'] = safety.isCriticalAlert ? 'CRITICAL' : safety.isSafeForFeeding ? 'INFO' : 'HIGH'; const sensorStatus: WaterQualityLog['sensorStatus'] = invalid ? 'INVALID' : safety.staleTelemetry ? 'STALE' : 'VALID';
-    const newLog: WaterQualityLog = { ...test, id: nextId('water'), timestamp, severity, sensorStatus, alertMessage: safety.feedingProhibitionReason }; setWaterLogs((previous) => [newLog, ...previous]);
-    setPonds((previous) => previous.map((item) => item.id !== pond.id ? item : { ...item, dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, ammonia: test.ammonia, nitrite: test.nitrite, lastTelemetryTimestamp: timestamp, sensorQuality: sensorStatus, feedingStatus: safety.isSafeForFeeding ? item.feedingStatus : 'STOPPED', stopFeedingReason: safety.isSafeForFeeding ? item.stopFeedingReason : (test.temperature < 4 ? 'Low Temperature' : test.dissolvedOxygen < 4 ? 'Low Oxygen' : 'Other'), stopFeedingDetails: safety.isSafeForFeeding ? item.stopFeedingDetails : safety.feedingProhibitionReason, stopFeedingTimestamp: safety.isSafeForFeeding ? item.stopFeedingTimestamp : timestamp }));
-    createAuditLog('CREATE', 'WaterQualityLog', newLog.id, safety.isSafeForFeeding ? 'Water quality recorded' : `Water safety alert: ${safety.feedingProhibitionReason}`); markLocalChange({ module: 'water_quality', action: 'create', entity: 'WaterQualityLog', entityId: newLog.id });
+    const pond = ponds.find((item) => item.id === test.pondId); if (!pond) return;
+    const timestamp = new Date().toISOString();
+    const manual = test.sensorStatus === 'MANUAL';
+    const safety = assessWaterSafetyForFeeding({ dissolvedOxygen: test.dissolvedOxygen, waterTemperature: test.temperature, ph: test.ph, ammonia: test.ammonia, nitrite: test.nitrite, timestamp, sensorStatus: manual ? 'MANUAL' : test.sensorStatus });
+    const invalid = [safety.doStatus, safety.tempStatus, safety.phStatus, safety.ammoniaStatus, safety.nitriteStatus].some((status) => !status?.isValid);
+    const severity: WaterQualityLog['severity'] = safety.isCriticalAlert ? 'CRITICAL' : safety.isSafeForFeeding ? 'INFO' : 'HIGH';
+    const sensorStatus: WaterQualityLog['sensorStatus'] = manual ? 'MANUAL' : invalid ? 'INVALID' : safety.staleTelemetry ? 'STALE' : 'VALID';
+    const authoritativeForAutomation = sensorStatus === 'VALID' && safety.isSafeForFeeding;
+    const newLog: WaterQualityLog = { ...test, id: nextId('water'), timestamp, severity, sensorStatus, alertMessage: manual ? 'اندازه‌گیری دستی ثبت شد؛ برای تصمیم خوراک‌دهی منبع authoritative محسوب نمی‌شود.' : safety.feedingProhibitionReason };
+    setWaterLogs((previous) => [newLog, ...previous]);
+    setPonds((previous) => previous.map((item) => item.id !== pond.id ? item : {
+      ...item,
+      dissolvedOxygen: test.dissolvedOxygen,
+      waterTemperature: test.temperature,
+      ph: test.ph,
+      ammonia: test.ammonia,
+      nitrite: test.nitrite,
+      lastTelemetryTimestamp: timestamp,
+      sensorQuality: sensorStatus,
+      feedingStatus: authoritativeForAutomation ? item.feedingStatus : 'STOPPED',
+      stopFeedingReason: authoritativeForAutomation ? item.stopFeedingReason : (test.temperature < 4 ? 'Low Temperature' : test.dissolvedOxygen < 4 ? 'Low Oxygen' : 'Manual Decision'),
+      stopFeedingDetails: authoritativeForAutomation ? item.stopFeedingDetails : (manual ? 'اندازه‌گیری دستی جایگزین تله‌متری معتبر برای ایمنی خوراک‌دهی نیست.' : safety.feedingProhibitionReason),
+      stopFeedingTimestamp: authoritativeForAutomation ? item.stopFeedingTimestamp : timestamp,
+    }));
+    createAuditLog('CREATE', 'WaterQualityLog', newLog.id, manual ? 'Manual water quality recorded; feeding remains fail-closed' : safety.isSafeForFeeding ? 'Water quality recorded' : `Water safety alert: ${safety.feedingProhibitionReason}`);
+    markLocalChange({ module: 'water_quality', action: 'create', entity: 'WaterQualityLog', entityId: newLog.id });
   };
 
   const recordTreatment = (treatment: Omit<TreatmentRecord, 'id'>) => {
@@ -457,13 +734,31 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     createAuditLog('CREATE', 'TreatmentRecord', id, `${treatment.drugName} treatment recorded for ${treatment.pondName}`); markLocalChange({ module: 'treatments', action: 'create', entity: 'TreatmentRecord', entityId: id });
   };
 
+  const completeTreatment = (treatmentId: string): { success: boolean; error?: string } => {
+    if (!can('treatments', 'edit')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const treatment = treatments.find((item) => item.id === treatmentId);
+    if (!treatment) return { success: false, error: 'TREATMENT_NOT_FOUND' };
+    if (treatment.status !== 'ACTIVE') return { success: false, error: 'TREATMENT_NOT_ACTIVE' };
+    setTreatments((previous) => previous.map((item) => item.id === treatmentId ? { ...item, status: 'COMPLETED' } : item));
+    setPonds((previous) => previous.map((pond) => pond.id === treatment.pondId && pond.activeTreatmentId === treatmentId ? {
+      ...pond,
+      activeTreatmentId: undefined,
+      feedingStatus: 'STOPPED',
+      stopFeedingReason: 'Treatment',
+      stopFeedingDetails: `درمان ${treatment.drugName} تکمیل شد؛ فعال‌سازی مجدد خوراک نیازمند تأیید جداگانه و تله‌متری معتبر است.`,
+      stopFeedingTimestamp: new Date().toISOString(),
+      stopFeedingUser: currentUser?.fullName || treatment.veterinarian,
+    } : pond));
+    createAuditLog('UPDATE', 'TreatmentRecord', treatmentId, `Treatment ${treatment.drugName} completed; withdrawal remains until ${treatment.withdrawalEndDate}`);
+    markLocalChange({ module: 'treatments', action: 'edit', entity: 'TreatmentRecord', entityId: treatmentId });
+    return { success: true };
+  };
+
   const executeAtomicTransfer = (transferData: Omit<FishTransfer, 'id' | 'status'>): { success: boolean; error?: string } => {
     if (!can('transfers', 'create', transferData.sourceId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const result = executeAtomicFishTransfer(transferData, ponds, nurseryTanks, larvae);
     if (!result.success || !result.updatedPonds || !result.updatedNurseryTanks || !result.updatedLarvae || !result.newTransfer) return { success: false, error: result.error };
-    setPonds(result.updatedPonds);
-    setNurseryTanks(result.updatedNurseryTanks);
-    setLarvae(result.updatedLarvae);
+    setPonds(result.updatedPonds); setNurseryTanks(result.updatedNurseryTanks); setLarvae(result.updatedLarvae);
     setTransfers((previous) => [result.newTransfer!, ...previous]);
     createAuditLog('CREATE', 'FishTransfer', result.newTransfer.id, `${transferData.sourceName} → ${transferData.destinationName}: ${transferData.fishCount} fish`, undefined, undefined, `txn_${result.newTransfer.id}`);
     markLocalChange({ module: 'transfers', action: 'create', entity: 'FishTransfer', entityId: result.newTransfer.id, transactionId: `txn_${result.newTransfer.id}` });
@@ -481,6 +776,15 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const createProcessingBatch = (batch: Omit<ProcessingBatch, 'id' | 'caviarYieldPercent' | 'filletYieldPercent'>): { success: boolean; error?: string } => {
     if (!can('processing', 'create', batch.sourcePondId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const sourcePond = ponds.find((pond) => pond.id === batch.sourcePondId); if (!sourcePond) return { success: false, error: 'POND_NOT_FOUND' };
+    const processTime = new Date(batch.date).getTime();
+    if (!Number.isFinite(processTime)) return { success: false, error: 'PROCESSING_DATE_INVALID' };
+    const blockingTreatment = treatments.find((treatment) => {
+      if (treatment.pondId !== batch.sourcePondId) return false;
+      if (treatment.status === 'ACTIVE') return true;
+      const withdrawalEnd = new Date(treatment.withdrawalEndDate).getTime();
+      return Number.isFinite(withdrawalEnd) && withdrawalEnd >= processTime;
+    });
+    if (blockingTreatment) return { success: false, error: `PROCESSING_TREATMENT_WITHDRAWAL_HOLD:${blockingTreatment.drugName}` };
     const result = executeAtomicProcessing(batch, ponds, coldStorage);
     if (!result.success || !result.batch || !result.ponds || !result.coldStorage) return { success: false, error: result.error };
     setPonds(result.ponds); setProcessingBatches((previous) => [result.batch!, ...previous]); setColdStorage(result.coldStorage);
@@ -499,23 +803,191 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!can('sales', 'edit')) return;
     const existing = proformas.find((row) => row.id === id);
     if (!existing) return;
-    const requiresFulfillment = newStage === 'Payment Received (تسویه)' || newStage === 'Dispatched / Delivery (تحویل)' || String(newStage) === 'Paid';
-    let updatedColdStorage = coldStorage;
+    const requiresFulfillment = newStage === 'Dispatched / Delivery (تحویل)';
     let fulfillment: ReturnType<typeof fulfillProforma> | undefined;
     if (requiresFulfillment && !existing.fulfilledAt) {
       fulfillment = fulfillProforma(existing, coldStorage);
       if (!fulfillment.success || !fulfillment.coldStorage || !fulfillment.fulfilledAt || !fulfillment.transactionId) return;
-      updatedColdStorage = fulfillment.coldStorage;
-      setColdStorage(updatedColdStorage);
+      setColdStorage(fulfillment.coldStorage);
     }
-    const updatedProforma: ProformaInvoice = {
-      ...existing,
-      stage: newStage,
-      ...(fulfillment ? { fulfilledAt: fulfillment.fulfilledAt, fulfillmentTransactionId: fulfillment.transactionId } : {}),
-    };
+    const updatedProforma: ProformaInvoice = { ...existing, stage: newStage, ...(fulfillment ? { fulfilledAt: fulfillment.fulfilledAt, fulfillmentTransactionId: fulfillment.transactionId } : {}) };
     setProformas((previous) => previous.map((row) => row.id === id ? updatedProforma : row));
     createAuditLog('UPDATE', 'ProformaInvoice', id, `Stage changed to ${newStage}`, undefined, undefined, fulfillment?.transactionId);
     markLocalChange({ module: 'sales', action: 'edit', entity: 'ProformaInvoice', entityId: id, transactionId: fulfillment?.transactionId });
+  };
+
+  const nextIndicatorNumber = (dateIso: string): string => {
+    const year = (dateIso || new Date().toISOString()).slice(0, 4);
+    const nextSeq = officeDocuments.filter((document) => document.indicatorNumber.startsWith(`IND-${year}-`)).length + 1;
+    return `IND-${year}-${String(nextSeq).padStart(5, '0')}`;
+  };
+
+  const addOfficeDocument = (document: Omit<OfficeDocument, 'id' | 'indicatorNumber' | 'registeredAt' | 'createdBy' | 'updatedAt'>) => {
+    if (!can('documents', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    if (!document.subject.trim() || !document.documentDate || !document.sender.trim() || !document.receiver.trim()) return { success: false, error: 'DOCUMENT_REQUIRED_FIELDS' };
+    const registeredAt = new Date().toISOString();
+    const newDocument: OfficeDocument = {
+      ...document,
+      id: nextId('doc'),
+      indicatorNumber: nextIndicatorNumber(registeredAt),
+      registeredAt,
+      createdBy: currentUser?.fullName || currentUser?.username || 'System',
+      updatedAt: registeredAt,
+      tags: document.tags.map((tag) => tag.trim()).filter(Boolean),
+      attachments: document.attachments.map((attachment) => ({ ...attachment, id: attachment.id || nextId('att'), addedAt: attachment.addedAt || registeredAt })),
+      workflowEvents: [{
+        id: nextId('flow'),
+        timestamp: registeredAt,
+        action: 'REGISTERED',
+        toStatus: document.status,
+        assignedTo: document.assignedTo,
+        note: document.summary,
+        userName: currentUser?.fullName || currentUser?.username || 'System',
+      }],
+    };
+    setOfficeDocuments((previous) => [newDocument, ...previous]);
+    createAuditLog('CREATE', 'OfficeDocument', newDocument.id, `Document ${newDocument.indicatorNumber} registered`);
+    markLocalChange({ module: 'documents', action: 'create', entity: 'OfficeDocument', entityId: newDocument.id, referenceId: newDocument.indicatorNumber });
+    return { success: true, id: newDocument.id };
+  };
+
+  const updateOfficeDocumentStatus = (id: string, status: OfficeDocument['status'], notes?: string) => {
+    if (!can('documents', 'edit')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const document = officeDocuments.find((row) => row.id === id);
+    if (!document) return { success: false, error: 'DOCUMENT_NOT_FOUND' };
+    const updatedAt = new Date().toISOString();
+    setOfficeDocuments((previous) => previous.map((row) => row.id === id ? {
+      ...row,
+      status,
+      notes: notes ?? row.notes,
+      updatedAt,
+      workflowEvents: [...(row.workflowEvents || []), {
+        id: nextId('flow'),
+        timestamp: updatedAt,
+        action: status === 'Referred' ? 'REFERRED' : status === 'Answered' ? 'ANSWERED' : status === 'Archived' ? 'ARCHIVED' : 'STATUS_CHANGED',
+        fromStatus: row.status,
+        toStatus: status,
+        assignedTo: row.assignedTo,
+        note: notes,
+        userName: currentUser?.fullName || currentUser?.username || 'System',
+      }],
+    } : row));
+    createAuditLog('UPDATE', 'OfficeDocument', id, `Document status changed to ${status}`);
+    markLocalChange({ module: 'documents', action: 'edit', entity: 'OfficeDocument', entityId: id, referenceId: document.indicatorNumber });
+    return { success: true };
+  };
+
+  const updateOfficeBranding = (patch: Partial<Omit<OfficeBrandingSettings, 'id' | 'updatedAt' | 'updatedBy'>>) => {
+    if (!can('documents', 'manage') && !can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const updatedAt = new Date().toISOString();
+    setOfficeSettings((previous) => {
+      const current = previous[0] || {
+        id: 'office-branding-default',
+        companyNameFa: '',
+        companyNameEn: '',
+        registrationLine: '',
+        addressLine: '',
+        phoneLine: '',
+        emailLine: '',
+        websiteLine: '',
+        invoiceFooterNote: '',
+        letterFooterNote: '',
+        updatedAt,
+        updatedBy: currentUser?.fullName || 'System',
+      };
+      return [{ ...current, ...patch, updatedAt, updatedBy: currentUser?.fullName || currentUser?.username || 'System' }];
+    });
+    createAuditLog('UPDATE', 'OfficeBrandingSettings', 'office-branding-default', 'Office letterhead/signature settings updated');
+    markLocalChange({ module: 'documents', action: 'manage', entity: 'OfficeBrandingSettings', entityId: 'office-branding-default' });
+    return { success: true };
+  };
+
+  const nextGatePassNumber = (): string => `GP-${new Date().getFullYear()}-${String(gatePasses.length + 1).padStart(5, '0')}`;
+  const validIranNationalId = (value: string): boolean => /^\d{10}$/.test(String(value || '').trim());
+  const validPhone = (value: string): boolean => /^(\+?\d{8,15}|0\d{10})$/.test(String(value || '').replace(/[\s-]/g, ''));
+
+  const addGatePass = (record: Omit<GatePassRecord, 'id' | 'passNumber' | 'registeredAt' | 'registeredBy' | 'status'>) => {
+    if (!can('gatehouse', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const required = [record.vehiclePlateNumber, record.carrierVehicleNumber, record.vehicleType, record.driverName, record.driverNationalId, record.driverPhone, record.cargoOwnerName, record.cargoOwnerNationalId, record.cargoOwnerPhone, record.cargoType, record.cargoVolume, record.cargoQuality, record.originAddress, record.destinationAddress];
+    if (required.some((value) => !String(value || '').trim())) return { success: false, error: 'GATE_PASS_REQUIRED_FIELDS' };
+    if (!validIranNationalId(record.driverNationalId) || !validIranNationalId(record.cargoOwnerNationalId)) return { success: false, error: 'INVALID_NATIONAL_ID' };
+    if (!validPhone(record.driverPhone) || !validPhone(record.cargoOwnerPhone)) return { success: false, error: 'INVALID_PHONE_NUMBER' };
+    const registeredAt = new Date().toISOString();
+    const pass: GatePassRecord = {
+      ...record,
+      id: nextId('gate'),
+      passNumber: nextGatePassNumber(),
+      registeredAt,
+      status: record.direction === 'Exit (خروج)' ? 'Approved for Exit' : 'Registered',
+      registeredBy: currentUser?.fullName || currentUser?.username || 'System',
+      approvedBy: record.direction === 'Exit (خروج)' ? currentUser?.fullName || currentUser?.username || 'System' : undefined,
+      exitApprovedAt: record.direction === 'Exit (خروج)' ? registeredAt : undefined,
+      exitSheetIssuedAt: record.direction === 'Exit (خروج)' ? registeredAt : undefined,
+      exitSheetIssuedBy: record.direction === 'Exit (خروج)' ? currentUser?.fullName || currentUser?.username || 'System' : undefined,
+    };
+    setGatePasses((previous) => [pass, ...previous]);
+    createAuditLog('CREATE', 'GatePassRecord', pass.id, `Gate pass ${pass.passNumber} registered for ${pass.vehiclePlateNumber}`);
+    markLocalChange({ module: 'gatehouse', action: 'create', entity: 'GatePassRecord', entityId: pass.id, referenceId: pass.passNumber });
+    return { success: true, id: pass.id };
+  };
+
+  const updateGatePassStatus = (id: string, status: GatePassRecord['status']) => {
+    if (!can('gatehouse', 'edit')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const row = gatePasses.find((pass) => pass.id === id);
+    if (!row) return { success: false, error: 'GATE_PASS_NOT_FOUND' };
+    const now = new Date().toISOString();
+    setGatePasses((previous) => previous.map((pass) => pass.id === id ? {
+      ...pass,
+      status,
+      exitApprovedAt: status === 'Approved for Exit' ? now : pass.exitApprovedAt,
+      exitedAt: status === 'Exited' ? now : pass.exitedAt,
+      approvedBy: status === 'Approved for Exit' ? currentUser?.fullName || currentUser?.username || 'System' : pass.approvedBy,
+      exitSheetIssuedAt: status === 'Approved for Exit' && !pass.exitSheetIssuedAt ? now : pass.exitSheetIssuedAt,
+      exitSheetIssuedBy: status === 'Approved for Exit' && !pass.exitSheetIssuedBy ? currentUser?.fullName || currentUser?.username || 'System' : pass.exitSheetIssuedBy,
+    } : pass));
+    createAuditLog('UPDATE', 'GatePassRecord', id, `Gate pass ${row.passNumber} status changed to ${status}`);
+    markLocalChange({ module: 'gatehouse', action: 'edit', entity: 'GatePassRecord', entityId: id, referenceId: row.passNumber });
+    return { success: true };
+  };
+
+  const createChatThread = (thread: Omit<InternalChatThread, 'id' | 'createdAt' | 'createdBy' | 'lastMessageAt'>) => {
+    if (!can('chat', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const participants = [...new Set(thread.participantUserIds.map(String).filter(Boolean))];
+    if (!thread.title.trim() || participants.length < 2) return { success: false, error: 'CHAT_THREAD_REQUIRED_FIELDS' };
+    const now = new Date().toISOString();
+    const row: InternalChatThread = {
+      ...thread,
+      participantUserIds: participants,
+      id: nextId('chat_thread'),
+      createdAt: now,
+      createdBy: currentUser?.fullName || currentUser?.username || 'System',
+      lastMessageAt: now,
+    };
+    setChatThreads((previous) => [row, ...previous]);
+    createAuditLog('CREATE', 'InternalChatThread', row.id, `Chat thread ${row.title} created`);
+    markLocalChange({ module: 'chat', action: 'create', entity: 'InternalChatThread', entityId: row.id });
+    return { success: true, id: row.id };
+  };
+
+  const sendChatMessage = (message: Omit<InternalChatMessage, 'id' | 'createdAt' | 'senderUserId' | 'senderName'>) => {
+    if (!can('chat', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const thread = chatThreads.find((row) => row.id === message.threadId);
+    if (!thread) return { success: false, error: 'CHAT_THREAD_NOT_FOUND' };
+    if (!String(message.text || '').trim() && !message.attachments.length) return { success: false, error: 'CHAT_MESSAGE_EMPTY' };
+    const now = new Date().toISOString();
+    const row: InternalChatMessage = {
+      ...message,
+      text: String(message.text || '').trim(),
+      id: nextId('chat_msg'),
+      createdAt: now,
+      senderUserId: currentUser?.id || 'system',
+      senderName: currentUser?.fullName || currentUser?.username || 'System',
+    };
+    setChatMessages((previous) => [...previous, row]);
+    setChatThreads((previous) => previous.map((candidate) => candidate.id === thread.id ? { ...candidate, lastMessageAt: now } : candidate));
+    createAuditLog('CREATE', 'InternalChatMessage', row.id, `Message sent in ${thread.title}`);
+    markLocalChange({ module: 'chat', action: 'create', entity: 'InternalChatMessage', entityId: row.id });
+    return { success: true, id: row.id };
   };
 
   const createJournalEntry = (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>): { success: boolean; error?: string } => {
@@ -526,8 +998,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!can('accounting', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const result = validateAndExecuteFxConversion(entry, accounts, journals);
     if (!result.success || !result.newEntry || !result.updatedAccounts) return { success: false, error: result.error };
-    setAccounts(result.updatedAccounts);
-    setJournals((previous) => [result.newEntry!, ...previous]);
+    setAccounts(result.updatedAccounts); setJournals((previous) => [result.newEntry!, ...previous]);
     createAuditLog('CREATE', 'JournalEntry', result.newEntry.id, `FX journal ${result.newEntry.entryNumber} posted`, undefined, undefined, result.newEntry.referenceId);
     markLocalChange({ module: 'accounting', action: 'create', entity: 'JournalEntry', entityId: result.newEntry.id, referenceId: result.newEntry.referenceId });
     return { success: true };
@@ -547,7 +1018,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPayrolls((previous) => [...generated, ...previous.filter((row) => row.payrollMonth !== monthString)]); createAuditLog('CREATE', 'Payroll', monthString, 'Draft payroll generated from recorded attendance'); markLocalChange({ module: 'hr', action: 'create', entity: 'Payroll', entityId: monthString });
   };
 
-  const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
+  const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
   const createBackupSnapshot = (type: BackupSnapshot['type'] = 'Manual Export'): BackupSnapshot => {
     const isPreRestore = type === 'Pre-Restore Safety Snapshot';
     if (!can('backup', 'export') && !(isPreRestore && can('backup', 'approve'))) throw new Error('ACTION_NOT_ALLOWED');
@@ -574,8 +1045,8 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await fetch('/api/state', { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: candidateState, version: serverVersion, operation: { module: 'backup', action: 'approve', entity: 'BackupRestore', entityId: nextId('restore') } }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.success || !payload.state?.data) return { success: false, message: payload.error || 'BACKUP_RESTORE_FAILED' };
-      pendingOperation.current = null;
-      revision.current += 1;
+      pendingOperations.current = [];
+      conflictRetryCount.current = 0;
       applyState(payload.state.data, Array.isArray(payload.auditLogs) ? payload.auditLogs : []);
       setServerVersion(Number(payload.state.version));
       setSyncStatus((previous) => ({ ...previous, status: 'ONLINE', pendingChangesCount: 0, lastSyncTimestamp: new Date().toISOString() }));
@@ -585,10 +1056,52 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const addBroodstock = (fish: Omit<BroodstockFish, 'id'>) => { if (!can('hatchery', 'create') || !fish.chipNumber.trim() || broodstock.some((row) => row.chipNumber === fish.chipNumber || row.plateNumber === fish.plateNumber) || !Number.isFinite(fish.weightKg) || fish.weightKg <= 0) return; const newFish: BroodstockFish = { ...fish, id: nextId('brood') }; setBroodstock((previous) => [newFish, ...previous]); createAuditLog('CREATE', 'Broodstock', newFish.id, `Broodstock ${fish.chipNumber} registered`); markLocalChange({ module: 'hatchery', action: 'create', entity: 'Broodstock', entityId: newFish.id }); };
   const recordFertilization = (fert: Omit<FertilizationBatch, 'id' | 'fertilizationTimestamp' | 'status'>) => { if (!can('hatchery', 'create')) return; const parentsExist = fert.femaleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Female')) && fert.maleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Male')); if (!parentsExist || !Number.isFinite(fert.fertilizationRatePercent) || fert.fertilizationRatePercent < 0 || fert.fertilizationRatePercent > 100) return; const newBatch: FertilizationBatch = { ...fert, id: nextId('fert'), fertilizationTimestamp: new Date().toISOString(), status: 'Incubating' }; setFertilizations((previous) => [newBatch, ...previous]); createAuditLog('CREATE', 'FertilizationBatch', newBatch.id, `Fertilization ${fert.batchCode} registered`); markLocalChange({ module: 'hatchery', action: 'create', entity: 'FertilizationBatch', entityId: newBatch.id }); };
-  const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id }); };
+  const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => {
+    if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return;
+    const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0, tags: (cust.tags || []).map((tag) => tag.trim()).filter(Boolean), score: Math.max(0, Math.min(100, Number(cust.score) || 0)), attachments: cust.attachments || [] };
+    setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id });
+  };
+  const updateCustomerProfile = (id: string, patch: Partial<Omit<Customer, 'id' | 'createdAt'>>) => {
+    if (!can('crm', 'edit')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const customer = customers.find((row) => row.id === id);
+    if (!customer) return { success: false, error: 'CUSTOMER_NOT_FOUND' };
+    const cleanPatch: Partial<Customer> = { ...patch };
+    if (patch.tags) cleanPatch.tags = patch.tags.map((tag) => tag.trim()).filter(Boolean);
+    if (patch.score !== undefined) cleanPatch.score = Math.max(0, Math.min(100, Number(patch.score) || 0));
+    setCustomers((previous) => previous.map((row) => row.id === id ? { ...row, ...cleanPatch } : row));
+    createAuditLog('UPDATE', 'Customer', id, `Customer ${customer.name} profile updated`);
+    markLocalChange({ module: 'crm', action: 'edit', entity: 'Customer', entityId: id });
+    return { success: true };
+  };
+  const addCrmActivity = (activity: Omit<CrmActivity, 'id' | 'customerName' | 'createdAt' | 'createdBy'>) => {
+    if (!can('crm', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const customer = customers.find((row) => row.id === activity.customerId);
+    if (!customer || !activity.subject.trim()) return { success: false, error: 'CRM_ACTIVITY_REQUIRED_FIELDS' };
+    const now = new Date().toISOString();
+    const row: CrmActivity = { ...activity, id: nextId('crmact'), customerName: customer.name, subject: activity.subject.trim(), details: activity.details.trim(), attachments: activity.attachments || [], createdAt: now, createdBy: currentUser?.fullName || currentUser?.username || 'System' };
+    setCrmActivities((previous) => [row, ...previous]);
+    setCustomers((previous) => previous.map((item) => item.id === customer.id ? { ...item, lastContactAt: now, nextFollowUpAt: activity.followUpAt || item.nextFollowUpAt } : item));
+    if (activity.followUpAt) {
+      const reminder: CrmReminder = { id: nextId('crmrem'), customerId: customer.id, customerName: customer.name, title: activity.subject, dueAt: activity.followUpAt, priority: activity.outcome === 'Needs Follow-up' ? 'High' : 'Normal', status: 'Open', assignedTo: activity.assignedTo, relatedActivityId: row.id, createdAt: now, createdBy: row.createdBy };
+      setCrmReminders((previous) => [reminder, ...previous]);
+    }
+    createAuditLog('CREATE', 'CrmActivity', row.id, `CRM ${row.type} logged for ${customer.name}`);
+    markLocalChange({ module: 'crm', action: 'create', entity: 'CrmActivity', entityId: row.id, referenceId: customer.id });
+    return { success: true, id: row.id };
+  };
+  const updateCrmReminderStatus = (id: string, status: CrmReminder['status']) => {
+    if (!can('crm', 'edit')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const reminder = crmReminders.find((row) => row.id === id);
+    if (!reminder) return { success: false, error: 'CRM_REMINDER_NOT_FOUND' };
+    const now = new Date().toISOString();
+    setCrmReminders((previous) => previous.map((row) => row.id === id ? { ...row, status, completedAt: status === 'Done' ? now : row.completedAt, completedBy: status === 'Done' ? currentUser?.fullName || currentUser?.username || 'System' : row.completedBy } : row));
+    createAuditLog('UPDATE', 'CrmReminder', id, `CRM reminder ${status}`);
+    markLocalChange({ module: 'crm', action: 'edit', entity: 'CrmReminder', entityId: id, referenceId: reminder.customerId });
+    return { success: true };
+  };
   const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { if (!can('media', 'create')) return; const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange({ module: 'media', action: 'create', entity: 'SocialMediaPost', entityId: newPost.id }); };
 
-  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, createHallStructure, updateHallStructure, createPondStructure, updatePondStructure, createSpeciesDefinition, setSpeciesActive, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, addOfficeDocument, updateOfficeDocumentStatus, updateOfficeBranding, addGatePass, updateGatePassStatus, createChatThread, sendChatMessage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, updateCustomerProfile, addCrmActivity, updateCrmReminderStatus, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 

@@ -1,0 +1,233 @@
+import React, { useMemo, useState } from 'react';
+import { Archive, FileCheck2, FileText, Plus, Printer, Search, UploadCloud } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { getStoredSessionToken } from '../../context/AuthContext';
+import { useFarm } from '../../context/FarmContext';
+import { OfficeDocument, OfficeDocumentAttachment } from '../../types';
+import { nextId } from '../../utils/id';
+
+type Draft = {
+  direction: OfficeDocument['direction'];
+  type: OfficeDocument['type'];
+  documentNumber: string;
+  documentDate: string;
+  subject: string;
+  sender: string;
+  receiver: string;
+  confidentiality: OfficeDocument['confidentiality'];
+  priority: OfficeDocument['priority'];
+  status: OfficeDocument['status'];
+  relatedCustomerId: string;
+  relatedProformaId: string;
+  assignedTo: string;
+  dueDate: string;
+  tags: string;
+  summary: string;
+  notes: string;
+};
+
+const EMPTY_DRAFT: Draft = {
+  direction: 'Incoming (وارده)',
+  type: 'Letter (نامه)',
+  documentNumber: '',
+  documentDate: new Date().toISOString().slice(0, 10),
+  subject: '',
+  sender: '',
+  receiver: 'دفتر مرکزی مزرعه فتحی',
+  confidentiality: 'Normal',
+  priority: 'Normal',
+  status: 'Registered',
+  relatedCustomerId: '',
+  relatedProformaId: '',
+  assignedTo: '',
+  dueDate: '',
+  tags: '',
+  summary: '',
+  notes: '',
+};
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+    reader.onerror = () => reject(new Error('FILE_READ_FAILED'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function fileToAttachment(file: File, kind: OfficeDocumentAttachment['kind']): Promise<OfficeDocumentAttachment> {
+  const fallback: OfficeDocumentAttachment = {
+    id: nextId('att'),
+    kind,
+    fileName: file.name,
+    mimeType: file.type || 'application/octet-stream',
+    sizeBytes: file.size,
+    addedAt: new Date().toISOString(),
+  };
+  const token = getStoredSessionToken();
+  if (!token) return fallback;
+  try {
+    const response = await fetch('/api/documents/files', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name, mimeType: file.type || 'application/octet-stream', base64: await fileToBase64(file) }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success || !data.file?.storageId) return fallback;
+    return {
+      ...fallback,
+      fileName: data.file.originalName || fallback.fileName,
+      mimeType: data.file.mimeType || fallback.mimeType,
+      sizeBytes: Number(data.file.sizeBytes) || fallback.sizeBytes,
+      checksum: data.file.sha256 ? `SHA-256:${data.file.sha256}` : undefined,
+      storageId: data.file.storageId,
+      downloadUrl: `/api/documents/files/${encodeURIComponent(data.file.storageId)}`,
+      addedAt: data.file.storedAt || fallback.addedAt,
+    };
+  } catch { return fallback; }
+}
+
+function localAttachment(file: File, kind: OfficeDocumentAttachment['kind']): OfficeDocumentAttachment {
+  return {
+    id: nextId('att'),
+    kind,
+    fileName: file.name,
+    mimeType: file.type || 'application/octet-stream',
+    sizeBytes: file.size,
+    addedAt: new Date().toISOString(),
+  };
+}
+
+function sizeLabel(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+export const DocumentsOfficeView: React.FC = () => {
+  const { officeDocuments, officeSettings, customers, proformas, addOfficeDocument, updateOfficeDocumentStatus } = useFarm();
+  const branding = officeSettings[0];
+  const { hasPermission } = useAuth();
+  const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState('');
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [attachments, setAttachments] = useState<OfficeDocumentAttachment[]>([]);
+  const [printDocument, setPrintDocument] = useState<OfficeDocument | null>(null);
+  const [error, setError] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return officeDocuments;
+    return officeDocuments.filter((document) => [
+      document.indicatorNumber, document.documentNumber, document.subject, document.sender, document.receiver,
+      document.summary, document.tags.join(' '), document.attachments.map((file) => file.fileName).join(' '),
+    ].join(' ').toLowerCase().includes(q));
+  }, [officeDocuments, query]);
+
+  const stats = useMemo(() => ({
+    total: officeDocuments.length,
+    incoming: officeDocuments.filter((row) => row.direction === 'Incoming (وارده)').length,
+    outgoing: officeDocuments.filter((row) => row.direction === 'Outgoing (صادره)').length,
+    withPdf: officeDocuments.filter((row) => row.attachments.some((file) => file.kind === 'PDF Copy (نسخه PDF)')).length,
+  }), [officeDocuments]);
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    const result = addOfficeDocument({
+      ...draft,
+      relatedCustomerId: draft.relatedCustomerId || undefined,
+      relatedProformaId: draft.relatedProformaId || undefined,
+      assignedTo: draft.assignedTo || undefined,
+      dueDate: draft.dueDate || undefined,
+      tags: draft.tags.split(/[،,]/).map((tag) => tag.trim()).filter(Boolean),
+      attachments,
+    });
+    if (!result.success) { setError(result.error || 'ثبت سند انجام نشد'); return; }
+    setDraft(EMPTY_DRAFT); setAttachments([]); setShowForm(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div>
+          <h1 className="text-xl font-black text-white flex items-center gap-2"><Archive className="w-6 h-6 text-amber-400" />دبیرخانه، اندیکاتور و آرشیو اسناد</h1>
+          <p className="text-xs text-slate-400 mt-1">ثبت نامه‌های وارده/صادره، شماره اندیکاتور، فایل اصل، نسخه PDF و ارتباط با مشتری، فاکتور و پیش‌فاکتور.</p>
+        </div>
+        <button disabled={!hasPermission('documents', 'create')} onClick={() => setShowForm(true)} className="px-4 py-2 bg-amber-500 text-slate-950 rounded-xl text-xs font-bold disabled:opacity-40"><Plus className="w-4 h-4 inline ml-1" />ثبت سند جدید</button>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[['کل اسناد', stats.total], ['نامه وارده', stats.incoming], ['نامه صادره', stats.outgoing], ['دارای PDF', stats.withPdf]].map(([label, value]) => (
+          <div key={String(label)} className="bg-slate-900 border border-slate-800 rounded-2xl p-4"><span className="text-[10px] text-slate-500">{label}</span><strong className="block text-2xl text-white mt-1">{value}</strong></div>
+        ))}
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        <div className="relative mb-4">
+          <Search className="w-4 h-4 absolute top-3 right-3 text-slate-500" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="جستجو در شماره اندیکاتور، موضوع، فرستنده، گیرنده، فایل‌ها..." className="field w-full pr-10" />
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+          {filtered.length === 0 ? <div className="text-xs text-slate-500 p-6">هنوز سندی ثبت نشده است.</div> : filtered.map((document) => (
+            <div key={document.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-4">
+              <div className="flex justify-between gap-3 border-b border-slate-800 pb-3">
+                <div><strong className="text-amber-400 font-mono">{document.indicatorNumber}</strong><p className="text-sm text-white mt-1">{document.subject}</p><span className="text-[10px] text-slate-500">{document.documentNumber || 'بدون شماره نامه'} · {document.documentDate}</span></div>
+                <span className="text-[10px] text-slate-300">{document.direction}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-slate-300">
+                <span>از: {document.sender}</span><span>به: {document.receiver}</span><span>نوع: {document.type}</span><span>وضعیت: {document.status}</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-3 line-clamp-2">{document.summary || document.notes || '—'}</p>
+              <div className="mt-3 text-[10px] text-slate-500">آخرین گردش: {(document.workflowEvents || []).at(-1)?.action || 'REGISTERED'} · {(document.workflowEvents || []).at(-1)?.userName || document.createdBy}</div>
+              <div className="mt-3 space-y-1">{document.attachments.map((file) => <div key={file.id} className="flex justify-between text-[10px] bg-slate-900 rounded-lg px-2 py-1"><span className="text-slate-300">{file.kind}: {file.fileName}</span>{file.downloadUrl ? <a href={file.downloadUrl} className="text-amber-300" target="_blank" rel="noreferrer">دانلود</a> : <span className="text-slate-500">{sizeLabel(file.sizeBytes)}</span>}</div>)}</div>
+              <div className="grid grid-cols-[1fr_auto] gap-2 mt-3"><select disabled={!hasPermission('documents', 'edit')} value={document.status} onChange={(event) => updateOfficeDocumentStatus(document.id, event.target.value as OfficeDocument['status'])} className="field text-xs">
+                {['Registered', 'In Review', 'Referred', 'Answered', 'Archived', 'Cancelled'].map((status) => <option key={status} value={status}>{status}</option>)}
+              </select><button disabled={!hasPermission('documents', 'print')} onClick={() => setPrintDocument(document)} className="px-3 rounded-xl bg-slate-800 text-slate-200 disabled:opacity-40"><Printer className="w-4 h-4" /></button></div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {showForm && <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <form onSubmit={submit} className="bg-slate-950 border border-amber-500/30 rounded-2xl p-6 w-full max-w-5xl max-h-[90vh] overflow-auto space-y-4 text-xs">
+          <div className="flex justify-between items-center"><h2 className="text-white font-bold flex items-center gap-2"><FileCheck2 className="w-5 h-5 text-amber-400" />ثبت سند در دفتر اندیکاتور</h2><button type="button" onClick={() => setShowForm(false)} className="text-slate-400">بستن</button></div>
+          {error && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-200 rounded-xl p-3">{error}</div>}
+          <div className="grid md:grid-cols-4 gap-3">
+            <select value={draft.direction} onChange={(e) => setDraft({ ...draft, direction: e.target.value as Draft['direction'] })} className="field"><option value="Incoming (وارده)">وارده</option><option value="Outgoing (صادره)">صادره</option><option value="Internal (داخلی)">داخلی</option></select>
+            <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value as Draft['type'] })} className="field"><option value="Letter (نامه)">نامه</option><option value="Invoice (فاکتور)">فاکتور</option><option value="Proforma (پیش‌فاکتور)">پیش‌فاکتور</option><option value="Contract (قرارداد)">قرارداد</option><option value="Receipt (رسید)">رسید</option><option value="Other (سایر)">سایر</option></select>
+            <input value={draft.documentNumber} onChange={(e) => setDraft({ ...draft, documentNumber: e.target.value })} placeholder="شماره نامه/فاکتور" className="field" />
+            <input type="date" value={draft.documentDate} onChange={(e) => setDraft({ ...draft, documentDate: e.target.value })} required className="field" />
+          </div>
+          <input value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} placeholder="موضوع سند" required className="field w-full" />
+          <div className="grid md:grid-cols-2 gap-3"><input value={draft.sender} onChange={(e) => setDraft({ ...draft, sender: e.target.value })} placeholder="فرستنده" required className="field" /><input value={draft.receiver} onChange={(e) => setDraft({ ...draft, receiver: e.target.value })} placeholder="گیرنده" required className="field" /></div>
+          <div className="grid md:grid-cols-4 gap-3">
+            <select value={draft.confidentiality} onChange={(e) => setDraft({ ...draft, confidentiality: e.target.value as Draft['confidentiality'] })} className="field"><option value="Normal">عادی</option><option value="Confidential">محرمانه</option><option value="Secret">سری</option></select>
+            <select value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value as Draft['priority'] })} className="field"><option value="Low">کم</option><option value="Normal">عادی</option><option value="High">بالا</option><option value="Urgent">فوری</option></select>
+            <select value={draft.relatedCustomerId} onChange={(e) => setDraft({ ...draft, relatedCustomerId: e.target.value })} className="field"><option value="">ارتباط با مشتری...</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name} · {customer.companyName}</option>)}</select>
+            <select value={draft.relatedProformaId} onChange={(e) => setDraft({ ...draft, relatedProformaId: e.target.value })} className="field"><option value="">ارتباط با فاکتور...</option>{proformas.map((proforma) => <option key={proforma.id} value={proforma.id}>{proforma.invoiceNumber} · {proforma.customerName}</option>)}</select>
+          </div>
+          <div className="grid md:grid-cols-3 gap-3"><input value={draft.assignedTo} onChange={(e) => setDraft({ ...draft, assignedTo: e.target.value })} placeholder="ارجاع به" className="field" /><input type="date" value={draft.dueDate} onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })} className="field" /><input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="برچسب‌ها با ویرگول" className="field" /></div>
+          <textarea value={draft.summary} onChange={(e) => setDraft({ ...draft, summary: e.target.value })} placeholder="خلاصه محتوا" className="field w-full min-h-[90px]" />
+          <div className="grid md:grid-cols-2 gap-3">
+            <label className="bg-slate-900 border border-slate-800 rounded-xl p-4 cursor-pointer"><UploadCloud className="w-5 h-5 text-amber-400 mb-2" />فایل اصل نامه/فاکتور<input type="file" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) { setUploading(true); setAttachments((prev) => [...prev, localAttachment(file, 'Original File (اصل فایل)')]); void fileToAttachment(file, 'Original File (اصل فایل)').then((stored) => setAttachments((prev) => prev.map((item, idx) => idx === prev.length - 1 ? stored : item))).finally(() => setUploading(false)); } }} /></label>
+            <label className="bg-slate-900 border border-slate-800 rounded-xl p-4 cursor-pointer"><FileText className="w-5 h-5 text-emerald-400 mb-2" />نسخه PDF<input type="file" accept="application/pdf,.pdf" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) { setUploading(true); setAttachments((prev) => [...prev, localAttachment(file, 'PDF Copy (نسخه PDF)')]); void fileToAttachment(file, 'PDF Copy (نسخه PDF)').then((stored) => setAttachments((prev) => prev.map((item, idx) => idx === prev.length - 1 ? stored : item))).finally(() => setUploading(false)); } }} /></label>
+          </div>
+          <div className="space-y-1">{attachments.map((file) => <div key={file.id} className="flex justify-between bg-slate-900 rounded-lg px-3 py-2 text-slate-300"><span>{file.kind}: {file.fileName}</span><span>{sizeLabel(file.sizeBytes)}</span></div>)}</div>
+          {uploading && <div className="text-[10px] text-amber-300">در حال ذخیره فایل در storage محلی برنامه...</div>}
+          <div className="flex justify-end gap-2"><button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl">انصراف</button><button type="submit" disabled={uploading} className="px-4 py-2 bg-amber-500 text-slate-950 font-bold rounded-xl disabled:opacity-40">ثبت در اندیکاتور</button></div>
+        </form>
+      </div>}
+      {printDocument && <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"><div className="bg-white text-slate-950 rounded-2xl p-8 w-full max-w-3xl max-h-[90vh] overflow-auto">
+        <div className="flex justify-between border-b pb-4">{branding?.letterheadDataUrl ? <img src={branding.letterheadDataUrl} alt="Letterhead" className="max-h-24 object-contain" /> : <div className="flex gap-3">{branding?.logoDataUrl && <img src={branding.logoDataUrl} alt="Logo" className="w-14 h-14 object-contain" />}<div><h2 className="text-xl font-black">{branding?.companyNameFa || 'مزرعه فتحی'}</h2><div className="text-xs text-slate-500">{branding?.companyNameEn}</div><div className="text-xs text-slate-500">{branding?.registrationLine}</div></div></div>}<button onClick={() => setPrintDocument(null)} className="text-slate-500 print:hidden">×</button></div>
+        <div className="grid grid-cols-2 gap-3 mt-4 text-sm"><div>شماره اندیکاتور: <strong className="font-mono">{printDocument.indicatorNumber}</strong></div><div>تاریخ: {printDocument.documentDate}</div><div>شماره سند: {printDocument.documentNumber || '—'}</div><div>نوع: {printDocument.type}</div><div>از: {printDocument.sender}</div><div>به: {printDocument.receiver}</div><div className="col-span-2 text-lg font-black border-t pt-4">{printDocument.subject}</div></div>
+        <p className="mt-4 text-sm leading-8 whitespace-pre-wrap">{printDocument.summary || printDocument.notes || '—'}</p>
+        <div className="mt-4 text-xs text-slate-600">پیوست‌ها: {printDocument.attachments.map((file) => file.fileName).join('، ') || 'ندارد'}</div>
+        <div className="mt-4 border rounded-xl p-3 text-xs"><strong>تاریخچه گردش اداری</strong>{(printDocument.workflowEvents || []).map((event) => <div key={event.id} className="mt-1 text-slate-600">{event.timestamp} · {event.action} · {event.userName}</div>)}</div>
+        <div className="mt-8 flex justify-between items-end text-xs"><div className="text-slate-500">{branding?.letterFooterNote}</div><div className="flex gap-4 items-end">{branding?.stampDataUrl && <img src={branding.stampDataUrl} alt="Stamp" className="w-20 h-20 object-contain" />}{branding?.signatureDataUrl && <div className="text-center"><img src={branding.signatureDataUrl} alt="Signature" className="w-28 h-16 object-contain" /><div className="border-t pt-1">امضا مجاز</div></div>}</div></div>
+        <div className="mt-6 flex justify-end gap-2 print:hidden"><button onClick={() => window.print()} className="px-4 py-2 bg-slate-900 text-white rounded-lg">چاپ / PDF</button><button onClick={() => setPrintDocument(null)} className="px-4 py-2 bg-slate-200 rounded-lg">بستن</button></div>
+      </div></div>}
+    </div>
+  );
+};

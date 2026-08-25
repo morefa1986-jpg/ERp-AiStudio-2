@@ -130,6 +130,7 @@ export const de = {
     sectionSystem: 'KI, Sicherheit & Plattform',
     stoppedBadge: '{count} Fütterungsstopps',
     dashboard: 'Zentrales KPI-Dashboard',
+    workbench: 'Täglicher Arbeitskorb',
     farmHalls: 'Farmhallen & Anlagen',
     ponds: 'Digitale Zwillingsbecken',
     feeding: 'Fütterungs- & Rationsmotor',

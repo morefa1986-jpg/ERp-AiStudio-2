@@ -34,15 +34,24 @@ export function normalizeFeedAmountToKg(
   return Number(amount.toFixed(4));
 }
 
+export function feedItemIsExpired(item: InventoryItem, at: Date = new Date()): boolean {
+  if (item.status === 'Expired') return true;
+  if (!item.expiryDate) return false;
+  const expiry = new Date(`${item.expiryDate}T23:59:59.999`).getTime();
+  return !Number.isFinite(expiry) || expiry < at.getTime();
+}
+
 /** Convert a normalized kilogram amount to the unit used by the inventory ledger. */
 export function inventoryQuantityForFeedKg(item: InventoryItem, amountKg: number): number {
   if (!Number.isFinite(amountKg) || amountKg <= 0) return 0;
+  if (feedItemIsExpired(item)) return 0;
   if (item.unit === 'gram') return Number((amountKg * 1000).toFixed(4));
   if (item.unit === 'kg') return Number(amountKg.toFixed(4));
   return 0;
 }
 
 function validatePondSafety(pond: Pond, telemetry?: AuthoritativeFeedingTelemetry): { safe: boolean; error?: string; assessment: ReturnType<typeof assessWaterSafetyForFeeding> } {
+  const effectiveSensorStatus = telemetry?.sensorStatus ?? pond.sensorQuality;
   const assessment = assessWaterSafetyForFeeding({
     dissolvedOxygen: telemetry?.dissolvedOxygen ?? pond.dissolvedOxygen,
     waterTemperature: telemetry?.waterTemperature ?? pond.waterTemperature,
@@ -50,7 +59,7 @@ function validatePondSafety(pond: Pond, telemetry?: AuthoritativeFeedingTelemetr
     ammonia: telemetry?.ammonia ?? pond.ammonia,
     nitrite: telemetry?.nitrite ?? pond.nitrite,
     timestamp: telemetry?.timestamp ?? pond.lastTelemetryTimestamp,
-    sensorStatus: telemetry?.sensorStatus ?? pond.sensorQuality,
+    sensorStatus: effectiveSensorStatus,
   });
 
   if (pond.feedingStatus === 'STOPPED') {
@@ -59,7 +68,10 @@ function validatePondSafety(pond: Pond, telemetry?: AuthoritativeFeedingTelemetr
   if (pond.activeTreatmentId) {
     return { safe: false, error: 'ثبت خوراک غیرمجاز است: استخر دارای درمان فعال است.', assessment };
   }
-  if (pond.sensorQuality === 'INVALID' || pond.sensorQuality === 'STALE' || pond.sensorQuality === 'OFFLINE') {
+  if (effectiveSensorStatus === 'MANUAL') {
+    return { safe: false, error: 'ثبت خوراک غیرمجاز است: اندازه‌گیری دستی منبع authoritative تله‌متری نیست.', assessment };
+  }
+  if (effectiveSensorStatus === 'INVALID' || effectiveSensorStatus === 'STALE' || effectiveSensorStatus === 'OFFLINE' || effectiveSensorStatus !== 'VALID') {
     return { safe: false, error: 'ثبت خوراک غیرمجاز است: کیفیت سنسور معتبر نیست.', assessment };
   }
   if (!assessment.isSafeForFeeding) {
@@ -159,6 +171,9 @@ export function validateFeedingSubmission(
   }
   if (!feedItem.category.includes('Feed')) {
     return { success: false, error: 'کالای انتخاب‌شده خوراک نیست.', normalizedAmountKg: normalizedKg, feedItem };
+  }
+  if (feedItemIsExpired(feedItem)) {
+    return { success: false, error: 'مصرف خوراک منقضی‌شده در ERP مجاز نیست.', normalizedAmountKg: normalizedKg, feedItem };
   }
   const requiredInventoryQuantity = inventoryQuantityForFeedKg(feedItem, normalizedKg);
   if (requiredInventoryQuantity <= 0) {

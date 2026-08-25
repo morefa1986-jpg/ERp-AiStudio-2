@@ -130,6 +130,7 @@ export const en = {
     sectionSystem: 'AI, Security & Platform',
     stoppedBadge: '{count} Feeding Stopped',
     dashboard: 'Central KPI Dashboard',
+    workbench: 'Daily Workbench',
     farmHalls: 'Farm Halls & Facilities',
     ponds: 'Digital Twin Ponds',
     feeding: 'Feeding & Ration Engine',

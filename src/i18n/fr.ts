@@ -130,6 +130,7 @@ export const fr = {
     sectionSystem: 'IA, Sécurité & Plateforme',
     stoppedBadge: '{count} Nourrissages Arrêtés',
     dashboard: 'Tableau de Bord Central KPI',
+    workbench: 'Corbeille Quotidienne',
     farmHalls: 'Halles & Installations',
     ponds: 'Bassins Jumeaux Numériques',
     feeding: 'Moteur de Ration & Alimentation',

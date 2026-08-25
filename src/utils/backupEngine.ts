@@ -33,11 +33,12 @@ export function validateBackupDocument(input: unknown): { ok: boolean; error?: s
   const required = [
     'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
     'treatments', 'transfers', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks',
-    'inventory', 'inventoryTxs', 'labSamples', 'processingBatches', 'coldStorage', 'customers', 'proformas',
-    'accounts', 'journals', 'employees', 'attendance', 'payrolls', 'equipment', 'socialPosts', 'auditLogs',
+    'inventory', 'inventoryTxs', 'labSamples', 'processingBatches', 'coldStorage', 'customers', 'crmActivities', 'crmReminders', 'proformas',
+    'officeDocuments', 'officeSettings', 'gatePasses', 'chatThreads', 'chatMessages', 'accounts', 'journals', 'employees', 'attendance', 'payrolls', 'equipment', 'socialPosts', 'auditLogs',
   ];
   for (const key of required) {
     const rows = input.data[key];
+    if ((key === 'crmActivities' || key === 'crmReminders' || key === 'officeDocuments' || key === 'officeSettings' || key === 'gatePasses' || key === 'chatThreads' || key === 'chatMessages') && rows === undefined) continue;
     if (!Array.isArray(rows) || !validIdRows(rows)) return { ok: false, error: `BACKUP_COLLECTION_INVALID:${key}` };
   }
 

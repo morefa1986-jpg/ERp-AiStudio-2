@@ -84,10 +84,10 @@ export async function listSocialConnections(): Promise<SocialConnectionState[]> 
   return SOCIAL_PLATFORMS.map((platform) => saved[platform.id] || { platformId: platform.id, connected: false });
 }
 
-export async function setSocialConnection(platformId: SocialPlatformId, _connected: boolean, accountLabel?: string): Promise<SocialConnectionState[]> {
+export async function setSocialConnection(platformId: SocialPlatformId, connected: boolean, accountLabel?: string): Promise<SocialConnectionState[]> {
   const payload = await socialApi<{ connections: SocialConnectionState[] }>(`/api/social/connections/${encodeURIComponent(platformId)}`, {
     method: 'POST',
-    body: JSON.stringify({ connected: false, accountLabel }),
+    body: JSON.stringify({ connected, accountLabel }),
   });
   return SOCIAL_PLATFORMS.map((platform) => payload.connections.find((item) => item.platformId === platform.id) || { platformId: platform.id, connected: false });
 }

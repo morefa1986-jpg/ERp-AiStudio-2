@@ -35,6 +35,8 @@ export type UserRole =
   | 'CRM Operator'
   | 'HR Manager'
   | 'Media Manager'
+  | 'Gate Guard'
+  | 'Office Automation'
   | 'Viewer/Auditor';
 
 export type PermissionAction =
@@ -49,6 +51,7 @@ export type PermissionAction =
 
 export type PermissionModule =
   | 'dashboard'
+  | 'workbench'
   | 'farm'
   | 'halls'
   | 'ponds'
@@ -70,6 +73,9 @@ export type PermissionModule =
   | 'accounting'
   | 'hr'
   | 'media'
+  | 'chat'
+  | 'documents'
+  | 'gatehouse'
   | 'ai_assistant'
   | 'reports'
   | 'backup'
@@ -89,6 +95,18 @@ export interface CustomRole {
   description: string;
   isSystem?: boolean;
   permissions: GranularPermission[];
+}
+
+export interface FileAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  storageId?: string;
+  downloadUrl?: string;
+  checksum?: string;
+  addedAt: string;
+  addedBy?: string;
 }
 
 export interface User {
@@ -139,15 +157,30 @@ export interface SensorMeasurement {
   quality: SensorQuality;
 }
 
+export interface PondStockGroup {
+  speciesId: string;
+  sex: 'Female' | 'Male' | 'Unknown';
+  count: number;
+  averageWeightKg: number;
+  chipNumbers?: string[];
+}
+
 export interface Pond {
   id: string;
   number: string;
   name: string;
   hallId: string;
   capacityCubicMeters: number;
+  shape?: 'Rectangular' | 'Circular' | 'Other';
+  lengthMeters?: number;
+  widthMeters?: number;
+  depthMeters?: number;
+  diameterMeters?: number;
+  isActive?: boolean;
   fishCount: number;
   speciesId: string;
-  speciesMix?: { speciesId: string; count: number; avgWeightKg: number }[];
+  speciesMix?: { speciesId: string; count: number; avgWeightKg: number; maleCount?: number; femaleCount?: number; unknownSexCount?: number; chipNumbers?: string[] }[];
+  stockGroups?: PondStockGroup[];
   biomassKg: number;
   averageWeightKg: number;
   lastFeedingKg: number;
@@ -268,6 +301,7 @@ export interface MortalityRecord {
   treatmentId?: string;
   description: string;
   photoUrl?: string;
+  photos?: FileAttachment[];
   recordedBy: string;
 }
 
@@ -409,7 +443,7 @@ export interface InventoryItem {
   id: string;
   sku: string;
   name: string;
-  category: 'Feed (خوراک)' | 'Medicine & Disinfectant (دارو و ضدعفونی)' | 'Oxygen & Chemicals' | 'Packaging & Cans' | 'Equipment & Spare Parts' | 'Caviar Cans & Jars' | 'Finished Goods';
+  category: 'Feed (خوراک)' | 'Raw Material (مواد اولیه خوراک)' | 'Medicine & Disinfectant (دارو و ضدعفونی)' | 'Oxygen & Chemicals' | 'Packaging & Cans' | 'Equipment & Spare Parts' | 'Caviar Cans & Jars' | 'Finished Goods';
   batchNumber: string;
   quantity: number;
   unit: 'kg' | 'gram' | 'liter' | 'can' | 'piece' | 'bag';
@@ -464,6 +498,39 @@ export interface LabSample {
   status: 'Pending' | 'Approved' | 'Rejected';
   approvedBy?: string;
   attachmentUrl?: string;
+  attachments?: FileAttachment[];
+}
+
+export interface InternalChatThread {
+  id: string;
+  title: string;
+  type: 'Direct' | 'Group';
+  participantUserIds: string[];
+  createdAt: string;
+  createdBy: string;
+  lastMessageAt?: string;
+}
+
+export interface InternalChatMessage {
+  id: string;
+  threadId: string;
+  senderUserId: string;
+  senderName: string;
+  text: string;
+  attachments: FileAttachment[];
+  createdAt: string;
+}
+
+export interface InternalChatCall {
+  id: string;
+  threadId: string;
+  callType: 'audio' | 'video';
+  status: 'Ringing' | 'Active' | 'Ended';
+  startedAt: string;
+  endedAt?: string;
+  startedByUserId: string;
+  startedByName: string;
+  participantUserIds: string[];
 }
 
 export interface ProcessingBatch {
@@ -493,6 +560,7 @@ export interface ProcessingBatch {
 export interface ColdStoragePallet {
   id: string;
   sku?: string;
+  processingBatchId?: string;
   slotCode: string;
   temperatureC: number;
   productType: 'Caviar (Cans/Jars)' | 'Frozen Sturgeon Whole' | 'Vacuumed Fillet' | 'Smoked Sturgeon' | 'Raw Broodstock Eggs';
@@ -503,6 +571,9 @@ export interface ColdStoragePallet {
   entryDate: string;
   expiryDate: string;
   ownerCustomer?: string;
+  qualityHold?: boolean;
+  qualityHoldReason?: string;
+  qualityHoldSince?: string;
   status: 'Stored' | 'Pending Dispatch' | 'Reserved';
 }
 
@@ -522,8 +593,50 @@ export interface Customer {
   totalOrdersCount: number;
   totalSpent: number;
   status: 'Active VIP' | 'Regular' | 'Lead' | 'Inactive';
+  ownerUserId?: string;
+  ownerName?: string;
+  tags?: string[];
+  score?: number;
+  lastContactAt?: string;
+  nextFollowUpAt?: string;
+  attachments?: FileAttachment[];
   notes: string;
   createdAt: string;
+}
+
+export type CrmActivityType = 'Call' | 'Meeting' | 'Message' | 'Email' | 'Visit' | 'Note' | 'Payment Follow-up' | 'Complaint' | 'Support';
+export type CrmActivityOutcome = 'Open' | 'Done' | 'Needs Follow-up' | 'Waiting Customer' | 'Closed';
+
+export interface CrmActivity {
+  id: string;
+  customerId: string;
+  customerName: string;
+  type: CrmActivityType;
+  subject: string;
+  details: string;
+  outcome: CrmActivityOutcome;
+  relatedProformaId?: string;
+  followUpAt?: string;
+  assignedTo?: string;
+  attachments: FileAttachment[];
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface CrmReminder {
+  id: string;
+  customerId: string;
+  customerName: string;
+  title: string;
+  dueAt: string;
+  priority: 'Low' | 'Normal' | 'High' | 'Urgent';
+  status: 'Open' | 'Done' | 'Cancelled';
+  assignedTo?: string;
+  relatedActivityId?: string;
+  createdAt: string;
+  createdBy: string;
+  completedAt?: string;
+  completedBy?: string;
 }
 
 export type SalesStage =
@@ -542,6 +655,8 @@ export interface ProformaItem {
   id: string;
   productName: string;
   sku: string;
+  coldStorageLotId?: string;
+  processingBatchId?: string;
   quantity: number;
   unit: string;
   unitPrice: number;
@@ -572,6 +687,115 @@ export interface ProformaInvoice {
   status: 'Draft' | 'Sent' | 'Accepted' | 'Converted to Invoice' | 'Cancelled';
   fulfilledAt?: string;
   fulfillmentTransactionId?: string;
+}
+
+export type OfficeDocumentDirection = 'Incoming (وارده)' | 'Outgoing (صادره)' | 'Internal (داخلی)';
+export type OfficeDocumentType = 'Letter (نامه)' | 'Invoice (فاکتور)' | 'Proforma (پیش‌فاکتور)' | 'Contract (قرارداد)' | 'Receipt (رسید)' | 'Other (سایر)';
+export type OfficeDocumentStatus = 'Registered' | 'In Review' | 'Referred' | 'Answered' | 'Archived' | 'Cancelled';
+
+export interface OfficeDocumentAttachment {
+  id: string;
+  kind: 'Original File (اصل فایل)' | 'PDF Copy (نسخه PDF)' | 'Supporting Attachment (پیوست)';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  localPath?: string;
+  checksum?: string;
+  storageId?: string;
+  downloadUrl?: string;
+  addedAt: string;
+}
+
+export interface OfficeDocumentWorkflowEvent {
+  id: string;
+  timestamp: string;
+  action: 'REGISTERED' | 'STATUS_CHANGED' | 'REFERRED' | 'ANSWERED' | 'ARCHIVED' | 'COMMENT';
+  fromStatus?: OfficeDocumentStatus;
+  toStatus?: OfficeDocumentStatus;
+  assignedTo?: string;
+  note?: string;
+  userName: string;
+}
+
+export interface OfficeDocument {
+  id: string;
+  indicatorNumber: string;
+  documentNumber: string;
+  documentDate: string;
+  registeredAt: string;
+  direction: OfficeDocumentDirection;
+  type: OfficeDocumentType;
+  subject: string;
+  sender: string;
+  receiver: string;
+  confidentiality: 'Normal' | 'Confidential' | 'Secret';
+  priority: 'Low' | 'Normal' | 'High' | 'Urgent';
+  status: OfficeDocumentStatus;
+  relatedCustomerId?: string;
+  relatedProformaId?: string;
+  relatedFarmId?: string;
+  assignedTo?: string;
+  dueDate?: string;
+  tags: string[];
+  summary: string;
+  notes?: string;
+  attachments: OfficeDocumentAttachment[];
+  workflowEvents: OfficeDocumentWorkflowEvent[];
+  createdBy: string;
+  updatedAt?: string;
+}
+
+export interface OfficeBrandingSettings {
+  id: string;
+  companyNameFa: string;
+  companyNameEn: string;
+  registrationLine: string;
+  addressLine: string;
+  phoneLine: string;
+  emailLine: string;
+  websiteLine: string;
+  invoiceFooterNote: string;
+  letterFooterNote: string;
+  logoDataUrl?: string;
+  letterheadDataUrl?: string;
+  signatureDataUrl?: string;
+  stampDataUrl?: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface GatePassRecord {
+  id: string;
+  passNumber: string;
+  direction: 'Entry (ورود)' | 'Exit (خروج)';
+  status: 'Draft' | 'Registered' | 'Approved for Exit' | 'Exited' | 'Cancelled';
+  registeredAt: string;
+  exitApprovedAt?: string;
+  exitedAt?: string;
+  vehiclePlateNumber: string;
+  carrierVehicleNumber: string;
+  vehicleType: string;
+  driverName: string;
+  driverNationalId: string;
+  driverPhone: string;
+  cargoOwnerName: string;
+  cargoOwnerNationalId: string;
+  cargoOwnerPhone: string;
+  cargoType: string;
+  cargoVolume: string;
+  cargoQuality: string;
+  waybillNumber: string;
+  dispatchOrderNumber: string;
+  transportPermitNumber: string;
+  originAddress: string;
+  destinationAddress: string;
+  relatedDocumentId?: string;
+  relatedProformaId?: string;
+  exitSheetIssuedAt?: string;
+  exitSheetIssuedBy?: string;
+  registeredBy: string;
+  approvedBy?: string;
+  notes?: string;
 }
 
 export interface Account {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useI18n } from '../../i18n';
 import { useFarm } from '../../context/FarmContext';
 import { useAuth } from '../../context/AuthContext';
@@ -19,6 +19,15 @@ import {
 } from 'lucide-react';
 import { Pond } from '../../types';
 import { pondWithManualSnapshot, PondManualSnapshotInput } from '../../types/pondSnapshot';
+import { pondStockGroups } from '../../utils/pondStockLedger';
+
+function stockKey(speciesId: string, sex: string): string {
+  return `${speciesId}|${sex}`;
+}
+
+function parseChips(value: string): string[] {
+  return [...new Set(value.split(/[،,\n]/).map((item) => item.trim()).filter(Boolean))];
+}
 
 interface PondsViewProps {
   onSelectNav: (viewId: string) => void;
@@ -54,14 +63,39 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
   const [feedOperator, setFeedOperator] = useState<string>(currentUser?.fullName || '');
 
   const [mortalityModalPond, setMortalityModalPond] = useState<Pond | null>(null);
+  const [mortalityStockKey, setMortalityStockKey] = useState<string>('');
+  const [mortalityChipSelection, setMortalityChipSelection] = useState<string>('');
   const [mortalityCount, setMortalityCount] = useState<number>(0);
   const [mortalityWeightKg, setMortalityWeightKg] = useState<number>(0);
   const [mortalityReason, setMortalityReason] = useState<string>('');
 
   const [transferModalPond, setTransferModalPond] = useState<Pond | null>(null);
+  const [transferStockKey, setTransferStockKey] = useState<string>('');
+  const [transferChipSelection, setTransferChipSelection] = useState<string>('');
   const [destPondId, setDestPondId] = useState<string>('');
   const [transferCount, setTransferCount] = useState<number>(0);
   const [transferReason, setTransferReason] = useState<string>('');
+
+  const mortalityStockGroups = useMemo(() => mortalityModalPond ? pondStockGroups(mortalityModalPond).filter((group) => group.count > 0) : [], [mortalityModalPond]);
+  const selectedMortalityStock = mortalityStockGroups.find((group) => stockKey(group.speciesId, group.sex) === mortalityStockKey) || mortalityStockGroups[0];
+  const transferStockGroups = useMemo(() => transferModalPond ? pondStockGroups(transferModalPond).filter((group) => group.count > 0) : [], [transferModalPond]);
+  const selectedTransferStock = transferStockGroups.find((group) => stockKey(group.speciesId, group.sex) === transferStockKey) || transferStockGroups[0];
+
+  const speciesLabel = (speciesId: string) => {
+    const row = species.find((item) => item.id === speciesId);
+    return row?.faName || row?.enName || row?.scientificName || speciesId;
+  };
+
+  const validateChipRemoval = (chipsText: string, registered: string[] | undefined, groupCount: number, removeCount: number) => {
+    const chips = parseChips(chipsText);
+    const registeredChips = registered || [];
+    if (chips.some((chip) => !registeredChips.includes(chip))) return { ok: false, chips, error: 'حداقل یک شماره Chip در گروه انتخاب‌شده ثبت نشده است.' };
+    if (chips.length > removeCount) return { ok: false, chips, error: 'تعداد Chipهای انتخاب‌شده از تعداد ماهی عملیات بیشتر است.' };
+    if (registeredChips.length - chips.length > groupCount - removeCount) {
+      return { ok: false, chips, error: 'برای حفظ دفترچه Chip، شماره Chip ماهیان خارج‌شونده را مشخص کنید.' };
+    }
+    return { ok: true, chips };
+  };
 
   const filteredPonds = ponds.filter((p) => {
     const matchHall = selectedHall === 'all' || p.hallId === selectedHall;
@@ -113,12 +147,23 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
 
   const handleConfirmMortality = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mortalityModalPond) return;
+    if (!mortalityModalPond || !selectedMortalityStock) return;
+    if (mortalityCount > selectedMortalityStock.count) {
+      alert('تعداد تلفات بیشتر از موجودی گروه انتخاب‌شده است.');
+      return;
+    }
+    const chipCheck = validateChipRemoval(mortalityChipSelection, selectedMortalityStock.chipNumbers, selectedMortalityStock.count, mortalityCount);
+    if (!chipCheck.ok) {
+      alert(chipCheck.error);
+      return;
+    }
     recordMortality({
       pondId: mortalityModalPond.id,
       pondName: mortalityModalPond.name,
-      speciesId: mortalityModalPond.speciesId,
-      speciesName: species.find((item) => item.id === mortalityModalPond.speciesId)?.enName || '',
+      speciesId: selectedMortalityStock.speciesId,
+      speciesName: speciesLabel(selectedMortalityStock.speciesId),
+      stockSex: selectedMortalityStock.sex,
+      chipNumbers: chipCheck.chips.length ? chipCheck.chips : undefined,
       count: mortalityCount,
       estimatedWeightKg: mortalityWeightKg,
       reason: mortalityReason,
@@ -126,13 +171,25 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
       recordedBy: currentUser?.fullName || '',
     });
     setMortalityModalPond(null);
+    setMortalityStockKey('');
+    setMortalityChipSelection('');
   };
 
   const handleConfirmTransfer = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!transferModalPond || !destPondId) return;
+    if (!transferModalPond || !destPondId || !selectedTransferStock) return;
     const destPond = ponds.find((p) => p.id === destPondId);
     if (!destPond) return;
+    if (transferCount > selectedTransferStock.count) {
+      alert('تعداد انتقال بیشتر از موجودی گروه انتخاب‌شده است.');
+      return;
+    }
+    const chipCheck = validateChipRemoval(transferChipSelection, selectedTransferStock.chipNumbers, selectedTransferStock.count, transferCount);
+    if (!chipCheck.ok) {
+      alert(chipCheck.error);
+      return;
+    }
+    const biomassKg = Number((transferCount * selectedTransferStock.averageWeightKg).toFixed(3));
 
     const res = executeAtomicTransfer({
       sourceType: 'Pond',
@@ -141,11 +198,13 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
       destinationType: 'Pond',
       destinationId: destPond.id,
       destinationName: destPond.name,
-      speciesId: transferModalPond.speciesId,
-      speciesName: species.find((item) => item.id === transferModalPond.speciesId)?.enName || '',
+      speciesId: selectedTransferStock.speciesId,
+      speciesName: speciesLabel(selectedTransferStock.speciesId),
+      stockSex: selectedTransferStock.sex,
+      chipNumbers: chipCheck.chips.length ? chipCheck.chips : undefined,
       fishCount: transferCount,
-      averageWeightKg: transferModalPond.averageWeightKg,
-      totalBiomassKg: transferCount * transferModalPond.averageWeightKg,
+      averageWeightKg: selectedTransferStock.averageWeightKg,
+      totalBiomassKg: biomassKg,
       reason: transferReason,
       date: new Date().toISOString().split('T')[0],
       operator: currentUser?.fullName || '',
@@ -155,6 +214,8 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
       alert(res.error);
     } else {
       setTransferModalPond(null);
+      setTransferStockKey('');
+      setTransferChipSelection('');
     }
   };
 
@@ -414,9 +475,13 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
 
                   <button
                     onClick={() => {
+                      const groups = pondStockGroups(pond).filter((group) => group.count > 0);
+                      const firstGroup = groups[0];
                       setMortalityModalPond(pond);
+                      setMortalityStockKey(firstGroup ? stockKey(firstGroup.speciesId, firstGroup.sex) : '');
+                      setMortalityChipSelection('');
                       setMortalityCount(1);
-                      setMortalityWeightKg(pond.averageWeightKg);
+                      setMortalityWeightKg(firstGroup?.averageWeightKg || pond.averageWeightKg);
                     }}
                     title={t('pond.quickMortality')}
                     className="p-2 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded-xl transition-colors cursor-pointer border border-slate-700"
@@ -426,8 +491,12 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
 
                   <button
                     onClick={() => {
+                      const groups = pondStockGroups(pond).filter((group) => group.count > 0);
+                      const firstGroup = groups[0];
                       setTransferModalPond(pond);
-                      setTransferCount(10);
+                      setTransferStockKey(firstGroup ? stockKey(firstGroup.speciesId, firstGroup.sex) : '');
+                      setTransferChipSelection('');
+                      setTransferCount(Math.min(10, firstGroup?.count || pond.fishCount));
                       const otherPonds = ponds.filter((p) => p.id !== pond.id);
                       if (otherPonds.length > 0) setDestPondId(otherPonds[0].id);
                     }}
@@ -608,6 +677,27 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
             </div>
 
             <form onSubmit={handleConfirmMortality} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">
+                  گروه گونه / جنسیت:
+                </label>
+                <select
+                  value={selectedMortalityStock ? stockKey(selectedMortalityStock.speciesId, selectedMortalityStock.sex) : ''}
+                  onChange={(e) => {
+                    setMortalityStockKey(e.target.value);
+                    setMortalityChipSelection('');
+                  }}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-medium focus:border-rose-500"
+                  required
+                >
+                  {mortalityStockGroups.map((group) => (
+                    <option key={stockKey(group.speciesId, group.sex)} value={stockKey(group.speciesId, group.sex)}>
+                      {speciesLabel(group.speciesId)} · {group.sex} · {group.count} قطعه · {group.averageWeightKg} kg
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-bold mb-1">
@@ -616,7 +706,7 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
                   <input
                     type="number"
                     min="1"
-                    max={mortalityModalPond.fishCount}
+                    max={selectedMortalityStock?.count || mortalityModalPond.fishCount}
                     value={mortalityCount}
                     onChange={(e) => setMortalityCount(Number(e.target.value))}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold focus:border-rose-500"
@@ -640,6 +730,24 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
                   />
                 </div>
               </div>
+
+              {selectedMortalityStock?.chipNumbers?.length ? (
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">
+                    Chip ماهیان تلف‌شده:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={mortalityChipSelection}
+                    onChange={(e) => setMortalityChipSelection(e.target.value)}
+                    placeholder={selectedMortalityStock.chipNumbers.join(', ')}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:border-rose-500"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Chipهای ثبت‌شده این گروه: {selectedMortalityStock.chipNumbers.join(' · ')}
+                  </span>
+                </div>
+              ) : null}
 
               <div>
                 <label className="block text-slate-300 font-bold mb-1">
@@ -694,6 +802,27 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
             <form onSubmit={handleConfirmTransfer} className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-300 font-bold mb-1">
+                  گروه گونه / جنسیت:
+                </label>
+                <select
+                  value={selectedTransferStock ? stockKey(selectedTransferStock.speciesId, selectedTransferStock.sex) : ''}
+                  onChange={(e) => {
+                    setTransferStockKey(e.target.value);
+                    setTransferChipSelection('');
+                  }}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-medium focus:border-blue-500"
+                  required
+                >
+                  {transferStockGroups.map((group) => (
+                    <option key={stockKey(group.speciesId, group.sex)} value={stockKey(group.speciesId, group.sex)}>
+                      {speciesLabel(group.speciesId)} · {group.sex} · {group.count} قطعه · {group.averageWeightKg} kg
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">
                   استخر مقصد:
                 </label>
                 <select
@@ -719,16 +848,34 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav 
                 <input
                   type="number"
                   min="1"
-                  max={transferModalPond.fishCount}
+                  max={selectedTransferStock?.count || transferModalPond.fishCount}
                   value={transferCount}
                   onChange={(e) => setTransferCount(Number(e.target.value))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold focus:border-blue-500"
                   required
                 />
                 <span className="text-[11px] text-slate-400 mt-1 block">
-                  وزن بیوماس کل انتقالی: {(transferCount * transferModalPond.averageWeightKg).toFixed(1)} kg
+                  وزن بیوماس کل انتقالی: {(transferCount * (selectedTransferStock?.averageWeightKg || transferModalPond.averageWeightKg)).toFixed(1)} kg
                 </span>
               </div>
+
+              {selectedTransferStock?.chipNumbers?.length ? (
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">
+                    Chip ماهیان انتقالی:
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={transferChipSelection}
+                    onChange={(e) => setTransferChipSelection(e.target.value)}
+                    placeholder={selectedTransferStock.chipNumbers.join(', ')}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:border-blue-500"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Chipهای ثبت‌شده این گروه: {selectedTransferStock.chipNumbers.join(' · ')}
+                  </span>
+                </div>
+              ) : null}
 
               <div>
                 <label className="block text-slate-300 font-bold mb-1">
