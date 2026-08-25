@@ -6,7 +6,7 @@ const baseState = () => ({
   halls: [], ponds: [], species: [], feedingRecords: [], biometricSessions: [], waterLogs: [], mortalityRecords: [],
   treatments: [], transfers: [], broodstock: [], fertilizations: [], incubators: [], larvae: [], nurseryTanks: [],
   inventory: [], inventoryTxs: [], labSamples: [], processingBatches: [], coldStorage: [], customers: [], proformas: [],
-  officeDocuments: [], accounts: [], journals: [], employees: [], attendance: [], payrolls: [], equipment: [], socialPosts: [],
+  officeDocuments: [], gatePasses: [], accounts: [], journals: [], employees: [], attendance: [], payrolls: [], equipment: [], socialPosts: [],
   auditLogs: [], backups: [],
 });
 

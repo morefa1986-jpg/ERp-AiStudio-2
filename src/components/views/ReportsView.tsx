@@ -7,16 +7,16 @@ import { downloadXlsx } from '../../utils/xlsxExport';
 import { ComparativeAnalyticsView } from './ComparativeAnalyticsView';
 
 type ScopeMode = 'farm' | 'multiHall' | 'hall' | 'pond';
-type ReportType = 'ponds' | 'feeding' | 'water' | 'mortality' | 'treatments' | 'transfers' | 'inventory' | 'processing' | 'sales' | 'receivables' | 'documents' | 'accounting' | 'payroll' | 'audit';
+type ReportType = 'ponds' | 'feeding' | 'water' | 'mortality' | 'treatments' | 'transfers' | 'inventory' | 'processing' | 'sales' | 'receivables' | 'documents' | 'gatehouse' | 'accounting' | 'payroll' | 'audit';
 type ReportRow = Record<string, string | number | boolean | null | undefined>;
 
 const REPORT_LABELS: Record<ReportType, string> = {
   ponds: 'وضعیت استخرها', feeding: 'خوراک‌دهی', water: 'کیفیت آب', mortality: 'تلفات', treatments: 'درمان‌ها', transfers: 'انتقالات',
-  inventory: 'انبار', processing: 'فرآوری', sales: 'فروش', receivables: 'مطالبات و سررسید', documents: 'دبیرخانه و اسناد', accounting: 'حسابداری', payroll: 'حقوق', audit: 'Audit Trail',
+  inventory: 'انبار', processing: 'فرآوری', sales: 'فروش', receivables: 'مطالبات و سررسید', documents: 'دبیرخانه و اسناد', gatehouse: 'نگهبانی و برگه خروج', accounting: 'حسابداری', payroll: 'حقوق', audit: 'Audit Trail',
 };
 
 const SCOPED_REPORTS = new Set<ReportType>(['ponds', 'feeding', 'water', 'mortality', 'treatments', 'transfers', 'processing', 'sales', 'receivables']);
-const DATED_REPORTS = new Set<ReportType>(['feeding', 'water', 'mortality', 'treatments', 'transfers', 'processing', 'sales', 'receivables', 'documents', 'accounting', 'payroll', 'audit']);
+const DATED_REPORTS = new Set<ReportType>(['feeding', 'water', 'mortality', 'treatments', 'transfers', 'processing', 'sales', 'receivables', 'documents', 'gatehouse', 'accounting', 'payroll', 'audit']);
 const CURRENT_SNAPSHOT_REPORTS = new Set<ReportType>(['ponds', 'inventory']);
 
 function csvCell(value: unknown): string { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
@@ -79,6 +79,7 @@ const ReportsTablePanel: React.FC = () => {
       case 'sales': return farm.proformas.filter((row) => proformaTouchesScope(row) && inDateRange(row.date)).map((row) => ({ invoice: row.invoiceNumber, date: row.date, customer: row.customerName, country: row.customerCountry, currency: row.currency, total: row.grandTotal, stage: row.stage, fulfilledAt: row.fulfilledAt || '', sourceLots: row.items.map((item) => item.coldStorageLotId || '').filter(Boolean).join(' | ') }));
       case 'receivables': return buildReceivablesAging(farm.proformas.filter((row) => proformaTouchesScope(row)), toDate || new Date().toISOString().slice(0, 10)).filter((row) => inDateRange(row.dueDate)).map((row) => ({ invoice: row.invoiceNumber, dueDate: row.dueDate, customer: row.customerName, company: row.customerCompany, country: row.customerCountry, currency: row.currency, amountDue: row.amountDue, daysOverdue: row.daysOverdue, bucket: row.bucket, stage: row.stage, status: row.status }));
       case 'documents': return farm.officeDocuments.filter((row) => inDateRange(row.documentDate)).map((row) => ({ indicator: row.indicatorNumber, documentNumber: row.documentNumber, date: row.documentDate, direction: row.direction, type: row.type, subject: row.subject, sender: row.sender, receiver: row.receiver, status: row.status, priority: row.priority, attachments: row.attachments.length, hasOriginal: row.attachments.some((file) => file.kind === 'Original File (اصل فایل)'), hasPdf: row.attachments.some((file) => file.kind === 'PDF Copy (نسخه PDF)') }));
+      case 'gatehouse': return farm.gatePasses.filter((row) => inDateRange(row.registeredAt)).map((row) => ({ passNumber: row.passNumber, registeredAt: row.registeredAt, direction: row.direction, status: row.status, vehiclePlateNumber: row.vehiclePlateNumber, vehicleType: row.vehicleType, driverName: row.driverName, driverNationalId: row.driverNationalId, driverPhone: row.driverPhone, cargoOwnerName: row.cargoOwnerName, cargoOwnerNationalId: row.cargoOwnerNationalId, cargoOwnerPhone: row.cargoOwnerPhone, cargoType: row.cargoType, cargoVolume: row.cargoVolume, cargoQuality: row.cargoQuality, waybillNumber: row.waybillNumber, dispatchOrderNumber: row.dispatchOrderNumber, transportPermitNumber: row.transportPermitNumber, originAddress: row.originAddress, destinationAddress: row.destinationAddress, registeredBy: row.registeredBy, approvedBy: row.approvedBy || '', exitedAt: row.exitedAt || '' }));
       case 'accounting': return farm.journals.filter((row) => inDateRange(row.date)).map((row) => ({ entryNumber: row.entryNumber, date: row.date, referenceType: row.referenceType, referenceId: row.referenceId || '', description: row.description, totalDebit: row.totalDebit, totalCredit: row.totalCredit, approvedBy: row.approvedBy, balanced: row.isBalanced }));
       case 'payroll': return farm.payrolls.filter((row) => inDateRange(`${row.payrollMonth}-01`)).map((row) => ({ month: row.payrollMonth, employee: row.employeeName, department: row.department, gross: row.grossSalary, deductions: row.socialSecurityInsurance + row.incomeTax + row.loanDeduction, net: row.netPay, currency: row.currency, status: row.paymentStatus }));
       case 'audit': return farm.auditLogs.filter((row) => inDateRange(row.timestamp)).map((row) => ({ timestamp: row.timestamp, user: row.userName, role: row.userRole, action: row.action, entity: row.entity, entityId: row.entityId, details: row.details, transactionId: row.transactionId || '', ipAddress: row.ipAddress || '' }));

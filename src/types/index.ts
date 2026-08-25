@@ -35,6 +35,8 @@ export type UserRole =
   | 'CRM Operator'
   | 'HR Manager'
   | 'Media Manager'
+  | 'Gate Guard'
+  | 'Office Automation'
   | 'Viewer/Auditor';
 
 export type PermissionAction =
@@ -71,6 +73,7 @@ export type PermissionModule =
   | 'hr'
   | 'media'
   | 'documents'
+  | 'gatehouse'
   | 'ai_assistant'
   | 'reports'
   | 'backup'
@@ -669,6 +672,37 @@ export interface OfficeBrandingSettings {
   stampDataUrl?: string;
   updatedAt: string;
   updatedBy: string;
+}
+
+export interface GatePassRecord {
+  id: string;
+  passNumber: string;
+  direction: 'Entry (ورود)' | 'Exit (خروج)';
+  status: 'Draft' | 'Registered' | 'Approved for Exit' | 'Exited' | 'Cancelled';
+  registeredAt: string;
+  exitApprovedAt?: string;
+  exitedAt?: string;
+  vehiclePlateNumber: string;
+  vehicleType: string;
+  driverName: string;
+  driverNationalId: string;
+  driverPhone: string;
+  cargoOwnerName: string;
+  cargoOwnerNationalId: string;
+  cargoOwnerPhone: string;
+  cargoType: string;
+  cargoVolume: string;
+  cargoQuality: string;
+  waybillNumber: string;
+  dispatchOrderNumber: string;
+  transportPermitNumber: string;
+  originAddress: string;
+  destinationAddress: string;
+  relatedDocumentId?: string;
+  relatedProformaId?: string;
+  registeredBy: string;
+  approvedBy?: string;
+  notes?: string;
 }
 
 export interface Account {

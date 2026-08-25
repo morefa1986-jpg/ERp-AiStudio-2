@@ -76,12 +76,13 @@ const VALID_SERVER_ROLES = new Set([
   'Laboratory', 'Veterinarian', 'Feed Manager', 'Warehouse Manager', 'Processing Manager',
   'Cold Storage Manager', 'Accountant', 'Sales Manager', 'CRM Operator', 'HR Manager',
   'Media Manager', 'Viewer/Auditor',
+  'Gate Guard', 'Office Automation',
 ]);
 const VALID_STATE_MODULES = new Set([
   'dashboard', 'farm', 'halls', 'ponds', 'feeding', 'biometrics', 'water_quality', 'mortality',
   'treatments', 'transfers', 'hatchery', 'nursery', 'feed_factory', 'warehouse', 'laboratory',
   'processing', 'cold_storage', 'crm', 'sales', 'accounting', 'hr', 'media', 'ai_assistant',
-  'reports', 'documents', 'backup', 'users', 'settings',
+  'reports', 'documents', 'gatehouse', 'backup', 'users', 'settings',
 ]);
 const VALID_STATE_ACTIONS = new Set(['view', 'create', 'edit', 'delete', 'approve', 'export', 'print', 'manage']);
 
@@ -172,6 +173,8 @@ function roleAllowsServer(role: string, module: string, action: string): boolean
     case 'CRM Operator': return ['dashboard', 'crm', 'sales', 'documents', 'processing', 'cold_storage', 'media', 'reports'].includes(module) && operational;
     case 'HR Manager': return ['dashboard', 'hr', 'reports'].includes(module) && operational;
     case 'Media Manager': return ['dashboard', 'media', 'reports'].includes(module) && operational;
+    case 'Gate Guard': return ['dashboard', 'gatehouse', 'documents'].includes(module) && ['view', 'create', 'edit', 'print'].includes(action);
+    case 'Office Automation': return ['dashboard', 'documents', 'gatehouse', 'reports'].includes(module) && operational;
     case 'Viewer/Auditor': return viewLike;
     default: return false;
   }
@@ -230,6 +233,7 @@ const COLLECTION_VIEW_MODULES: Record<string, string[]> = {
   proformas: ['sales'],
   officeDocuments: ['documents', 'sales', 'accounting'],
   officeSettings: ['documents', 'sales', 'accounting'],
+  gatePasses: ['gatehouse', 'documents'],
   accounts: ['accounting'],
   journals: ['accounting'],
   employees: ['hr'],

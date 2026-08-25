@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { getStoredSessionToken, useAuth } from './AuthContext';
 import {
   Account, AttendanceRecord, BackupSnapshot, BiometricSession, BroodstockFish, ColdStoragePallet, Customer,
-  Employee, Equipment, FeedingRecord, FertilizationBatch, FishTransfer, FarmAuditLog, Hall, IncubatorUnit,
+  Employee, Equipment, FeedingRecord, FertilizationBatch, FishTransfer, FarmAuditLog, GatePassRecord, Hall, IncubatorUnit,
   InventoryItem, InventoryTransaction, JournalEntry, LabSample, LarvalBatch, MortalityRecord, NurseryTank,
   OfficeBrandingSettings, OfficeDocument, PayrollRecord, PermissionAction, PermissionModule, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost,
   SturgeonSpecies, TreatmentRecord, WaterQualityLog,
@@ -45,7 +45,7 @@ interface FarmContextType {
   fertilizations: FertilizationBatch[]; incubators: IncubatorUnit[]; larvae: LarvalBatch[]; nurseryTanks: NurseryTank[];
   inventory: InventoryItem[]; inventoryTxs: InventoryTransaction[]; labSamples: LabSample[];
   processingBatches: ProcessingBatch[]; coldStorage: ColdStoragePallet[]; customers: Customer[];
-  proformas: ProformaInvoice[]; officeDocuments: OfficeDocument[]; accounts: Account[]; journals: JournalEntry[]; employees: Employee[];
+  proformas: ProformaInvoice[]; officeDocuments: OfficeDocument[]; gatePasses: GatePassRecord[]; accounts: Account[]; journals: JournalEntry[]; employees: Employee[];
   attendance: AttendanceRecord[]; payrolls: PayrollRecord[]; equipment: Equipment[]; socialPosts: SocialMediaPost[];
   officeSettings: OfficeBrandingSettings[]; auditLogs: FarmAuditLog[]; backups: BackupSnapshot[]; syncStatus: OfflineSyncStatus;
   createHallStructure: (input: HallAdminInput) => { success: boolean; error?: string; id?: string };
@@ -72,6 +72,8 @@ interface FarmContextType {
   addOfficeDocument: (document: Omit<OfficeDocument, 'id' | 'indicatorNumber' | 'registeredAt' | 'createdBy' | 'updatedAt'>) => { success: boolean; error?: string; id?: string };
   updateOfficeDocumentStatus: (id: string, status: OfficeDocument['status'], notes?: string) => { success: boolean; error?: string };
   updateOfficeBranding: (patch: Partial<Omit<OfficeBrandingSettings, 'id' | 'updatedAt' | 'updatedBy'>>) => { success: boolean; error?: string };
+  addGatePass: (record: Omit<GatePassRecord, 'id' | 'passNumber' | 'registeredAt' | 'registeredBy' | 'status'>) => { success: boolean; error?: string; id?: string };
+  updateGatePassStatus: (id: string, status: GatePassRecord['status']) => { success: boolean; error?: string };
   createJournalEntry: (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>) => { success: boolean; error?: string };
   createFxConversionJournalEntry: (entry: FxConversionInput) => { success: boolean; error?: string };
   clockAttendance: (employeeId: string, type: 'in' | 'out', shift: AttendanceRecord['shift']) => void;
@@ -162,6 +164,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [customers, setCustomers] = useState<Customer[]>(() => DEMO_MODE ? INITIAL_CUSTOMERS : EMPTY_ARRAY<Customer>());
   const [proformas, setProformas] = useState<ProformaInvoice[]>(() => DEMO_MODE ? INITIAL_PROFORMAS : EMPTY_ARRAY<ProformaInvoice>());
   const [officeDocuments, setOfficeDocuments] = useState<OfficeDocument[]>(EMPTY_ARRAY);
+  const [gatePasses, setGatePasses] = useState<GatePassRecord[]>(EMPTY_ARRAY);
   const [officeSettings, setOfficeSettings] = useState<OfficeBrandingSettings[]>(() => [{
     id: 'office-branding-default',
     companyNameFa: 'مزرعه تکثیر و پرورش ماهیان خاویاری فتحی',
@@ -196,9 +199,9 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const stateData = useMemo<Record<string, unknown>>(() => ({
     halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers,
     broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples,
-    processingBatches, coldStorage, customers, proformas, officeDocuments, accounts, journals, employees, attendance, payrolls,
+    processingBatches, coldStorage, customers, proformas, officeDocuments, gatePasses, accounts, journals, employees, attendance, payrolls,
     equipment, socialPosts, officeSettings, auditLogs, backups: backups.map(stripBackupData),
-  }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, officeSettings, auditLogs, backups]);
+  }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, gatePasses, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, officeSettings, auditLogs, backups]);
 
   const applyState = (data: Record<string, unknown>, serverAudit: FarmAuditLog[] = []) => {
     const rows = <T,>(key: string): T[] => Array.isArray(data[key]) ? data[key] as T[] : [];
@@ -215,7 +218,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIncubators(rows<IncubatorUnit>('incubators')); setLarvae(rows<LarvalBatch>('larvae')); setNurseryTanks(rows<NurseryTank>('nurseryTanks'));
     setInventory(rows<InventoryItem>('inventory')); setInventoryTxs(rows<InventoryTransaction>('inventoryTxs')); setLabSamples(rows<LabSample>('labSamples'));
     setProcessingBatches(rows<ProcessingBatch>('processingBatches')); setColdStorage(rows<ColdStoragePallet>('coldStorage'));
-    setCustomers(rows<Customer>('customers')); setProformas(rows<ProformaInvoice>('proformas')); setOfficeDocuments(rows<OfficeDocument>('officeDocuments')); if (rows<OfficeBrandingSettings>('officeSettings').length) setOfficeSettings(rows<OfficeBrandingSettings>('officeSettings')); setAccounts(rows<Account>('accounts'));
+    setCustomers(rows<Customer>('customers')); setProformas(rows<ProformaInvoice>('proformas')); setOfficeDocuments(rows<OfficeDocument>('officeDocuments')); setGatePasses(rows<GatePassRecord>('gatePasses')); if (rows<OfficeBrandingSettings>('officeSettings').length) setOfficeSettings(rows<OfficeBrandingSettings>('officeSettings')); setAccounts(rows<Account>('accounts'));
     setJournals(rows<JournalEntry>('journals')); setEmployees(rows<Employee>('employees')); setAttendance(rows<AttendanceRecord>('attendance'));
     setPayrolls(rows<PayrollRecord>('payrolls')); setEquipment(rows<Equipment>('equipment')); setSocialPosts(rows<SocialMediaPost>('socialPosts'));
     const mappedServerAudit = serverAudit.map((log: any): FarmAuditLog => ({
@@ -889,6 +892,46 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true };
   };
 
+  const nextGatePassNumber = (): string => `GP-${new Date().getFullYear()}-${String(gatePasses.length + 1).padStart(5, '0')}`;
+
+  const addGatePass = (record: Omit<GatePassRecord, 'id' | 'passNumber' | 'registeredAt' | 'registeredBy' | 'status'>) => {
+    if (!can('gatehouse', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const required = [record.vehiclePlateNumber, record.vehicleType, record.driverName, record.driverNationalId, record.driverPhone, record.cargoOwnerName, record.cargoOwnerNationalId, record.cargoOwnerPhone, record.cargoType, record.cargoVolume, record.cargoQuality, record.originAddress, record.destinationAddress];
+    if (required.some((value) => !String(value || '').trim())) return { success: false, error: 'GATE_PASS_REQUIRED_FIELDS' };
+    const registeredAt = new Date().toISOString();
+    const pass: GatePassRecord = {
+      ...record,
+      id: nextId('gate'),
+      passNumber: nextGatePassNumber(),
+      registeredAt,
+      status: record.direction === 'Exit (خروج)' ? 'Approved for Exit' : 'Registered',
+      registeredBy: currentUser?.fullName || currentUser?.username || 'System',
+      approvedBy: record.direction === 'Exit (خروج)' ? currentUser?.fullName || currentUser?.username || 'System' : undefined,
+      exitApprovedAt: record.direction === 'Exit (خروج)' ? registeredAt : undefined,
+    };
+    setGatePasses((previous) => [pass, ...previous]);
+    createAuditLog('CREATE', 'GatePassRecord', pass.id, `Gate pass ${pass.passNumber} registered for ${pass.vehiclePlateNumber}`);
+    markLocalChange({ module: 'gatehouse', action: 'create', entity: 'GatePassRecord', entityId: pass.id, referenceId: pass.passNumber });
+    return { success: true, id: pass.id };
+  };
+
+  const updateGatePassStatus = (id: string, status: GatePassRecord['status']) => {
+    if (!can('gatehouse', 'edit')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const row = gatePasses.find((pass) => pass.id === id);
+    if (!row) return { success: false, error: 'GATE_PASS_NOT_FOUND' };
+    const now = new Date().toISOString();
+    setGatePasses((previous) => previous.map((pass) => pass.id === id ? {
+      ...pass,
+      status,
+      exitApprovedAt: status === 'Approved for Exit' ? now : pass.exitApprovedAt,
+      exitedAt: status === 'Exited' ? now : pass.exitedAt,
+      approvedBy: status === 'Approved for Exit' ? currentUser?.fullName || currentUser?.username || 'System' : pass.approvedBy,
+    } : pass));
+    createAuditLog('UPDATE', 'GatePassRecord', id, `Gate pass ${row.passNumber} status changed to ${status}`);
+    markLocalChange({ module: 'gatehouse', action: 'edit', entity: 'GatePassRecord', entityId: id, referenceId: row.passNumber });
+    return { success: true };
+  };
+
   const createJournalEntry = (entry: Omit<JournalEntry, 'id' | 'entryNumber' | 'createdAt' | 'isBalanced'>): { success: boolean; error?: string } => {
     if (!can('accounting', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
     const result = validateAndExecuteJournalEntry(entry, accounts, journals); if (!result.success || !result.newEntry || !result.updatedAccounts) return { success: false, error: result.error }; setAccounts(result.updatedAccounts); setJournals((previous) => [result.newEntry!, ...previous]); createAuditLog('CREATE', 'JournalEntry', result.newEntry.id, `Balanced journal ${result.newEntry.entryNumber} posted`); markLocalChange({ module: 'accounting', action: 'create', entity: 'JournalEntry', entityId: result.newEntry.id, referenceId: result.newEntry.referenceId }); return { success: true };
@@ -917,7 +960,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPayrolls((previous) => [...generated, ...previous.filter((row) => row.payrollMonth !== monthString)]); createAuditLog('CREATE', 'Payroll', monthString, 'Draft payroll generated from recorded attendance'); markLocalChange({ module: 'hr', action: 'create', entity: 'Payroll', entityId: monthString });
   };
 
-  const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
+  const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
   const createBackupSnapshot = (type: BackupSnapshot['type'] = 'Manual Export'): BackupSnapshot => {
     const isPreRestore = type === 'Pre-Restore Safety Snapshot';
     if (!can('backup', 'export') && !(isPreRestore && can('backup', 'approve'))) throw new Error('ACTION_NOT_ALLOWED');
@@ -958,7 +1001,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id }); };
   const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { if (!can('media', 'create')) return; const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange({ module: 'media', action: 'create', entity: 'SocialMediaPost', entityId: newPost.id }); };
 
-  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, createHallStructure, updateHallStructure, createPondStructure, updatePondStructure, createSpeciesDefinition, setSpeciesActive, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, addOfficeDocument, updateOfficeDocumentStatus, updateOfficeBranding, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, createHallStructure, updateHallStructure, createPondStructure, updatePondStructure, createSpeciesDefinition, setSpeciesActive, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, addOfficeDocument, updateOfficeDocumentStatus, updateOfficeBranding, addGatePass, updateGatePassStatus, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 

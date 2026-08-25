@@ -1,8 +1,8 @@
 export const MODULE_VISIBILITY_IDS = [
   'dashboard', 'farmHalls', 'ponds', 'feeding', 'biometrics', 'waterQuality', 'mortality', 'treatments',
   'transfers', 'hatchery', 'nursery', 'feedFactory', 'warehouse', 'laboratory', 'processing', 'coldStorage',
-  'crm', 'sales', 'accounting', 'hr', 'aiAssistant', 'mediaStudio', 'maintenance', 'reports', 'securityAudit',
-  'documents', 'backup', 'platformHub', 'adminSettings',
+  'crm', 'sales', 'accounting', 'hr', 'documents', 'gatehouse', 'aiAssistant', 'mediaStudio', 'maintenance', 'reports', 'securityAudit',
+  'backup', 'platformHub', 'adminSettings',
 ] as const;
 
 export type SharedModuleVisibilityId = typeof MODULE_VISIBILITY_IDS[number];

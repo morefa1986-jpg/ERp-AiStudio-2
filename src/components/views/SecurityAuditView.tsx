@@ -5,7 +5,7 @@ import { useFarm } from '../../context/FarmContext';
 import { useAuth } from '../../context/AuthContext';
 import { LanguageCode, UserRole } from '../../types';
 
-const ROLES: UserRole[] = ['Farm Owner','Farm Manager','Hall Manager','Technician','Hatchery Manager','Laboratory','Veterinarian','Feed Manager','Warehouse Manager','Processing Manager','Cold Storage Manager','Accountant','Sales Manager','CRM Operator','HR Manager','Media Manager','Viewer/Auditor'];
+const ROLES: UserRole[] = ['Farm Owner','Farm Manager','Hall Manager','Technician','Hatchery Manager','Laboratory','Veterinarian','Feed Manager','Warehouse Manager','Processing Manager','Cold Storage Manager','Accountant','Sales Manager','CRM Operator','HR Manager','Media Manager','Gate Guard','Office Automation','Viewer/Auditor'];
 const SCOPE_REQUIRED = new Set<UserRole>(['Hall Manager', 'Technician']);
 const toggleValue = (items: string[], value: string) => items.includes(value) ? items.filter((item) => item !== value) : [...items, value];
 

@@ -38,6 +38,10 @@ export function roleAllows(role: string, module: PermissionModule, action: Permi
       return ['dashboard', 'hr', 'reports'].includes(module) && canOperate;
     case 'Media Manager':
       return ['dashboard', 'media', 'reports'].includes(module) && canOperate;
+    case 'Gate Guard':
+      return ['dashboard', 'gatehouse', 'documents'].includes(module) && ['view', 'create', 'edit', 'print'].includes(action);
+    case 'Office Automation':
+      return ['dashboard', 'documents', 'gatehouse', 'reports'].includes(module) && canOperate;
     case 'Viewer/Auditor':
       return viewLike;
     default:
