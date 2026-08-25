@@ -5,7 +5,6 @@ import fs from 'fs';
 import https from 'https';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
-import { createServer as createViteServer } from 'vite';
 import { DUMMY_PASSWORD_HASH, hashPasswordServer, verifyPasswordServer } from './server/auth';
 import { dahirGatewayStatus, fetchDahirTelemetryServerSide } from './server/dahirGateway';
 import { resolveServerListenConfig } from './server/lanConfig';
@@ -1056,6 +1055,7 @@ app.post('/api/license/verify', requireAuth, (req: AuthenticatedRequest, res) =>
 
 async function start() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
