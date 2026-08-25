@@ -3,33 +3,30 @@ import { useI18n } from '../../i18n';
 import { useFarm } from '../../context/FarmContext';
 import { useAuth } from '../../context/AuthContext';
 import { DynamicTranslatedText } from '../common/DynamicTranslatedText';
+import { PondManualSnapshotModal } from './PondManualSnapshotModal';
 import {
   Fish,
   AlertTriangle,
   Utensils,
-  TrendingUp,
-  Activity,
   Skull,
   ArrowLeftRight,
-  ShieldAlert,
   Play,
   Square,
   Droplets,
   Thermometer,
-  Layers,
   Search,
-  Filter,
-  Plus,
+  ClipboardPen,
 } from 'lucide-react';
 import { Pond } from '../../types';
+import { pondWithManualSnapshot, PondManualSnapshotInput } from '../../types/pondSnapshot';
 
 interface PondsViewProps {
   onSelectNav: (viewId: string) => void;
 }
 
-export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
+export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav: _onSelectNav }) => {
   const { t, formatNumber, formatDate } = useI18n();
-  const { currentUser } = useAuth();
+  const { currentUser, hasPermission } = useAuth();
   const {
     ponds,
     halls,
@@ -38,16 +35,16 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
     calculateRecommendedFeed,
     stopPondFeeding,
     resumePondFeeding,
+    updatePondManualSnapshot,
     recordFeeding,
     recordMortality,
-    recordWaterTest,
     executeAtomicTransfer,
   } = useFarm();
 
   const [selectedHall, setSelectedHall] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Modals state
+  const [snapshotModalPond, setSnapshotModalPond] = useState<Pond | null>(null);
   const [stopModalPond, setStopModalPond] = useState<Pond | null>(null);
   const [stopReason, setStopReason] = useState<Pond['stopFeedingReason']>('Handling');
   const [stopDetails, setStopDetails] = useState<string>('');
@@ -161,9 +158,12 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
     }
   };
 
+  const handleManualSnapshotSave = (pond: Pond, input: PondManualSnapshotInput) => {
+    return updatePondManualSnapshot(pond.id, input);
+  };
+
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
-      {/* Header & Controls */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-black text-white flex items-center gap-2.5">
@@ -171,13 +171,11 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
             {t('pond.digitalTwin')} ({ponds.length} استخر پرورشی)
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            دوقلوی دیجیتال استخرها، مدیریت قطع/وصل تغذیه، ثبت بیومتری، کنترل اکسیژن و انتقال اتمیک ماهی
+            دوقلوی دیجیتال استخرها، ثبت آمار دستی، ترکیب گونه/جنسیت، چیپ، ابعاد، قطع خوراک و عملیات روزانه
           </p>
         </div>
 
-        {/* Filters */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Hall selector */}
           <select
             value={selectedHall}
             onChange={(e) => setSelectedHall(e.target.value)}
@@ -191,7 +189,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
             ))}
           </select>
 
-          {/* Search Box */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
             <input
@@ -205,13 +202,24 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
         </div>
       </div>
 
-      {/* Ponds Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {filteredPonds.map((pond) => {
           const isStopped = pond.feedingStatus === 'STOPPED';
           const isLowDO = pond.dissolvedOxygen < 4.0;
           const sp = species.find((s) => s.id === pond.speciesId);
           const hall = halls.find((h) => h.id === pond.hallId);
+          const manual = pondWithManualSnapshot(pond);
+          const manualGroups = manual.speciesMix || [];
+          const manualMale = manualGroups.reduce((sum, group) => sum + (group.maleCount || 0), 0);
+          const manualFemale = manualGroups.reduce((sum, group) => sum + (group.femaleCount || 0), 0);
+          const manualUnknown = manualGroups.reduce((sum, group) => sum + (group.unknownSexCount || 0), 0);
+          const manualChips = manualGroups.reduce((sum, group) => sum + (group.chipNumbers?.length || 0), 0);
+          const canEditPond = hasPermission('ponds', 'edit', pond.id);
+          const dimensions = manual.pondShape === 'Circular'
+            ? `Ø ${manual.diameterMeters ?? '—'} × ${manual.depthMeters ?? '—'} m`
+            : manual.pondShape === 'Rectangular' || manual.pondShape === 'Raceway'
+              ? `${manual.lengthMeters ?? '—'} × ${manual.widthMeters ?? '—'} × ${manual.depthMeters ?? '—'} m`
+              : '—';
 
           return (
             <div
@@ -224,7 +232,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                   : 'bg-slate-900 border-slate-800 hover:border-slate-700'
               }`}
             >
-              {/* Card Header */}
               <div className="p-4 border-b border-slate-800/80 bg-slate-950/40">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -236,7 +243,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                     </h3>
                   </div>
 
-                  {/* Feeding Status Pill */}
                   <span
                     className={`text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1.5 ${
                       isStopped
@@ -259,14 +265,12 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                 </div>
 
                 <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2">
-                  <span>سالن: <strong className="text-slate-300">{hall?.number || 'H-01'}</strong></span>
-                  <span>گونه: <strong className="text-amber-400">{sp?.faName || 'ثبت نشده'}</strong></span>
+                  <span>سالن: <strong className="text-slate-300">{hall?.number || '—'}</strong></span>
+                  <span>گونه اصلی: <strong className="text-amber-400">{sp?.faName || 'ثبت نشده'}</strong></span>
                 </div>
               </div>
 
-              {/* Digital Twin Metrics Grid */}
               <div className="p-4 space-y-3 flex-1">
-                {/* Stopped Warning Notice */}
                 {isStopped && (
                   <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
                     <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
@@ -289,7 +293,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                 )}
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  {/* Biomass */}
                   <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
                     <span className="text-[11px] text-slate-400 block">{t('pond.biomass')}</span>
                     <span className="text-sm font-black text-white">
@@ -297,7 +300,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                     </span>
                   </div>
 
-                  {/* Fish Count */}
                   <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
                     <span className="text-[11px] text-slate-400 block">{t('pond.count')}</span>
                     <span className="text-sm font-black text-white">
@@ -305,7 +307,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                     </span>
                   </div>
 
-                  {/* Average Weight */}
                   <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
                     <span className="text-[11px] text-slate-400 block">{t('pond.avgWeight')}</span>
                     <span className="text-sm font-black text-amber-400">
@@ -313,7 +314,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                     </span>
                   </div>
 
-                  {/* FCR */}
                   <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50">
                     <span className="text-[11px] text-slate-400 block">{t('pond.fcr')}</span>
                     <span className={`text-sm font-black ${pond.fcr > 1.3 ? 'text-rose-400' : 'text-emerald-400'}`}>
@@ -322,11 +322,10 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                   </div>
                 </div>
 
-                {/* IoT Telemetry Strip */}
-                <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+                <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 flex items-center justify-between text-xs gap-2">
                   <div className="flex items-center gap-1.5">
                     <Droplets className="w-4 h-4 text-cyan-400" />
-                    <span className="text-slate-400 text-[11px]">اکسیژن (DO):</span>
+                    <span className="text-slate-400 text-[11px]">DO:</span>
                     <strong className={`font-bold ${pond.dissolvedOxygen < 4 ? 'text-rose-400' : 'text-cyan-300'}`}>
                       {pond.dissolvedOxygen} mg/L
                     </strong>
@@ -334,7 +333,7 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
 
                   <div className="flex items-center gap-1.5">
                     <Thermometer className="w-4 h-4 text-orange-400" />
-                    <span className="text-slate-400 text-[11px]">دما:</span>
+                    <span className="text-slate-400 text-[11px]">سنسور:</span>
                     <strong className="font-bold text-orange-300">{pond.waterTemperature}°C</strong>
                   </div>
 
@@ -343,14 +342,33 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                     <strong className="text-slate-200">{pond.ph}</strong>
                   </div>
                 </div>
+
+                {manual.lastManualSnapshotAt && (
+                  <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-2.5 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-black text-amber-300 flex items-center gap-1"><ClipboardPen className="w-3.5 h-3.5" /> آخرین آمار دستی</span>
+                      <span className="text-[10px] text-slate-500">{formatDate(manual.lastManualSnapshotAt)}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+                      <span className="text-slate-400">دمای دستی: <strong className="text-orange-200">{manual.manualWaterTemperature ?? '—'}°C</strong></span>
+                      <span className="text-slate-400">گونه‌ها: <strong className="text-white">{manualGroups.length || 1}</strong></span>
+                      <span className="text-slate-400">نر / ماده: <strong className="text-white">{manualMale} / {manualFemale}</strong></span>
+                      <span className="text-slate-400">نامشخص: <strong className="text-white">{manualUnknown}</strong></span>
+                      <span className="text-slate-400">چیپ: <strong className="text-cyan-200">{manualChips}</strong></span>
+                      <span className="text-slate-400">ابعاد: <strong className="text-violet-200">{dimensions}</strong></span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 truncate" title={manual.manualSnapshotNotes}>{manual.manualSnapshotNotes}</div>
+                  </div>
+                )}
               </div>
 
-              {/* Card Action Footer */}
               <div className="p-3 bg-slate-950/80 border-t border-slate-800 flex items-center justify-between gap-2">
-                {/* Stop / Resume Button */}
                 {isStopped ? (
                   <button
-                    onClick={() => resumePondFeeding(pond.id, currentUser?.fullName || 'مدیر مزرعه')}
+                    onClick={() => {
+                      const result = resumePondFeeding(pond.id, currentUser?.fullName || 'مدیر مزرعه');
+                      if (!result.success && result.error) alert(result.error);
+                    }}
                     className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
@@ -370,9 +388,16 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                   </button>
                 )}
 
-                {/* Quick Action Icons */}
                 <div className="flex items-center gap-1">
-                  {/* Quick Feed */}
+                  <button
+                    disabled={!canEditPond}
+                    onClick={() => setSnapshotModalPond(pond)}
+                    title="ثبت آمار دستی استخر"
+                    className="p-2 bg-amber-500/10 hover:bg-amber-500/20 disabled:opacity-30 disabled:cursor-not-allowed text-amber-300 rounded-xl transition-colors cursor-pointer border border-amber-500/30"
+                  >
+                    <ClipboardPen className="w-4 h-4" />
+                  </button>
+
                   <button
                     disabled={calculateRecommendedFeed(pond.id).isLocked}
                     onClick={() => {
@@ -387,7 +412,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                     <Utensils className="w-4 h-4" />
                   </button>
 
-                  {/* Quick Mortality */}
                   <button
                     onClick={() => {
                       setMortalityModalPond(pond);
@@ -400,7 +424,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                     <Skull className="w-4 h-4" />
                   </button>
 
-                  {/* Quick Transfer */}
                   <button
                     onClick={() => {
                       setTransferModalPond(pond);
@@ -420,7 +443,15 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
         })}
       </div>
 
-      {/* MODAL 1: Emergency Feeding Cutoff */}
+      {snapshotModalPond && (
+        <PondManualSnapshotModal
+          pond={snapshotModalPond}
+          species={species}
+          onClose={() => setSnapshotModalPond(null)}
+          onSave={(input) => handleManualSnapshotSave(snapshotModalPond, input)}
+        />
+      )}
+
       {stopModalPond && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
@@ -445,16 +476,17 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                 </label>
                 <select
                   value={stopReason}
-                  onChange={(e) => setStopReason(e.target.value as any)}
+                  onChange={(e) => setStopReason(e.target.value as Pond['stopFeedingReason'])}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-medium focus:border-rose-500"
                 >
-                  <option value="Low Oxygen (افت اکسیژن)">افت شدید اکسیژن (Low Oxygen)</option>
-                  <option value="Treatment (درمان و دارو)">حمام دارویی و درمان (Treatment)</option>
-                  <option value="Handling (سونوگرافی و بیومتری)">سونوگرافی / بیومتری (Handling)</option>
-                  <option value="Fish Transfer (جابجایی ماهی)">جابجایی و سورتینگ (Fish Transfer)</option>
-                  <option value="Low Water Temperature (افت دما)">افت دمای آب (Low Water Temperature)</option>
-                  <option value="Disease Outbreak (بیماری)">مشاهده علائم بیماری (Disease)</option>
-                  <option value="Manual Operator Decision (تصمیم دستی)">تصمیم کارشناس کشیک (Manual Decision)</option>
+                  <option value="Low Oxygen">افت شدید اکسیژن (Low Oxygen)</option>
+                  <option value="Treatment">حمام دارویی و درمان (Treatment)</option>
+                  <option value="Handling">سونوگرافی / بیومتری (Handling)</option>
+                  <option value="Transfer">جابجایی و سورتینگ (Transfer)</option>
+                  <option value="Low Temperature">افت دمای آب (Low Temperature)</option>
+                  <option value="Disease">مشاهده علائم بیماری (Disease)</option>
+                  <option value="Manual Decision">تصمیم کارشناس کشیک (Manual Decision)</option>
+                  <option value="Other">سایر</option>
                 </select>
               </div>
 
@@ -492,7 +524,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
         </div>
       )}
 
-      {/* MODAL 2: Quick Feed Modal */}
       {feedModalPond && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-slate-900 border border-amber-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
@@ -517,6 +548,7 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                 </label>
                 <input
                   type="number"
+                  min="0.001"
                   step="0.1"
                   value={feedAmountKg}
                   onChange={(e) => setFeedAmountKg(Number(e.target.value))}
@@ -558,7 +590,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
         </div>
       )}
 
-      {/* MODAL 3: Quick Mortality Modal */}
       {mortalityModalPond && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
@@ -585,6 +616,7 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                   <input
                     type="number"
                     min="1"
+                    max={mortalityModalPond.fishCount}
                     value={mortalityCount}
                     onChange={(e) => setMortalityCount(Number(e.target.value))}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-white font-bold focus:border-rose-500"
@@ -598,6 +630,8 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
                   </label>
                   <input
                     type="number"
+                    min="0"
+                    max={mortalityModalPond.biomassKg}
                     step="0.1"
                     value={mortalityWeightKg}
                     onChange={(e) => setMortalityWeightKg(Number(e.target.value))}
@@ -640,7 +674,6 @@ export const PondsView: React.FC<PondsViewProps> = ({ onSelectNav }) => {
         </div>
       )}
 
-      {/* MODAL 4: Quick Atomic Transfer Modal */}
       {transferModalPond && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-slate-900 border border-blue-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">

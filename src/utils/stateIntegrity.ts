@@ -3,6 +3,8 @@ import { inventoryQuantityForFeedKg, normalizeFeedAmountToKg } from './feedingEn
 import { saleLineMatchesLot, saleLotMatchesSku, validateSaleFulfillmentConservation } from './salesEngine';
 import { addPondStock, consumePondStock, pondStockLedgerIsConsistent } from './pondStockLedger';
 import { applyBiometryToPondStock, applyMortalityToPondStock } from './pondStockOperations';
+import { validateManualPondSnapshotMutation } from './pondSnapshotValidation';
+import { validateFarmStructureMutation } from './farmStructureValidation';
 
 export const STATE_COLLECTIONS = [
   'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
@@ -17,6 +19,7 @@ const finiteNonNegative = (value: unknown): boolean => typeof value === 'number'
 const collection = (state: State, key: string): any[] => Array.isArray(state[key]) ? state[key] : [];
 
 export const MODULE_COLLECTIONS: Record<string, string[]> = {
+  ponds: ['ponds', 'halls', 'auditLogs'],
   feeding: ['feedingRecords', 'ponds', 'halls', 'inventory', 'inventoryTxs', 'auditLogs'],
   biometrics: ['biometricSessions', 'ponds', 'halls', 'auditLogs'],
   water_quality: ['waterLogs', 'ponds', 'halls', 'auditLogs'],
@@ -35,7 +38,7 @@ export const MODULE_COLLECTIONS: Record<string, string[]> = {
   hr: ['employees', 'attendance', 'payrolls', 'auditLogs'],
   media: ['socialPosts', 'auditLogs'],
   backup: ['backups', 'auditLogs'],
-  settings: ['auditLogs'],
+  settings: ['halls', 'ponds', 'species', 'auditLogs'],
 };
 
 function sameValue(left: unknown, right: unknown): boolean {
@@ -125,7 +128,7 @@ function newRows(previous: State, next: State, key: string): any[] {
 }
 
 const IMMUTABLE_LEDGER_COLLECTIONS = ['feedingRecords', 'waterLogs', 'mortalityRecords', 'transfers', 'processingBatches', 'inventoryTxs', 'biometricSessions', 'journals'];
-const NON_DELETABLE_REGISTERED_COLLECTIONS = [...IMMUTABLE_LEDGER_COLLECTIONS, 'halls', 'ponds', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks', 'inventory', 'accounts'];
+const NON_DELETABLE_REGISTERED_COLLECTIONS = [...IMMUTABLE_LEDGER_COLLECTIONS, 'halls', 'ponds', 'species', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks', 'inventory', 'accounts'];
 
 function modifiedExistingRows(previous: State, next: State, key: string): boolean {
   const previousById = new Map(collection(previous, key).filter((row) => row?.id).map((row) => [row.id, row]));
@@ -180,6 +183,7 @@ function validatePondMutation(previous: State, next: State, operation: { module?
   const changed = collection(next, 'ponds').filter((pond) => pond?.id && (!beforeById.has(pond.id) || !sameValue(beforeById.get(pond.id), pond)));
   if (!changed.length) return { ok: true };
   if (module === 'settings' || module === 'backup') return { ok: true };
+  if (module === 'ponds') return validateManualPondSnapshotMutation(previous, next, operation);
   if (changed.some((pond) => !beforeById.has(pond.id))) return { ok: false, error: 'POND_CREATION_REQUIRES_REGISTERED_WORKFLOW' };
 
   const mutableFields = new Set([
@@ -412,6 +416,10 @@ export function validateStateMutation(previousRaw: unknown, nextRaw: unknown, op
   if (operation.module === 'backup' && operation.action === 'approve') return { ok: true };
   for (const key of IMMUTABLE_LEDGER_COLLECTIONS) { if (modifiedExistingRows(previous, next, key)) return { ok: false, error: `STATE_IMMUTABLE_RECORD_MODIFIED:${key}` }; if (deletedExistingRows(previous, next, key)) return { ok: false, error: `STATE_IMMUTABLE_RECORD_DELETED:${key}` }; }
   for (const key of NON_DELETABLE_REGISTERED_COLLECTIONS) if (deletedExistingRows(previous, next, key)) return { ok: false, error: `STATE_REGISTERED_RECORD_DELETED:${key}` };
+  if (operation.module === 'settings' && operation.action === 'manage') {
+    const structureMutation = validateFarmStructureMutation(previous, next, operation);
+    if (!structureMutation.ok) return structureMutation;
+  }
 
   const pondValidation = validatePondMutation(previous, next, operation); if (!pondValidation.ok) return pondValidation;
   const inventoryValidation = validateInventoryConservation(previous, next); if (!inventoryValidation.ok) return inventoryValidation;

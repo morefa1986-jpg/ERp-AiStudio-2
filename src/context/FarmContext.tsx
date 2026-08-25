@@ -7,6 +7,8 @@ import {
   PayrollRecord, PermissionAction, PermissionModule, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost,
   SturgeonSpecies, TreatmentRecord, WaterQualityLog,
 } from '../types';
+import { manualSnapshotCapacityCubicMeters, PondManualSnapshotInput, PondSpeciesManualGroup } from '../types/pondSnapshot';
+import { FarmSpeciesWithStatus, HallAdminInput, HallAdminPatch, PondAdminPatch, PondStructureAdminInput, SpeciesAdminInput } from '../types/farmStructure';
 import {
   INITIAL_ACCOUNTS, INITIAL_BROODSTOCK, INITIAL_COLD_STORAGE, INITIAL_CUSTOMERS, INITIAL_EQUIPMENT,
   INITIAL_FERTILIZATIONS, INITIAL_HALLS, INITIAL_INCUBATORS, INITIAL_INVENTORY, INITIAL_INVENTORY_TXS,
@@ -46,10 +48,17 @@ interface FarmContextType {
   proformas: ProformaInvoice[]; accounts: Account[]; journals: JournalEntry[]; employees: Employee[];
   attendance: AttendanceRecord[]; payrolls: PayrollRecord[]; equipment: Equipment[]; socialPosts: SocialMediaPost[];
   auditLogs: FarmAuditLog[]; backups: BackupSnapshot[]; syncStatus: OfflineSyncStatus;
+  createHallStructure: (input: HallAdminInput) => { success: boolean; error?: string; id?: string };
+  updateHallStructure: (hallId: string, patch: HallAdminPatch) => { success: boolean; error?: string };
+  createPondStructure: (input: PondStructureAdminInput) => { success: boolean; error?: string; id?: string };
+  updatePondStructure: (pondId: string, patch: PondAdminPatch) => { success: boolean; error?: string };
+  createSpeciesDefinition: (input: SpeciesAdminInput) => { success: boolean; error?: string; id?: string };
+  setSpeciesActive: (speciesId: string, isActive: boolean) => { success: boolean; error?: string };
   calculateRecommendedFeed: (pondId: string) => FeedingRecommendationResult;
   recordFeeding: (record: Omit<FeedingRecord, 'id' | 'timestamp'>) => { success: boolean; error?: string };
   stopPondFeeding: (pondId: string, reason: Pond['stopFeedingReason'], details: string, operator: string) => void;
   resumePondFeeding: (pondId: string, operator: string) => { success: boolean; error?: string };
+  updatePondManualSnapshot: (pondId: string, input: PondManualSnapshotInput) => { success: boolean; error?: string };
   recordMortality: (record: Omit<MortalityRecord, 'id' | 'timestamp'>) => void;
   recordBiometry: (session: Omit<BiometricSession, 'id' | 'averageWeightKg' | 'minWeightKg' | 'maxWeightKg' | 'estimatedBiomassKg' | 'estimatedCount' | 'growthRateKgPerDay' | 'sgr'>) => void;
   recordWaterTest: (test: Omit<WaterQualityLog, 'id' | 'timestamp'>) => void;
@@ -94,6 +103,34 @@ function inventoryStatus(item: InventoryItem, quantity: number): InventoryItem['
 function stripBackupData(snapshot: BackupSnapshot): BackupSnapshot {
   const { data: _data, ...metadata } = snapshot;
   return metadata;
+}
+
+function withHallTotals(currentHalls: Hall[], currentPonds: Pond[]): Hall[] {
+  return currentHalls.map((hall) => {
+    const hallPonds = currentPonds.filter((pond) => pond.hallId === hall.id);
+    return {
+      ...hall,
+      pondCount: hallPonds.length,
+      totalBiomassKg: Number(hallPonds.reduce((sum, pond) => sum + pond.biomassKg, 0).toFixed(2)),
+      totalFishCount: hallPonds.reduce((sum, pond) => sum + pond.fishCount, 0),
+    };
+  });
+}
+
+function structureCapacity(input: PondStructureAdminInput | PondAdminPatch, fallback = 0): number {
+  if (input.pondShape === 'Circular') {
+    const diameter = Number(input.diameterMeters);
+    const depth = Number(input.depthMeters);
+    if (Number.isFinite(diameter) && diameter > 0 && Number.isFinite(depth) && depth > 0) return Number((Math.PI * Math.pow(diameter / 2, 2) * depth).toFixed(2));
+  }
+  if (input.pondShape === 'Rectangular' || input.pondShape === 'Raceway') {
+    const length = Number(input.lengthMeters);
+    const width = Number(input.widthMeters);
+    const depth = Number(input.depthMeters);
+    if (Number.isFinite(length) && length > 0 && Number.isFinite(width) && width > 0 && Number.isFinite(depth) && depth > 0) return Number((length * width * depth).toFixed(2));
+  }
+  const explicit = Number(input.capacityCubicMeters);
+  return Number.isFinite(explicit) && explicit > 0 ? Number(explicit.toFixed(2)) : fallback;
 }
 
 type StateOperation = { module: PermissionModule; action: PermissionAction; entity?: string; entityId?: string; referenceId?: string; transactionId?: string };
@@ -284,11 +321,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [currentUser?.id]);
 
   useEffect(() => {
-    setHalls((previous) => previous.map((hall) => {
-      const hallPonds = ponds.filter((pond) => pond.hallId === hall.id);
-      const next = { ...hall, pondCount: hallPonds.length, totalBiomassKg: Number(hallPonds.reduce((sum, pond) => sum + pond.biomassKg, 0).toFixed(2)), totalFishCount: hallPonds.reduce((sum, pond) => sum + pond.fishCount, 0) };
-      return hall.pondCount === next.pondCount && hall.totalBiomassKg === next.totalBiomassKg && hall.totalFishCount === next.totalFishCount ? hall : next;
-    }));
+    setHalls((previous) => withHallTotals(previous, ponds));
   }, [ponds]);
 
   const can = (module: PermissionModule, action: PermissionAction, scopeId?: string): boolean => stateReady && hasPermission(module, action, scopeId);
@@ -303,6 +336,147 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!currentUser) return;
     const log: FarmAuditLog = { id: nextId('audit'), timestamp: new Date().toISOString(), userId: currentUser.id, userName: currentUser.fullName, userRole: currentUser.role, action, entity, entityId, details, beforeState, afterState, transactionId };
     setAuditLogs((previous) => [log, ...previous].slice(0, 1000));
+  };
+
+  const createHallStructure = (input: HallAdminInput): { success: boolean; error?: string; id?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const number = input.number.trim();
+    const name = input.name.trim();
+    const description = input.description.trim();
+    if (!number || !name) return { success: false, error: 'HALL_IDENTITY_REQUIRED' };
+    if (halls.some((hall) => hall.number.trim().toLowerCase() === number.toLowerCase())) return { success: false, error: 'HALL_NUMBER_DUPLICATE' };
+    const hall: Hall = { id: nextId('hall'), number, name, description, pondCount: 0, totalBiomassKg: 0, totalFishCount: 0, isActive: true };
+    setHalls((previous) => [...previous, hall]);
+    createAuditLog('CREATE', 'Hall', hall.id, `Farm hall ${hall.number} created`, undefined, JSON.stringify(hall));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Hall', entityId: hall.id, referenceId: hall.number });
+    return { success: true, id: hall.id };
+  };
+
+  const updateHallStructure = (hallId: string, patch: HallAdminPatch): { success: boolean; error?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const hall = halls.find((item) => item.id === hallId);
+    if (!hall) return { success: false, error: 'HALL_NOT_FOUND' };
+    if (patch.isActive === false && ponds.some((pond) => pond.hallId === hallId && pond.fishCount > 0)) return { success: false, error: 'HALL_WITH_FISH_CANNOT_BE_DEACTIVATED' };
+    const number = patch.number?.trim();
+    if (number && halls.some((item) => item.id !== hallId && item.number.trim().toLowerCase() === number.toLowerCase())) return { success: false, error: 'HALL_NUMBER_DUPLICATE' };
+    const updated: Hall = {
+      ...hall,
+      ...(number !== undefined ? { number } : {}),
+      ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+      ...(patch.description !== undefined ? { description: patch.description.trim() } : {}),
+      ...(patch.managerId !== undefined ? { managerId: patch.managerId || undefined } : {}),
+      ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
+    };
+    if (!updated.number || !updated.name) return { success: false, error: 'HALL_IDENTITY_REQUIRED' };
+    setHalls((previous) => previous.map((item) => item.id === hallId ? updated : item));
+    createAuditLog('UPDATE', 'Hall', hallId, `Farm hall ${hall.number} updated`, JSON.stringify(hall), JSON.stringify(updated));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Hall', entityId: hallId, referenceId: updated.number });
+    return { success: true };
+  };
+
+  const createPondStructure = (input: PondStructureAdminInput): { success: boolean; error?: string; id?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const hall = halls.find((item) => item.id === input.hallId && item.isActive);
+    const speciesDefinition = species.find((item) => item.id === input.speciesId) as FarmSpeciesWithStatus | undefined;
+    if (!hall) return { success: false, error: 'ACTIVE_HALL_REQUIRED' };
+    if (!speciesDefinition || speciesDefinition.isActive === false) return { success: false, error: 'ACTIVE_SPECIES_REQUIRED' };
+    const number = input.number.trim();
+    const name = input.name.trim();
+    if (!number || !name) return { success: false, error: 'POND_IDENTITY_REQUIRED' };
+    if (ponds.some((pond) => pond.number.trim().toLowerCase() === number.toLowerCase())) return { success: false, error: 'POND_NUMBER_DUPLICATE' };
+    const capacityCubicMeters = structureCapacity(input);
+    if (!Number.isFinite(capacityCubicMeters) || capacityCubicMeters <= 0) return { success: false, error: 'POND_DIMENSIONS_OR_CAPACITY_REQUIRED' };
+    const timestamp = new Date().toISOString();
+    const pond = {
+      id: nextId('pond'), number, name, hallId: hall.id, capacityCubicMeters, fishCount: 0, speciesId: speciesDefinition.id,
+      biomassKg: 0, averageWeightKg: 0, lastFeedingKg: 0, lastFeedingTime: '', feedingStatus: 'STOPPED' as const,
+      stopFeedingReason: 'Manual Decision' as const, stopFeedingDetails: 'New pond awaiting initial stock snapshot and validated telemetry',
+      stopFeedingTimestamp: timestamp, stopFeedingUser: currentUser?.fullName || 'Admin', fcr: speciesDefinition.standardFCR,
+      dailyMortalityCount: 0, waterTemperature: 0, dissolvedOxygen: 0, ph: 7, sensorQuality: 'OFFLINE' as const,
+      lastBiometryDate: '', criticalAlerts: ['Initial stock snapshot required'], notes: input.notes?.trim(),
+      pondShape: input.pondShape, lengthMeters: input.lengthMeters, widthMeters: input.widthMeters,
+      depthMeters: input.depthMeters, diameterMeters: input.diameterMeters,
+    } as Pond;
+    const nextPonds = [...ponds, pond];
+    setPonds(nextPonds);
+    setHalls((previous) => withHallTotals(previous, nextPonds));
+    createAuditLog('CREATE', 'Pond', pond.id, `Pond ${pond.number} created in hall ${hall.number}`, undefined, JSON.stringify(pond));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Pond', entityId: pond.id, referenceId: pond.number });
+    return { success: true, id: pond.id };
+  };
+
+  const updatePondStructure = (pondId: string, patch: PondAdminPatch): { success: boolean; error?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const pond = ponds.find((item) => item.id === pondId);
+    if (!pond) return { success: false, error: 'POND_NOT_FOUND' };
+    const nextHallId = patch.hallId ?? pond.hallId;
+    const nextSpeciesId = patch.speciesId ?? pond.speciesId;
+    if (pond.fishCount > 0 && (nextHallId !== pond.hallId || nextSpeciesId !== pond.speciesId)) return { success: false, error: 'STOCKED_POND_REASSIGNMENT_FORBIDDEN' };
+    const hall = halls.find((item) => item.id === nextHallId && item.isActive);
+    const speciesDefinition = species.find((item) => item.id === nextSpeciesId) as FarmSpeciesWithStatus | undefined;
+    if (!hall) return { success: false, error: 'ACTIVE_HALL_REQUIRED' };
+    if (!speciesDefinition || speciesDefinition.isActive === false) return { success: false, error: 'ACTIVE_SPECIES_REQUIRED' };
+    const number = patch.number?.trim() ?? pond.number;
+    const name = patch.name?.trim() ?? pond.name;
+    if (!number || !name) return { success: false, error: 'POND_IDENTITY_REQUIRED' };
+    if (ponds.some((item) => item.id !== pondId && item.number.trim().toLowerCase() === number.toLowerCase())) return { success: false, error: 'POND_NUMBER_DUPLICATE' };
+    const current = pond as Pond & PondAdminPatch;
+    const mergedStructure: PondAdminPatch = {
+      pondShape: patch.pondShape ?? current.pondShape ?? 'Other',
+      capacityCubicMeters: patch.capacityCubicMeters ?? pond.capacityCubicMeters,
+      lengthMeters: patch.lengthMeters ?? current.lengthMeters,
+      widthMeters: patch.widthMeters ?? current.widthMeters,
+      depthMeters: patch.depthMeters ?? current.depthMeters,
+      diameterMeters: patch.diameterMeters ?? current.diameterMeters,
+    };
+    const capacityCubicMeters = structureCapacity(mergedStructure, pond.capacityCubicMeters);
+    if (!Number.isFinite(capacityCubicMeters) || capacityCubicMeters <= 0) return { success: false, error: 'POND_DIMENSIONS_OR_CAPACITY_REQUIRED' };
+    const updated = {
+      ...pond, number, name, hallId: nextHallId, speciesId: nextSpeciesId, capacityCubicMeters,
+      notes: patch.notes !== undefined ? patch.notes.trim() : pond.notes,
+      pondShape: mergedStructure.pondShape,
+      lengthMeters: mergedStructure.lengthMeters,
+      widthMeters: mergedStructure.widthMeters,
+      depthMeters: mergedStructure.depthMeters,
+      diameterMeters: mergedStructure.diameterMeters,
+    } as Pond;
+    const nextPonds = ponds.map((item) => item.id === pondId ? updated : item);
+    setPonds(nextPonds);
+    setHalls((previous) => withHallTotals(previous, nextPonds));
+    createAuditLog('UPDATE', 'Pond', pondId, `Pond structure ${pond.number} updated`, JSON.stringify(pond), JSON.stringify(updated));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Pond', entityId: pondId, referenceId: updated.number });
+    return { success: true };
+  };
+
+  const createSpeciesDefinition = (input: SpeciesAdminInput): { success: boolean; error?: string; id?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const faName = input.faName.trim();
+    const enName = input.enName.trim();
+    const scientificName = input.scientificName.trim();
+    if (!faName || !enName || !scientificName) return { success: false, error: 'SPECIES_IDENTITY_REQUIRED' };
+    if (species.some((item) => item.scientificName.trim().toLowerCase() === scientificName.toLowerCase())) return { success: false, error: 'SPECIES_SCIENTIFIC_NAME_DUPLICATE' };
+    const numeric = [input.optimumTempMin, input.optimumTempMax, input.optimumDOMin, input.optimumpHMin, input.optimumpHMax, input.standardFCR, input.feedingProfileCoeff, input.caviarMaturityYears];
+    if (numeric.some((value) => !Number.isFinite(value) || value < 0) || input.optimumTempMin >= input.optimumTempMax || input.optimumpHMin >= input.optimumpHMax || input.optimumDOMin <= 0 || input.standardFCR <= 0 || input.feedingProfileCoeff <= 0) return { success: false, error: 'SPECIES_LIMITS_INVALID' };
+    const definition: FarmSpeciesWithStatus = {
+      ...input, id: nextId('species'), faName, enName, scientificName,
+      origin: input.origin.trim(), geneticLine: input.geneticLine.trim(), description: input.description.trim(), isActive: input.isActive !== false,
+    };
+    setSpecies((previous) => [...previous, definition]);
+    createAuditLog('CREATE', 'Species', definition.id, `Species ${definition.scientificName} created`, undefined, JSON.stringify(definition));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Species', entityId: definition.id, referenceId: definition.scientificName });
+    return { success: true, id: definition.id };
+  };
+
+  const setSpeciesActive = (speciesId: string, isActive: boolean): { success: boolean; error?: string } => {
+    if (!can('settings', 'manage')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const definition = species.find((item) => item.id === speciesId) as FarmSpeciesWithStatus | undefined;
+    if (!definition) return { success: false, error: 'SPECIES_NOT_FOUND' };
+    if (!isActive && ponds.some((pond) => pond.speciesId === speciesId && pond.fishCount > 0)) return { success: false, error: 'SPECIES_IN_USE_CANNOT_BE_DEACTIVATED' };
+    const updated = { ...definition, isActive } as SturgeonSpecies;
+    setSpecies((previous) => previous.map((item) => item.id === speciesId ? updated : item));
+    createAuditLog('UPDATE', 'Species', speciesId, `Species ${definition.scientificName} ${isActive ? 'activated' : 'deactivated'}`, JSON.stringify(definition), JSON.stringify(updated));
+    markLocalChange({ module: 'settings', action: 'manage', entity: 'Species', entityId: speciesId, referenceId: definition.scientificName });
+    return { success: true };
   };
 
   const latestWaterLog = (pondId: string): WaterQualityLog | undefined => waterLogs.filter((log) => log.pondId === pondId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
@@ -360,6 +534,71 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (safety.isLocked) return { success: false, error: safety.lockReason || 'WATER_UNSAFE' };
     setPonds((previous) => previous.map((item) => item.id === pondId ? { ...item, feedingStatus: 'ACTIVE', stopFeedingReason: undefined, stopFeedingDetails: undefined, stopFeedingTimestamp: undefined, stopFeedingUser: currentUser?.fullName || operator } : item));
     createAuditLog('APPROVE', 'Pond', pondId, 'Feeding resumed after safety validation'); markLocalChange({ module: 'feeding', action: 'approve', entity: 'Pond', entityId: pondId }); return { success: true };
+  };
+
+  const updatePondManualSnapshot = (pondId: string, input: PondManualSnapshotInput): { success: boolean; error?: string } => {
+    if (!can('ponds', 'edit', pondId)) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const pond = ponds.find((item) => item.id === pondId);
+    if (!pond) return { success: false, error: 'POND_NOT_FOUND' };
+    if (!input || !Array.isArray(input.speciesMix)) return { success: false, error: 'POND_SPECIES_MIX_REQUIRED' };
+    if (typeof input.manualWaterTemperature !== 'number' || !Number.isFinite(input.manualWaterTemperature) || input.manualWaterTemperature < 0 || input.manualWaterTemperature > 40) return { success: false, error: 'POND_MANUAL_TEMPERATURE_INVALID' };
+    if (typeof input.notes !== 'string' || input.notes.trim().length < 3) return { success: false, error: 'POND_MANUAL_REASON_REQUIRED' };
+
+    const knownSpecies = new Set(species.map((item) => item.id));
+    const speciesIds = new Set<string>();
+    const chipNumbers = new Set<string>();
+    const normalizedGroups: PondSpeciesManualGroup[] = [];
+    for (const raw of input.speciesMix) {
+      if (!raw || !knownSpecies.has(raw.speciesId) || speciesIds.has(raw.speciesId)) return { success: false, error: 'POND_SPECIES_GROUP_INVALID' };
+      if (!Number.isInteger(raw.count) || raw.count < 0 || !Number.isFinite(raw.avgWeightKg) || raw.avgWeightKg < 0) return { success: false, error: 'POND_SPECIES_GROUP_BIOMETRY_INVALID' };
+      if (![raw.maleCount, raw.femaleCount, raw.unknownSexCount].every((value) => Number.isInteger(value) && value >= 0) || raw.maleCount + raw.femaleCount + raw.unknownSexCount !== raw.count) return { success: false, error: 'POND_SEX_TOTAL_MISMATCH' };
+      const chips = Array.from(new Set((raw.chipNumbers || []).map((value) => value.trim()).filter(Boolean)));
+      if (chips.length > raw.count) return { success: false, error: 'POND_CHIP_COUNT_INVALID' };
+      if (chips.some((chip) => chipNumbers.has(chip))) return { success: false, error: 'POND_CHIP_DUPLICATE_OR_INVALID' };
+      chips.forEach((chip) => chipNumbers.add(chip));
+      speciesIds.add(raw.speciesId);
+      normalizedGroups.push({ ...raw, avgWeightKg: Number(raw.avgWeightKg.toFixed(3)), chipNumbers: chips });
+    }
+
+    const totalFishCount = normalizedGroups.reduce((sum, group) => sum + group.count, 0);
+    if (totalFishCount > 0 && normalizedGroups.length === 0) return { success: false, error: 'POND_SPECIES_MIX_REQUIRED' };
+    const biomassKg = Number(normalizedGroups.reduce((sum, group) => sum + group.count * group.avgWeightKg, 0).toFixed(2));
+    const averageWeightKg = totalFishCount > 0 ? Number((biomassKg / totalFishCount).toFixed(3)) : 0;
+    const capacityCubicMeters = manualSnapshotCapacityCubicMeters(input, pond.capacityCubicMeters);
+    const timestamp = new Date().toISOString();
+    const operator = currentUser?.fullName || currentUser?.username || 'operator';
+    const stopFeeding = input.stopFeeding && pond.feedingStatus === 'ACTIVE';
+
+    const updatedPond: Pond = {
+      ...pond,
+      fishCount: totalFishCount,
+      biomassKg,
+      averageWeightKg,
+      speciesId: normalizedGroups[0]?.speciesId || pond.speciesId,
+      speciesMix: normalizedGroups,
+      capacityCubicMeters,
+      ...((input as any).pondShape !== undefined ? { pondShape: input.pondShape } : {}),
+      ...(input.lengthMeters !== undefined ? { lengthMeters: input.lengthMeters } : {}),
+      ...(input.widthMeters !== undefined ? { widthMeters: input.widthMeters } : {}),
+      ...(input.depthMeters !== undefined ? { depthMeters: input.depthMeters } : {}),
+      ...(input.diameterMeters !== undefined ? { diameterMeters: input.diameterMeters } : {}),
+      manualWaterTemperature: Number(input.manualWaterTemperature.toFixed(2)),
+      lastManualSnapshotAt: timestamp,
+      lastManualSnapshotBy: operator,
+      manualSnapshotNotes: input.notes.trim(),
+      ...(stopFeeding ? {
+        feedingStatus: 'STOPPED' as const,
+        stopFeedingReason: 'Manual Decision' as const,
+        stopFeedingDetails: `Manual pond snapshot: ${input.notes.trim()}`,
+        stopFeedingTimestamp: timestamp,
+        stopFeedingUser: operator,
+      } : {}),
+    } as Pond;
+
+    setPonds((previous) => previous.map((item) => item.id === pondId ? updatedPond : item));
+    createAuditLog('UPDATE', 'Pond', pondId, `Manual snapshot: ${totalFishCount} fish, ${biomassKg} kg biomass${stopFeeding ? ', feeding stopped' : ''}`, JSON.stringify(pond), JSON.stringify(updatedPond), `snapshot_${pondId}_${timestamp}`);
+    markLocalChange({ module: 'ponds', action: 'edit', entity: 'Pond', entityId: pondId, referenceId: `snapshot_${timestamp}`, transactionId: `snapshot_${pondId}_${timestamp}` });
+    return { success: true };
   };
 
   const recordMortality = (record: Omit<MortalityRecord, 'id' | 'timestamp'>) => {
@@ -615,7 +854,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id }); };
   const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { if (!can('media', 'create')) return; const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange({ module: 'media', action: 'create', entity: 'SocialMediaPost', entityId: newPost.id }); };
 
-  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, createHallStructure, updateHallStructure, createPondStructure, updatePondStructure, createSpeciesDefinition, setSpeciesActive, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 
