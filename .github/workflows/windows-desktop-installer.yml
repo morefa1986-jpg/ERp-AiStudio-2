@@ -88,6 +88,7 @@ jobs:
           New-Item -ItemType Directory -Force 'release/windows/tools' | Out-Null
           Copy-Item 'desktop/README-WINDOWS-fa.md' 'release/windows/README-WINDOWS-fa.md' -Force
           Copy-Item 'desktop/tools/Remove-FathiAquaSuperERP-UserData.ps1' 'release/windows/tools/Remove-FathiAquaSuperERP-UserData.ps1' -Force
+          Copy-Item 'desktop/tools/Set-FathiAquaSuperERP-Admin.ps1' 'release/windows/tools/Set-FathiAquaSuperERP-Admin.ps1' -Force
           Copy-Item 'docs/mobile-webapp-fa.md' 'release/windows/docs/mobile-webapp-fa.md' -Force
           Copy-Item 'docs/modules-fa.md' 'release/windows/docs/modules-fa.md' -Force
 
@@ -103,5 +104,6 @@ jobs:
             release/windows/SHA256SUMS.txt
             release/windows/README-WINDOWS-fa.md
             release/windows/tools/Remove-FathiAquaSuperERP-UserData.ps1
+            release/windows/tools/Set-FathiAquaSuperERP-Admin.ps1
             release/windows/docs/mobile-webapp-fa.md
             release/windows/docs/modules-fa.md
