@@ -2,7 +2,7 @@ import { getStoredSessionToken } from '../context/AuthContext';
 import { FileAttachment } from '../types';
 import { nextId } from '../utils/id';
 
-export type ClientFileCategory = 'chat' | 'mortality' | 'laboratory';
+export type ClientFileCategory = 'chat' | 'mortality' | 'laboratory' | 'crm';
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

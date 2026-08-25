@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { getStoredSessionToken, useAuth } from './AuthContext';
 import {
   Account, AttendanceRecord, BackupSnapshot, BiometricSession, BroodstockFish, ColdStoragePallet, Customer,
-  Employee, Equipment, FeedingRecord, FertilizationBatch, FishTransfer, FarmAuditLog, GatePassRecord, Hall, IncubatorUnit,
+  CrmActivity, CrmReminder, Employee, Equipment, FeedingRecord, FertilizationBatch, FishTransfer, FarmAuditLog, GatePassRecord, Hall, IncubatorUnit,
   InternalChatMessage, InternalChatThread, InventoryItem, InventoryTransaction, JournalEntry, LabSample, LarvalBatch, MortalityRecord, NurseryTank,
   OfficeBrandingSettings, OfficeDocument, PayrollRecord, PermissionAction, PermissionModule, Pond, ProcessingBatch, ProformaInvoice, SocialMediaPost,
   SturgeonSpecies, TreatmentRecord, WaterQualityLog,
@@ -44,7 +44,7 @@ interface FarmContextType {
   treatments: TreatmentRecord[]; transfers: FishTransfer[]; broodstock: BroodstockFish[];
   fertilizations: FertilizationBatch[]; incubators: IncubatorUnit[]; larvae: LarvalBatch[]; nurseryTanks: NurseryTank[];
   inventory: InventoryItem[]; inventoryTxs: InventoryTransaction[]; labSamples: LabSample[];
-  processingBatches: ProcessingBatch[]; coldStorage: ColdStoragePallet[]; customers: Customer[];
+  processingBatches: ProcessingBatch[]; coldStorage: ColdStoragePallet[]; customers: Customer[]; crmActivities: CrmActivity[]; crmReminders: CrmReminder[];
   proformas: ProformaInvoice[]; officeDocuments: OfficeDocument[]; gatePasses: GatePassRecord[]; accounts: Account[]; journals: JournalEntry[]; employees: Employee[];
   attendance: AttendanceRecord[]; payrolls: PayrollRecord[]; equipment: Equipment[]; socialPosts: SocialMediaPost[];
   officeSettings: OfficeBrandingSettings[]; auditLogs: FarmAuditLog[]; backups: BackupSnapshot[]; syncStatus: OfflineSyncStatus;
@@ -88,6 +88,9 @@ interface FarmContextType {
   addBroodstock: (fish: Omit<BroodstockFish, 'id'>) => void;
   recordFertilization: (fert: Omit<FertilizationBatch, 'id' | 'fertilizationTimestamp' | 'status'>) => void;
   addCustomer: (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => void;
+  updateCustomerProfile: (id: string, patch: Partial<Omit<Customer, 'id' | 'createdAt'>>) => { success: boolean; error?: string };
+  addCrmActivity: (activity: Omit<CrmActivity, 'id' | 'customerName' | 'createdAt' | 'createdBy'>) => { success: boolean; error?: string; id?: string };
+  updateCrmReminderStatus: (id: string, status: CrmReminder['status']) => { success: boolean; error?: string };
   addSocialPost: (post: Omit<SocialMediaPost, 'id' | 'status'>) => void;
 }
 
@@ -165,6 +168,8 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [processingBatches, setProcessingBatches] = useState<ProcessingBatch[]>(() => DEMO_MODE ? INITIAL_PROCESSING_BATCHES : EMPTY_ARRAY<ProcessingBatch>());
   const [coldStorage, setColdStorage] = useState<ColdStoragePallet[]>(() => DEMO_MODE ? INITIAL_COLD_STORAGE : EMPTY_ARRAY<ColdStoragePallet>());
   const [customers, setCustomers] = useState<Customer[]>(() => DEMO_MODE ? INITIAL_CUSTOMERS : EMPTY_ARRAY<Customer>());
+  const [crmActivities, setCrmActivities] = useState<CrmActivity[]>(EMPTY_ARRAY);
+  const [crmReminders, setCrmReminders] = useState<CrmReminder[]>(EMPTY_ARRAY);
   const [proformas, setProformas] = useState<ProformaInvoice[]>(() => DEMO_MODE ? INITIAL_PROFORMAS : EMPTY_ARRAY<ProformaInvoice>());
   const [officeDocuments, setOfficeDocuments] = useState<OfficeDocument[]>(EMPTY_ARRAY);
   const [gatePasses, setGatePasses] = useState<GatePassRecord[]>(EMPTY_ARRAY);
@@ -204,9 +209,9 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const stateData = useMemo<Record<string, unknown>>(() => ({
     halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers,
     broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples,
-    processingBatches, coldStorage, customers, proformas, officeDocuments, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls,
+    processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls,
     equipment, socialPosts, officeSettings, auditLogs, backups: backups.map(stripBackupData),
-  }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, officeSettings, auditLogs, backups]);
+  }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, officeSettings, auditLogs, backups]);
 
   const applyState = (data: Record<string, unknown>, serverAudit: FarmAuditLog[] = []) => {
     const rows = <T,>(key: string): T[] => Array.isArray(data[key]) ? data[key] as T[] : [];
@@ -223,7 +228,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIncubators(rows<IncubatorUnit>('incubators')); setLarvae(rows<LarvalBatch>('larvae')); setNurseryTanks(rows<NurseryTank>('nurseryTanks'));
     setInventory(rows<InventoryItem>('inventory')); setInventoryTxs(rows<InventoryTransaction>('inventoryTxs')); setLabSamples(rows<LabSample>('labSamples'));
     setProcessingBatches(rows<ProcessingBatch>('processingBatches')); setColdStorage(rows<ColdStoragePallet>('coldStorage'));
-    setCustomers(rows<Customer>('customers')); setProformas(rows<ProformaInvoice>('proformas')); setOfficeDocuments(rows<OfficeDocument>('officeDocuments')); setGatePasses(rows<GatePassRecord>('gatePasses')); setChatThreads(rows<InternalChatThread>('chatThreads')); setChatMessages(rows<InternalChatMessage>('chatMessages')); if (rows<OfficeBrandingSettings>('officeSettings').length) setOfficeSettings(rows<OfficeBrandingSettings>('officeSettings')); setAccounts(rows<Account>('accounts'));
+    setCustomers(rows<Customer>('customers')); setCrmActivities(rows<CrmActivity>('crmActivities')); setCrmReminders(rows<CrmReminder>('crmReminders')); setProformas(rows<ProformaInvoice>('proformas')); setOfficeDocuments(rows<OfficeDocument>('officeDocuments')); setGatePasses(rows<GatePassRecord>('gatePasses')); setChatThreads(rows<InternalChatThread>('chatThreads')); setChatMessages(rows<InternalChatMessage>('chatMessages')); if (rows<OfficeBrandingSettings>('officeSettings').length) setOfficeSettings(rows<OfficeBrandingSettings>('officeSettings')); setAccounts(rows<Account>('accounts'));
     setJournals(rows<JournalEntry>('journals')); setEmployees(rows<Employee>('employees')); setAttendance(rows<AttendanceRecord>('attendance'));
     setPayrolls(rows<PayrollRecord>('payrolls')); setEquipment(rows<Equipment>('equipment')); setSocialPosts(rows<SocialMediaPost>('socialPosts'));
     const mappedServerAudit = serverAudit.map((log: any): FarmAuditLog => ({
@@ -1013,7 +1018,7 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPayrolls((previous) => [...generated, ...previous.filter((row) => row.payrollMonth !== monthString)]); createAuditLog('CREATE', 'Payroll', monthString, 'Draft payroll generated from recorded attendance'); markLocalChange({ module: 'hr', action: 'create', entity: 'Payroll', entityId: monthString });
   };
 
-  const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
+  const buildBackupData = (): Record<string, unknown> => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs });
   const createBackupSnapshot = (type: BackupSnapshot['type'] = 'Manual Export'): BackupSnapshot => {
     const isPreRestore = type === 'Pre-Restore Safety Snapshot';
     if (!can('backup', 'export') && !(isPreRestore && can('backup', 'approve'))) throw new Error('ACTION_NOT_ALLOWED');
@@ -1051,10 +1056,52 @@ export const FarmProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const addBroodstock = (fish: Omit<BroodstockFish, 'id'>) => { if (!can('hatchery', 'create') || !fish.chipNumber.trim() || broodstock.some((row) => row.chipNumber === fish.chipNumber || row.plateNumber === fish.plateNumber) || !Number.isFinite(fish.weightKg) || fish.weightKg <= 0) return; const newFish: BroodstockFish = { ...fish, id: nextId('brood') }; setBroodstock((previous) => [newFish, ...previous]); createAuditLog('CREATE', 'Broodstock', newFish.id, `Broodstock ${fish.chipNumber} registered`); markLocalChange({ module: 'hatchery', action: 'create', entity: 'Broodstock', entityId: newFish.id }); };
   const recordFertilization = (fert: Omit<FertilizationBatch, 'id' | 'fertilizationTimestamp' | 'status'>) => { if (!can('hatchery', 'create')) return; const parentsExist = fert.femaleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Female')) && fert.maleIds.every((id) => broodstock.some((fish) => fish.id === id && fish.sex === 'Male')); if (!parentsExist || !Number.isFinite(fert.fertilizationRatePercent) || fert.fertilizationRatePercent < 0 || fert.fertilizationRatePercent > 100) return; const newBatch: FertilizationBatch = { ...fert, id: nextId('fert'), fertilizationTimestamp: new Date().toISOString(), status: 'Incubating' }; setFertilizations((previous) => [newBatch, ...previous]); createAuditLog('CREATE', 'FertilizationBatch', newBatch.id, `Fertilization ${fert.batchCode} registered`); markLocalChange({ module: 'hatchery', action: 'create', entity: 'FertilizationBatch', entityId: newBatch.id }); };
-  const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => { if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return; const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0 }; setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id }); };
+  const addCustomer = (cust: Omit<Customer, 'id' | 'createdAt' | 'totalOrdersCount' | 'totalSpent' | 'outstandingBalance'>) => {
+    if (!can('crm', 'create') || !cust.name.trim() || !cust.companyName.trim() || !cust.country.trim() || !cust.city.trim() || !cust.currency.trim() || (cust.email && customers.some((row) => row.email.toLowerCase() === cust.email.toLowerCase()))) return;
+    const customer: Customer = { ...cust, id: nextId('cust'), createdAt: new Date().toISOString(), totalOrdersCount: 0, totalSpent: 0, outstandingBalance: 0, tags: (cust.tags || []).map((tag) => tag.trim()).filter(Boolean), score: Math.max(0, Math.min(100, Number(cust.score) || 0)), attachments: cust.attachments || [] };
+    setCustomers((previous) => [customer, ...previous]); createAuditLog('CREATE', 'Customer', customer.id, `Customer ${customer.name} created`); markLocalChange({ module: 'crm', action: 'create', entity: 'Customer', entityId: customer.id });
+  };
+  const updateCustomerProfile = (id: string, patch: Partial<Omit<Customer, 'id' | 'createdAt'>>) => {
+    if (!can('crm', 'edit')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const customer = customers.find((row) => row.id === id);
+    if (!customer) return { success: false, error: 'CUSTOMER_NOT_FOUND' };
+    const cleanPatch: Partial<Customer> = { ...patch };
+    if (patch.tags) cleanPatch.tags = patch.tags.map((tag) => tag.trim()).filter(Boolean);
+    if (patch.score !== undefined) cleanPatch.score = Math.max(0, Math.min(100, Number(patch.score) || 0));
+    setCustomers((previous) => previous.map((row) => row.id === id ? { ...row, ...cleanPatch } : row));
+    createAuditLog('UPDATE', 'Customer', id, `Customer ${customer.name} profile updated`);
+    markLocalChange({ module: 'crm', action: 'edit', entity: 'Customer', entityId: id });
+    return { success: true };
+  };
+  const addCrmActivity = (activity: Omit<CrmActivity, 'id' | 'customerName' | 'createdAt' | 'createdBy'>) => {
+    if (!can('crm', 'create')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const customer = customers.find((row) => row.id === activity.customerId);
+    if (!customer || !activity.subject.trim()) return { success: false, error: 'CRM_ACTIVITY_REQUIRED_FIELDS' };
+    const now = new Date().toISOString();
+    const row: CrmActivity = { ...activity, id: nextId('crmact'), customerName: customer.name, subject: activity.subject.trim(), details: activity.details.trim(), attachments: activity.attachments || [], createdAt: now, createdBy: currentUser?.fullName || currentUser?.username || 'System' };
+    setCrmActivities((previous) => [row, ...previous]);
+    setCustomers((previous) => previous.map((item) => item.id === customer.id ? { ...item, lastContactAt: now, nextFollowUpAt: activity.followUpAt || item.nextFollowUpAt } : item));
+    if (activity.followUpAt) {
+      const reminder: CrmReminder = { id: nextId('crmrem'), customerId: customer.id, customerName: customer.name, title: activity.subject, dueAt: activity.followUpAt, priority: activity.outcome === 'Needs Follow-up' ? 'High' : 'Normal', status: 'Open', assignedTo: activity.assignedTo, relatedActivityId: row.id, createdAt: now, createdBy: row.createdBy };
+      setCrmReminders((previous) => [reminder, ...previous]);
+    }
+    createAuditLog('CREATE', 'CrmActivity', row.id, `CRM ${row.type} logged for ${customer.name}`);
+    markLocalChange({ module: 'crm', action: 'create', entity: 'CrmActivity', entityId: row.id, referenceId: customer.id });
+    return { success: true, id: row.id };
+  };
+  const updateCrmReminderStatus = (id: string, status: CrmReminder['status']) => {
+    if (!can('crm', 'edit')) return { success: false, error: 'ACTION_NOT_ALLOWED' };
+    const reminder = crmReminders.find((row) => row.id === id);
+    if (!reminder) return { success: false, error: 'CRM_REMINDER_NOT_FOUND' };
+    const now = new Date().toISOString();
+    setCrmReminders((previous) => previous.map((row) => row.id === id ? { ...row, status, completedAt: status === 'Done' ? now : row.completedAt, completedBy: status === 'Done' ? currentUser?.fullName || currentUser?.username || 'System' : row.completedBy } : row));
+    createAuditLog('UPDATE', 'CrmReminder', id, `CRM reminder ${status}`);
+    markLocalChange({ module: 'crm', action: 'edit', entity: 'CrmReminder', entityId: id, referenceId: reminder.customerId });
+    return { success: true };
+  };
   const addSocialPost = (post: Omit<SocialMediaPost, 'id' | 'status'>) => { if (!can('media', 'create')) return; const newPost: SocialMediaPost = { ...post, id: nextId('post'), status: 'Draft' }; setSocialPosts((previous) => [newPost, ...previous]); createAuditLog('CREATE', 'SocialMediaPost', newPost.id, `Draft post ${post.title} created`); markLocalChange({ module: 'media', action: 'create', entity: 'SocialMediaPost', entityId: newPost.id }); };
 
-  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, createHallStructure, updateHallStructure, createPondStructure, updatePondStructure, createSpeciesDefinition, setSpeciesActive, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, addOfficeDocument, updateOfficeDocumentStatus, updateOfficeBranding, addGatePass, updateGatePassStatus, createChatThread, sendChatMessage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
+  const value = useMemo<FarmContextType>(() => ({ halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus, createHallStructure, updateHallStructure, createPondStructure, updatePondStructure, createSpeciesDefinition, setSpeciesActive, calculateRecommendedFeed, recordFeeding, stopPondFeeding, resumePondFeeding, updatePondManualSnapshot, recordMortality, recordBiometry, recordWaterTest, recordTreatment, completeTreatment, executeAtomicTransfer, addInventoryTransaction, createProcessingBatch, createProformaInvoice, updateProformaStage, addOfficeDocument, updateOfficeDocumentStatus, updateOfficeBranding, addGatePass, updateGatePassStatus, createChatThread, sendChatMessage, createJournalEntry, createFxConversionJournalEntry, clockAttendance, generateMonthlyPayroll, createAuditLog, createBackupSnapshot, createEncryptedBackup, restoreFromSnapshotJson, addBroodstock, recordFertilization, addCustomer, updateCustomerProfile, addCrmActivity, updateCrmReminderStatus, addSocialPost }), [halls, ponds, species, feedingRecords, biometricSessions, waterLogs, mortalityRecords, treatments, transfers, broodstock, fertilizations, incubators, larvae, nurseryTanks, inventory, inventoryTxs, labSamples, processingBatches, coldStorage, customers, crmActivities, crmReminders, proformas, officeDocuments, officeSettings, gatePasses, chatThreads, chatMessages, accounts, journals, employees, attendance, payrolls, equipment, socialPosts, auditLogs, backups, syncStatus]);
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 };
 

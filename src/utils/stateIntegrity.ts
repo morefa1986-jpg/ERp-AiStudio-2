@@ -9,7 +9,7 @@ import { validateFarmStructureMutation } from './farmStructureValidation';
 export const STATE_COLLECTIONS = [
   'halls', 'ponds', 'species', 'feedingRecords', 'biometricSessions', 'waterLogs', 'mortalityRecords',
   'treatments', 'transfers', 'broodstock', 'fertilizations', 'incubators', 'larvae', 'nurseryTanks',
-  'inventory', 'inventoryTxs', 'labSamples', 'processingBatches', 'coldStorage', 'customers', 'proformas',
+  'inventory', 'inventoryTxs', 'labSamples', 'processingBatches', 'coldStorage', 'customers', 'crmActivities', 'crmReminders', 'proformas',
   'officeDocuments', 'officeSettings', 'gatePasses', 'chatThreads', 'chatMessages', 'accounts', 'journals', 'employees', 'attendance', 'payrolls', 'equipment', 'socialPosts', 'auditLogs', 'backups',
 ] as const;
 
@@ -32,8 +32,8 @@ export const MODULE_COLLECTIONS: Record<string, string[]> = {
   hatchery: ['broodstock', 'fertilizations', 'incubators', 'larvae', 'auditLogs'],
   nursery: ['larvae', 'nurseryTanks', 'auditLogs'],
   laboratory: ['labSamples', 'waterLogs', 'auditLogs'],
-  crm: ['customers', 'auditLogs'],
-  sales: ['proformas', 'customers', 'coldStorage', 'auditLogs'],
+  crm: ['customers', 'crmActivities', 'crmReminders', 'auditLogs'],
+  sales: ['proformas', 'customers', 'crmActivities', 'crmReminders', 'coldStorage', 'auditLogs'],
   documents: ['officeDocuments', 'officeSettings', 'proformas', 'customers', 'auditLogs'],
   gatehouse: ['gatePasses', 'officeDocuments', 'proformas', 'auditLogs'],
   chat: ['chatThreads', 'chatMessages', 'auditLogs'],
@@ -77,7 +77,7 @@ export function validateStateSnapshot(raw: unknown): { ok: boolean; error?: stri
   const unknownKeys = Object.keys(state).filter((key) => !(STATE_COLLECTIONS as readonly string[]).includes(key));
   if (unknownKeys.length) return { ok: false, error: `STATE_UNKNOWN_COLLECTION:${unknownKeys[0]}` };
   for (const key of STATE_COLLECTIONS) {
-    if ((key === 'officeDocuments' || key === 'officeSettings' || key === 'gatePasses' || key === 'chatThreads' || key === 'chatMessages') && state[key] === undefined) continue;
+    if ((key === 'crmActivities' || key === 'crmReminders' || key === 'officeDocuments' || key === 'officeSettings' || key === 'gatePasses' || key === 'chatThreads' || key === 'chatMessages') && state[key] === undefined) continue;
     if (!Array.isArray(state[key])) return { ok: false, error: `STATE_COLLECTION_REQUIRED:${key}` };
   }
   for (const key of STATE_COLLECTIONS) {

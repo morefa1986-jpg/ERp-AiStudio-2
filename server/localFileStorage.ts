@@ -3,12 +3,13 @@ import fs from 'fs';
 import path from 'path';
 import { defaultDatabasePath } from './storage';
 
-export type LocalFileCategory = 'chat' | 'mortality' | 'laboratory';
+export type LocalFileCategory = 'chat' | 'mortality' | 'laboratory' | 'crm';
 
 const CATEGORY_MAX_BYTES: Record<LocalFileCategory, number> = {
   chat: 32 * 1024 * 1024,
   mortality: 8 * 1024 * 1024,
   laboratory: 12 * 1024 * 1024,
+  crm: 16 * 1024 * 1024,
 };
 
 export interface StoredLocalFile {
@@ -34,7 +35,7 @@ function safeName(name: string): string {
 }
 
 export function isLocalFileCategory(value: string): value is LocalFileCategory {
-  return value === 'chat' || value === 'mortality' || value === 'laboratory';
+  return value === 'chat' || value === 'mortality' || value === 'laboratory' || value === 'crm';
 }
 
 export function storeLocalFile(category: LocalFileCategory, input: { fileName: string; mimeType?: string; base64: string }): StoredLocalFile {

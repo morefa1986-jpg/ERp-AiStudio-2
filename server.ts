@@ -251,6 +251,8 @@ const COLLECTION_VIEW_MODULES: Record<string, string[]> = {
   processingBatches: ['processing'],
   coldStorage: ['cold_storage', 'processing', 'sales'],
   customers: ['crm', 'sales'],
+  crmActivities: ['crm', 'sales'],
+  crmReminders: ['crm', 'sales'],
   proformas: ['sales'],
   officeDocuments: ['documents', 'sales', 'accounting'],
   officeSettings: ['documents', 'sales', 'accounting'],
@@ -800,7 +802,7 @@ app.post('/api/chat/calls/:id/end', requireAuth, requireModuleAction('chat', 'cr
   return res.json({ success: true, call });
 });
 
-const FILE_CATEGORY_MODULES: Record<string, string> = { chat: 'chat', mortality: 'mortality', laboratory: 'laboratory' };
+const FILE_CATEGORY_MODULES: Record<string, string> = { chat: 'chat', mortality: 'mortality', laboratory: 'laboratory', crm: 'crm' };
 
 app.post('/api/files/:category', requireAuth, (req: AuthenticatedRequest, res) => {
   try {

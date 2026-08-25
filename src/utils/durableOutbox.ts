@@ -62,6 +62,8 @@ const COLLECTION_HINTS: Array<{ collection: string; module: PermissionModule }> 
   { collection: 'larvae', module: 'nursery' },
   { collection: 'labSamples', module: 'laboratory' },
   { collection: 'customers', module: 'crm' },
+  { collection: 'crmActivities', module: 'crm' },
+  { collection: 'crmReminders', module: 'crm' },
   { collection: 'socialPosts', module: 'media' },
 ];
 

@@ -592,8 +592,50 @@ export interface Customer {
   totalOrdersCount: number;
   totalSpent: number;
   status: 'Active VIP' | 'Regular' | 'Lead' | 'Inactive';
+  ownerUserId?: string;
+  ownerName?: string;
+  tags?: string[];
+  score?: number;
+  lastContactAt?: string;
+  nextFollowUpAt?: string;
+  attachments?: FileAttachment[];
   notes: string;
   createdAt: string;
+}
+
+export type CrmActivityType = 'Call' | 'Meeting' | 'Message' | 'Email' | 'Visit' | 'Note' | 'Payment Follow-up' | 'Complaint' | 'Support';
+export type CrmActivityOutcome = 'Open' | 'Done' | 'Needs Follow-up' | 'Waiting Customer' | 'Closed';
+
+export interface CrmActivity {
+  id: string;
+  customerId: string;
+  customerName: string;
+  type: CrmActivityType;
+  subject: string;
+  details: string;
+  outcome: CrmActivityOutcome;
+  relatedProformaId?: string;
+  followUpAt?: string;
+  assignedTo?: string;
+  attachments: FileAttachment[];
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface CrmReminder {
+  id: string;
+  customerId: string;
+  customerName: string;
+  title: string;
+  dueAt: string;
+  priority: 'Low' | 'Normal' | 'High' | 'Urgent';
+  status: 'Open' | 'Done' | 'Cancelled';
+  assignedTo?: string;
+  relatedActivityId?: string;
+  createdAt: string;
+  createdBy: string;
+  completedAt?: string;
+  completedBy?: string;
 }
 
 export type SalesStage =
