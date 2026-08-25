@@ -6,6 +6,7 @@ import { ModuleVisibilityId, useModuleVisibility } from '../../context/ModuleVis
 import { maintenanceRoleAllows } from '../../utils/maintenanceAccess';
 import {
   LayoutDashboard,
+  ClipboardList,
   Building2,
   Fish,
   Utensils,
@@ -82,6 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       titleKey: 'nav.sectionBreeding',
       items: [
         { id: 'dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard, module: 'dashboard' },
+        { id: 'workbench', labelKey: 'nav.workbench', icon: ClipboardList, module: 'workbench' },
         { id: 'farmHalls', labelKey: 'nav.farmHalls', icon: Building2, module: 'halls' },
         {
           id: 'ponds',

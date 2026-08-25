@@ -97,7 +97,7 @@ const VALID_SERVER_ROLES = new Set([
   'Gate Guard', 'Office Automation',
 ]);
 const VALID_STATE_MODULES = new Set([
-  'dashboard', 'farm', 'halls', 'ponds', 'feeding', 'biometrics', 'water_quality', 'mortality',
+  'dashboard', 'workbench', 'farm', 'halls', 'ponds', 'feeding', 'biometrics', 'water_quality', 'mortality',
   'treatments', 'transfers', 'hatchery', 'nursery', 'feed_factory', 'warehouse', 'laboratory',
   'processing', 'cold_storage', 'crm', 'sales', 'accounting', 'hr', 'media', 'ai_assistant',
   'reports', 'documents', 'gatehouse', 'chat', 'backup', 'users', 'settings',
@@ -175,6 +175,7 @@ function roleAllowsServer(role: string, module: string, action: string): boolean
   if (role === 'Super Admin' || role === 'Farm Owner') return true;
   const viewLike = ['view', 'export', 'print'].includes(action);
   const operational = ['view', 'create', 'edit', 'approve', 'export', 'print'].includes(action);
+  if (module === 'workbench') return action === 'view';
   if (module === 'chat') return role !== 'Viewer/Auditor' ? ['view', 'create', 'edit'].includes(action) : action === 'view';
   switch (role) {
     case 'Farm Manager': return module !== 'users' && module !== 'settings' && !(module === 'backup' && action === 'approve') && action !== 'delete';

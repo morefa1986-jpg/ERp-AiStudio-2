@@ -28,6 +28,7 @@
 - [ ] Server-side feed-expiry invariant برای جلوگیری از bypass کلاینت.
 - [ ] Shared sensor mapping و validated ingestion برای «بررسی آنلاین پارامترهای آب».
 - [ ] Server-shared module visibility.
+- [x] کارتابل روزانه برای تجمیع CRM، دبیرخانه، نگهبانی، درمان، هشدار آب و audit.
 - [ ] Emergency alert, acknowledgement و escalation workflow.
 - [ ] Full disaster-recovery backup شامل کاربران و تنظیمات مشترک.
 - [ ] Night-shift cross-midnight و operational local-date/time.

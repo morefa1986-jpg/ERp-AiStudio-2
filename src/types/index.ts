@@ -51,6 +51,7 @@ export type PermissionAction =
 
 export type PermissionModule =
   | 'dashboard'
+  | 'workbench'
   | 'farm'
   | 'halls'
   | 'ponds'

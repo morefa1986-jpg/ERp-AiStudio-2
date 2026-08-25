@@ -6,6 +6,7 @@ export function roleAllows(role: string, module: PermissionModule, action: Permi
   const viewLike = action === 'view' || action === 'export' || action === 'print';
   const operationalActions: PermissionAction[] = ['view', 'create', 'edit', 'approve', 'export', 'print'];
   const canOperate = operationalActions.includes(action);
+  if (module === 'workbench') return action === 'view';
   if (module === 'chat') return role !== 'Viewer/Auditor' ? ['view', 'create', 'edit'].includes(action) : action === 'view';
 
   switch (role) {

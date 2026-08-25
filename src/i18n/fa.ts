@@ -130,6 +130,7 @@ export const fa = {
     sectionSystem: 'هوش مصنوعی، امنیت و زیرساخت',
     stoppedBadge: '{count} استخر قطع خوراک',
     dashboard: 'داشبورد مرکزی KPI',
+    workbench: 'کارتابل روزانه',
     farmHalls: 'مزرعه و سالن‌ها',
     ponds: 'استخرها (دوقلوی دیجیتال)',
     feeding: 'موتور جیره و تغذیه',

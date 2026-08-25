@@ -18,6 +18,7 @@ import { DurableOutboxGate } from './components/common/DurableOutboxGate';
 import { useSmartInputFocus } from './hooks/useSmartInputFocus';
 
 const DashboardView = lazy(() => import('./components/views/SafeDashboardView').then((module) => ({ default: module.SafeDashboardView })));
+const UserWorkbenchView = lazy(() => import('./components/views/UserWorkbenchView').then((module) => ({ default: module.UserWorkbenchView })));
 const IncidentPanel = lazy(() => import('./components/views/IncidentPanel').then((module) => ({ default: module.IncidentPanel })));
 const PondsView = lazy(() => import('./components/views/PondDigitalTwinView').then((module) => ({ default: module.PondDigitalTwinView })));
 const FeedingView = lazy(() => import('./components/views/FeedingView').then((module) => ({ default: module.FeedingView })));
@@ -50,7 +51,7 @@ const AdminSettingsView = lazy(() => import('./components/views/AdminSettingsVie
 const ReportsView = lazy(() => import('./components/views/ReportsView').then((module) => ({ default: module.ReportsView })));
 
 const VIEW_PERMISSIONS: Record<string, PermissionModule> = {
-  dashboard: 'dashboard', farmHalls: 'halls', ponds: 'ponds', feeding: 'feeding', biometrics: 'biometrics', waterQuality: 'water_quality', mortality: 'mortality',
+  dashboard: 'dashboard', workbench: 'workbench', farmHalls: 'halls', ponds: 'ponds', feeding: 'feeding', biometrics: 'biometrics', waterQuality: 'water_quality', mortality: 'mortality',
   treatments: 'treatments', transfers: 'transfers', hatchery: 'hatchery', nursery: 'nursery', feedFactory: 'feed_factory', warehouse: 'warehouse', laboratory: 'laboratory',
   processing: 'processing', coldStorage: 'cold_storage', crm: 'crm', sales: 'sales', accounting: 'accounting', hr: 'hr', hrPayroll: 'hr', aiAssistant: 'ai_assistant',
   mediaStudio: 'media', media: 'media', caviarMarketing: 'media', documents: 'documents', gatehouse: 'gatehouse', chat: 'chat', maintenance: 'settings', reports: 'reports', securityAudit: 'users', users: 'users', backup: 'backup',
@@ -58,7 +59,7 @@ const VIEW_PERMISSIONS: Record<string, PermissionModule> = {
 };
 
 const VISIBILITY_ROUTE_MAP: Record<string, ModuleVisibilityId> = {
-  dashboard: 'dashboard', farmHalls: 'farmHalls', ponds: 'ponds', feeding: 'feeding', biometrics: 'biometrics', waterQuality: 'waterQuality', mortality: 'mortality',
+  dashboard: 'dashboard', workbench: 'workbench', farmHalls: 'farmHalls', ponds: 'ponds', feeding: 'feeding', biometrics: 'biometrics', waterQuality: 'waterQuality', mortality: 'mortality',
   treatments: 'treatments', transfers: 'transfers', hatchery: 'hatchery', nursery: 'nursery', feedFactory: 'feedFactory', warehouse: 'warehouse', laboratory: 'laboratory',
   processing: 'processing', coldStorage: 'coldStorage', crm: 'crm', sales: 'sales', accounting: 'accounting', hr: 'hr', hrPayroll: 'hr', aiAssistant: 'aiAssistant',
   mediaStudio: 'mediaStudio', media: 'mediaStudio', caviarMarketing: 'mediaStudio', documents: 'documents', gatehouse: 'gatehouse', chat: 'chat', maintenance: 'maintenance', reports: 'reports', securityAudit: 'securityAudit', users: 'securityAudit',
@@ -127,6 +128,7 @@ const MainAppContent: React.FC = () => {
 
     switch (activeView) {
       case 'dashboard': return <div className="space-y-6"><IncidentPanel /><DashboardView onSelectNav={selectView} /></div>;
+      case 'workbench': return <UserWorkbenchView onSelectNav={selectView} />;
       case 'ponds': return <><DahirTelemetryPanel mode="pondLevels" /><PondsView onSelectNav={selectView} /></>;
       case 'feeding': return <><ManualFeedingModeNotice /><FeedingView /></>;
       case 'biometrics': return <BiometricsView />;
